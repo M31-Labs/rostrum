@@ -49,8 +49,6 @@ rubrics, external publishing, and an optional AI second opinion.
 | Portal wiki/resources and HTML embeds | allowlisted article/link/embed resource catalog in every speaker portal |
 | Mobile gallery, schedule, itinerary | `/public/m31-systems-forum-2026/agenda` and `/speakers`, embeddable and backed by public JSON |
 
-The detailed acceptance mapping is in [the product specification](docs/product-spec.md).
-
 ## Run locally
 
 Requirements: Go 1.26 or newer. No database or external credential is required.
@@ -232,8 +230,6 @@ fail the build on any unexpected capability. Production contains five compact
 `.gxi` programs, with `WorkspaceChrome` the largest. `make build` writes the
 ignored `dist/` bundle and reproducibly removes generated sourcemaps and copied
 Go sources that are not needed at runtime.
-The independent [Buckley / Qwen 3.8 Max review](docs/reviews/qwen-3.8-max.md)
-records the model result and the evidence used to close each follow-up.
 
 ## Deploy
 
