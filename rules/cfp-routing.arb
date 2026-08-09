@@ -1,0 +1,68 @@
+# CFP routing remains readable and auditable by program owners.
+
+feature submission from "programma" {
+    category: string
+    format: string
+    level: string
+}
+
+rule RouteAgents priority 1 {
+    when {
+        submission.category == "agents"
+    }
+    then RouteSubmission {
+        queue: "agents-in-production",
+        owner: "Maya Chen",
+        track: "track-agents",
+        reason: "category owner for production agent systems",
+    }
+}
+
+rule RouteGovernance priority 2 {
+    when {
+        submission.category == "governance"
+    }
+    then RouteSubmission {
+        queue: "governed-systems",
+        owner: "Theo Okafor",
+        track: "track-governance",
+        reason: "category owner for governed decision systems",
+    }
+}
+
+rule RouteInterfaces priority 3 {
+    when {
+        submission.category == "interfaces"
+    }
+    then RouteSubmission {
+        queue: "new-interfaces",
+        owner: "Lina Martinez",
+        track: "track-interfaces",
+        reason: "category owner for new human and agent interfaces",
+    }
+}
+
+rule RouteInfrastructure priority 4 {
+    when {
+        submission.category == "infrastructure"
+    }
+    then RouteSubmission {
+        queue: "open-infrastructure",
+        owner: "Priya Nair",
+        track: "track-infra",
+        reason: "category owner for open infrastructure",
+    }
+}
+
+rule RouteFallback priority 99 {
+    when {
+        true
+    }
+    then RouteSubmission {
+        queue: "program-triage",
+        owner: "Program team",
+        track: "track-agents",
+        reason: "fallback for an uncategorized proposal",
+    }
+}
+

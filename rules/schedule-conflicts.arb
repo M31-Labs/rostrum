@@ -1,0 +1,42 @@
+# Schedule policy separates hard collisions from program-shape warnings.
+
+feature conflict from "programma" {
+    kind: string
+    overlap_minutes: number
+    shared_speaker_count: number
+}
+
+rule SpeakerDoubleBooking priority 1 {
+    when {
+        conflict.kind == "speaker"
+        and conflict.shared_speaker_count > 0
+        and conflict.overlap_minutes > 0
+    }
+    then BlockSchedule {
+        severity: "hard",
+        reason: "a participant cannot appear in two places at once",
+    }
+}
+
+rule RoomDoubleBooking priority 2 {
+    when {
+        conflict.kind == "room"
+        and conflict.overlap_minutes > 0
+    }
+    then BlockSchedule {
+        severity: "hard",
+        reason: "a room cannot host two sessions at once",
+    }
+}
+
+rule TrackOverlapWarning priority 3 {
+    when {
+        conflict.kind == "track"
+        and conflict.overlap_minutes > 0
+    }
+    then WarnSchedule {
+        severity: "warning",
+        reason: "same-track overlap can split the intended audience",
+    }
+}
+

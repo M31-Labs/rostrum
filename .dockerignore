@@ -1,0 +1,10 @@
+.git
+.env
+build
+data
+tmp
+.playwright
+*.log
+Dockerfile*
+README.md
+docs

@@ -1,0 +1,12 @@
+/build
+/dist
+/data/*.json
+/data/*.tmp
+/data/uploads/
+/tmp
+/.env
+/.playwright
+/.DS_Store
+/.analyses
+
+/.gts

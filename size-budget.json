@@ -1,0 +1,27 @@
+{
+  "maxBespokeAppJsFiles": 0,
+  "maxBespokeAppJsBytes": 0,
+  "stylesGzipBytes": 14500,
+  "maxStaticHtmlBytes": 145500,
+  "maxStaticHtmlGzipBytes": 26000,
+  "maxIslandRawBytes": 12500,
+  "maxIslandGzipBytes": 4500,
+  "maxIslandBrotliBytes": 3500,
+  "maxRouteClientGzipBytes": 420000,
+  "maxRouteClientBrotliBytes": 335000,
+  "coldStartGzipBytes": 675840,
+  "coldStartBrotliBytes": 520000,
+  "totalRuntimeGzipBytes": 2100000,
+  "totalRuntimeBrotliBytes": 1650000,
+  "serverBinaryBytes": 56000000,
+  "distributionBytes": 70000000,
+  "minimumExportedRoutes": 12,
+  "expectedRouteCapabilities": {
+    "/": ["navigation"],
+    "/organizer": ["navigation", "bootstrap", "wasm", "islands", "controllers", "hubs"],
+    "/organizer/agenda": ["navigation", "bootstrap", "wasm", "islands", "controllers"],
+    "/organizer/portal": ["navigation", "bootstrap", "wasm", "islands", "controllers", "hubs"],
+    "/organizer/review": ["navigation", "bootstrap", "wasm", "islands", "controllers"],
+    "/public/m31-systems-forum-2026/agenda": ["navigation", "bootstrap", "wasm", "islands", "controllers"]
+  }
+}

@@ -1,0 +1,29 @@
+# Dynamic CFP fields use explicit question rules.
+
+feature answer from "programma" {
+    format: string
+    category: string
+}
+
+rule ShowWorkshopNeeds priority 1 {
+    when {
+        answer.format == "Workshop"
+    }
+    then FieldVisibility {
+        field: "workshop_needs",
+        visible: true,
+        reason: "workshops require room and facilitation details",
+    }
+}
+
+rule HideWorkshopNeeds priority 99 {
+    when {
+        answer.format != "Workshop"
+    }
+    then FieldVisibility {
+        field: "workshop_needs",
+        visible: false,
+        reason: "the field is not relevant to this format",
+    }
+}
+

@@ -1,0 +1,78 @@
+{
+  "defaultProfile": "public-root",
+  "profiles": {
+    "public-root": {
+      "description": "Cold server-rendered public entry with GoSX navigation only and no island runtime.",
+      "assertions": [
+        "lcp <= 1500",
+        "cls <= 0.02",
+        "tbt <= 150",
+        "long_tasks <= 3",
+        "network_kb <= 100",
+        "requests <= 10",
+        "js_total_kb <= 90",
+        "island_count == 0",
+        "hydration_total == 0"
+      ]
+    },
+    "workspace-entry": {
+      "description": "First organizer entry, including the shared GoSX island VM, WorkspaceChrome, Controller storage, and Hub refresh.",
+      "assertions": [
+        "lcp <= 2000",
+        "cls <= 0.02",
+        "tbt <= 200",
+        "long_tasks <= 3",
+        "network_kb <= 360",
+        "requests <= 16",
+        "island_count == 1",
+        "hydration_total <= 80"
+      ]
+    },
+    "agenda-warm": {
+      "description": "Warm organizer agenda navigation with WorkspaceChrome and AgendaBoard hydrated from the cached shared runtime.",
+      "assertions": [
+        "lcp <= 2000",
+        "cls <= 0.02",
+        "tbt <= 275",
+        "long_tasks <= 3",
+        "network_kb <= 50",
+        "requests <= 18",
+        "island_count == 2",
+        "hydration_total <= 100"
+      ]
+    },
+    "workspace-warm": {
+      "description": "Warm organizer route with WorkspaceChrome plus route-scoped Controller and Hub capabilities.",
+      "assertions": [
+        "lcp <= 2000",
+        "cls <= 0.02",
+        "tbt <= 175",
+        "long_tasks <= 3",
+        "network_kb <= 50",
+        "requests <= 16",
+        "island_count == 1",
+        "hydration_total <= 80"
+      ]
+    },
+    "public-agenda-warm": {
+      "description": "Warm public agenda navigation with the focused itinerary island and storage Controller.",
+      "assertions": [
+        "lcp <= 2000",
+        "cls <= 0.02",
+        "tbt <= 175",
+        "long_tasks <= 3",
+        "network_kb <= 50",
+        "requests <= 16",
+        "island_count == 1",
+        "hydration_total <= 80"
+      ]
+    }
+  },
+  "routes": [
+    {"url": "/", "profile": "public-root"},
+    {"url": "/organizer", "profile": "workspace-entry"},
+    {"url": "/organizer/agenda", "profile": "agenda-warm"},
+    {"url": "/organizer/portal", "profile": "workspace-warm"},
+    {"url": "/public/m31-systems-forum-2026/agenda", "profile": "public-agenda-warm"}
+  ]
+}
