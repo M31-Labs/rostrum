@@ -4,7 +4,7 @@ go 1.26
 
 require (
 	m31labs.dev/arbiter v1.9.0
-	m31labs.dev/gosx v0.38.0
+	m31labs.dev/gosx v0.38.1
 )
 
 require (
