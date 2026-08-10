@@ -121,7 +121,15 @@ func main() {
 	}
 
 	app := server.New()
-	app.EnableGzip()
+	// app.EnableGzip() is intentionally omitted. The GoSX gzip middleware
+	// (server/gzip.go, v0.38.0) double-encodes precompressed assets: its
+	// gzipWriter.WriteHeader skips when Content-Encoding is already set, but
+	// gzipWriter.Write still routes bytes through the gzip.Writer. A brotli
+	// runtime sidecar is re-gzipped while the header still reads "br", so the
+	// browser cannot decode any island script or WASM and nothing hydrates.
+	// Runtime assets self-negotiate br/gzip in server.serveRuntimeFile, and
+	// dynamic HTML is compressed at the CDN edge. Restore this call once the
+	// framework Write path honors the skip.
 	app.Use(securityHeaders(publicBase, navigationScriptCSPHash()))
 	app.Use(sessions.Middleware)
 	app.Use(organizerContext())
