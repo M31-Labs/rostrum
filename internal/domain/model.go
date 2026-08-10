@@ -245,6 +245,35 @@ func (session Session) Scheduled() bool {
 	return !session.StartsAt.IsZero() && !session.EndsAt.IsZero()
 }
 
+// AddSessionForSubmission appends an unscheduled Session for the submission
+// with the given ID, linked by SubmissionID. The transition is idempotent: if
+// a session already exists for that submission, AddSessionForSubmission does
+// nothing and reports created as false. It also reports created as false if
+// no submission with that ID exists.
+func (state *State) AddSessionForSubmission(submissionID string) (created bool) {
+	for _, existing := range state.Sessions {
+		if existing.SubmissionID == submissionID {
+			return false
+		}
+	}
+	submission, found := state.Submission(submissionID)
+	if !found {
+		return false
+	}
+	state.Sessions = append(state.Sessions, Session{
+		ID:           NewID("ses"),
+		EventID:      submission.EventID,
+		SubmissionID: submission.ID,
+		Title:        submission.Title,
+		Description:  submission.Abstract,
+		Format:       submission.Format,
+		TrackID:      submission.TrackID,
+		SpeakerIDs:   append([]string(nil), submission.SpeakerIDs...),
+		Status:       "unscheduled",
+	})
+	return true
+}
+
 type Task struct {
 	ID                 string      `json:"id"`
 	Title              string      `json:"title"`

@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -109,6 +110,7 @@ func main() {
 	app.EnableGzip()
 	app.Use(securityHeaders(publicBase, navigationScriptCSPHash()))
 	app.Use(sessions.Middleware)
+	app.Use(bodyLimit())
 	app.Use(sessions.Protect)
 	app.SetPublicDir(filepath.Join(root, "public"))
 	app.API("GET /api/health", func(ctx *server.Context) (any, error) {
@@ -268,6 +270,34 @@ func securityHeaders(publicBase, navigationHash string) server.Middleware {
 	}
 }
 
+// Upload body sizing. uploadBodyEnvelope bounds the whole multipart request
+// (the 10 MiB file cap plus boundary and header overhead); maxUploadBytes
+// bounds the stored file payload itself. defaultBodyLimit bounds every other
+// route so no form endpoint spools an unbounded body to memory or disk.
+const (
+	uploadBodyEnvelope = 12 << 20
+	maxUploadBytes     = 10 << 20
+	defaultBodyLimit   = 1 << 20
+)
+
+// bodyLimit caps the request body via http.MaxBytesReader before any
+// handler reads it. It runs ahead of sessions.Protect, whose CSRF check
+// calls r.FormValue and so triggers an unbounded ParseMultipartForm read on
+// the raw body if nothing has capped it first. Upload routes get the
+// upload envelope; every other route gets the default cap.
+func bodyLimit() server.Middleware {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			limit := int64(defaultBodyLimit)
+			if r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/portal-upload/") {
+				limit = uploadBodyEnvelope
+			}
+			r.Body = http.MaxBytesReader(w, r.Body, limit)
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 func navigationScriptCSPHash() string {
 	rendered := gosx.RenderHTML(server.NavigationScript())
 	start := strings.Index(rendered, ">")
@@ -332,8 +362,10 @@ func portalUpload(root string) http.HandlerFunc {
 			return
 		}
 		speakerID, taskID := parts[0], parts[1]
-		r.Body = http.MaxBytesReader(w, r.Body, 12<<20)
-		if err := r.ParseMultipartForm(10 << 20); err != nil {
+		// bodyLimit (registered ahead of sessions.Protect) has already wrapped
+		// r.Body in a MaxBytesReader sized to uploadBodyEnvelope, so the CSRF
+		// check's ParseMultipartForm call and this one are both bounded.
+		if err := r.ParseMultipartForm(maxUploadBytes); err != nil {
 			writeMutationError(w, r, http.StatusRequestEntityTooLarge, "Upload must be smaller than 10 MB.")
 			return
 		}
@@ -360,9 +392,26 @@ func portalUpload(root string) http.HandlerFunc {
 			writeMutationError(w, r, http.StatusInternalServerError, "Could not create upload.")
 			return
 		}
-		written, copyErr := io.Copy(destination, io.LimitReader(file, 10<<20))
+		// Copy one byte past the cap: reading exactly maxUploadBytes+1 without
+		// error means the source held more than the cap, so treat it as
+		// oversized rather than silently truncating and reporting success.
+		written, copyErr := io.CopyN(destination, file, maxUploadBytes+1)
 		closeErr := destination.Close()
-		if copyErr != nil || closeErr != nil || written == 0 {
+		var maxBytesErr *http.MaxBytesError
+		switch {
+		case written > maxUploadBytes:
+			_ = os.Remove(storedPath)
+			writeMutationError(w, r, http.StatusRequestEntityTooLarge, "Upload must be smaller than 10 MB.")
+			return
+		case errors.As(copyErr, &maxBytesErr):
+			_ = os.Remove(storedPath)
+			writeMutationError(w, r, http.StatusRequestEntityTooLarge, "Upload must be smaller than 10 MB.")
+			return
+		case copyErr != nil && !errors.Is(copyErr, io.EOF):
+			_ = os.Remove(storedPath)
+			writeMutationError(w, r, http.StatusInternalServerError, "Could not store upload.")
+			return
+		case closeErr != nil || written == 0:
 			_ = os.Remove(storedPath)
 			writeMutationError(w, r, http.StatusInternalServerError, "Could not store upload.")
 			return

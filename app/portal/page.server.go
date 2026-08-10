@@ -13,18 +13,23 @@ import (
 	"github.com/odvcencio/programma/internal/domain"
 	"github.com/odvcencio/programma/internal/live"
 	"github.com/odvcencio/programma/internal/present"
+	"github.com/odvcencio/programma/internal/token"
 	"m31labs.dev/gosx/action"
 	"m31labs.dev/gosx/route"
 	"m31labs.dev/gosx/server"
 	"m31labs.dev/gosx/session"
 )
 
+// portalSessionKey names the GoSX session value that binds a browser
+// session to one speaker ID once a visitor presents a valid portal token.
+const portalSessionKey = "portal_speaker"
+
 func init() {
 	_, thisFile, _, _ := runtime.Caller(0)
 	source := filepath.Join(filepath.Dir(thisFile), "[speaker]", "page.gsx")
 	if err := route.RegisterFileModule(route.FileModuleFor(source, route.FileModuleOptions{
 		Load: func(ctx *route.RouteContext, page route.FilePage) (any, error) {
-			return present.SpeakerPortal(appstate.MustGet().Snapshot(), ctx.Param("speaker"), ctx.Query("submitted") == "1")
+			return loadPortal(ctx)
 		},
 		Metadata: func(ctx *route.RouteContext, page route.FilePage, data any) (server.Metadata, error) {
 			return server.Metadata{Title: server.Title{Default: "Speaker portal — Programma"}, Description: "Update your profile, complete event tasks, and review your schedule."}, nil
@@ -38,8 +43,60 @@ func init() {
 	}
 }
 
+// loadPortal binds the visiting session to a speaker identity and renders
+// that speaker's portal.
+//
+// A `?key=<token>` query parameter carries a signed token.New().Verify
+// result; a valid one binds its speaker ID into the session so later
+// requests need no query key. The page only renders when the bound speaker
+// matches the path speaker and that speaker exists in the store.
+//
+// An unknown speaker in the path and a missing or invalid key both render
+// the identical friendly page (L8): neither response tells a visitor
+// whether a given speaker ID exists.
+func loadPortal(ctx *route.RouteContext) (any, error) {
+	requested := strings.TrimSpace(ctx.Param("speaker"))
+	store := session.Current(ctx.Request)
+	bound := store.String(portalSessionKey)
+
+	if key := strings.TrimSpace(ctx.Query("key")); key != "" {
+		if id, ok := token.New().Verify(key); ok {
+			bound = id
+			store.Set(portalSessionKey, id)
+		}
+	}
+
+	if bound != "" && bound == requested {
+		snapshot := appstate.MustGet().Snapshot()
+		if data, err := present.SpeakerPortal(snapshot, bound, ctx.Query("submitted") == "1"); err == nil {
+			data["available"] = true
+			return data, nil
+		}
+	}
+	return portalUnavailable(), nil
+}
+
+// portalUnavailable is the identical friendly response for an unbound
+// session, an invalid or expired key, and an unknown speaker (L8).
+func portalUnavailable() map[string]any {
+	return map[string]any{"available": false}
+}
+
+// boundSpeaker returns the speaker ID bound to the visiting session by
+// loadPortal, or empty when no portal session is bound.
+//
+// Actions never derive identity from a posted speaker_id field (H1 fix): a
+// forged or mismatched speaker_id in the request body is inert because
+// nothing here reads it.
+func boundSpeaker(ctx *action.Context) string {
+	return session.Current(ctx.Request).String(portalSessionKey)
+}
+
 func updateProfile(ctx *action.Context) error {
-	speakerID := strings.TrimSpace(ctx.FormData["speaker_id"])
+	speakerID := boundSpeaker(ctx)
+	if speakerID == "" {
+		return action.Validation("Your portal session expired. Reopen your portal link and try again.", nil, ctx.FormData)
+	}
 	if len(strings.TrimSpace(ctx.FormData["biography"])) < 40 {
 		return action.Validation("Add a little more detail to your biography.", map[string]string{"biography": "Use at least 40 characters."}, ctx.FormData)
 	}
@@ -68,14 +125,14 @@ func updateProfile(ctx *action.Context) error {
 }
 
 func completeTask(ctx *action.Context) error {
-	speakerID := strings.TrimSpace(ctx.FormData["speaker_id"])
+	speakerID := boundSpeaker(ctx)
 	taskID := strings.TrimSpace(ctx.FormData["task_id"])
 	if speakerID == "" || taskID == "" {
 		return action.Validation("Task identity is missing.", map[string]string{"task": "Reload the portal and try again."}, ctx.FormData)
 	}
 	values := make(map[string]string)
 	for key, value := range ctx.FormData {
-		if key != "csrf_token" && key != "speaker_id" && key != "task_id" {
+		if key != "csrf_token" && key != "task_id" && key != "speaker_id" {
 			values[key] = value
 		}
 	}

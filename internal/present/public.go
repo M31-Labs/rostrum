@@ -61,7 +61,80 @@ func SubmissionForm(state domain.State, slug string) (map[string]any, error) {
 		"categories": categories,
 		"formats":    formats,
 		"levels":     levels,
+		// proposalFields and participantFields render the public form from
+		// form.Fields, grouped by the two sections the layout keeps. The
+		// format field stays in the list so it renders in schema order, but
+		// the ConditionalFormatFields island — not this list — draws it and
+		// the workshop_needs field beside it, so workshop_needs is omitted
+		// here to avoid rendering it twice.
+		"proposalFields":    submissionFormFieldRows(state, form.Fields, "proposal"),
+		"participantFields": submissionFormFieldRows(state, form.Fields, "participant"),
 	}, nil
+}
+
+// submissionFormFieldRows returns the public, schema-driven rows for one
+// section of a submission form. Removing a field from form.Fields removes it
+// from this list, and therefore from the rendered page, on the next load.
+func submissionFormFieldRows(state domain.State, fields []domain.FormField, section string) []map[string]any {
+	rows := make([]map[string]any, 0, len(fields))
+	for _, field := range fields {
+		if field.Section != section || field.ID == "workshop_needs" {
+			continue
+		}
+		var maxLength any
+		if field.MaxLength > 0 {
+			maxLength = field.MaxLength
+		}
+		inputType := "text"
+		if field.Type == "email" {
+			inputType = "email"
+		}
+		rows = append(rows, map[string]any{
+			"id":          field.ID,
+			"label":       field.Label,
+			"type":        field.Type,
+			"inputType":   inputType,
+			"required":    field.Required,
+			"placeholder": field.Placeholder,
+			"help":        field.Help,
+			"maxLength":   maxLength,
+			"options":     submissionFormFieldOptions(state, field),
+		})
+	}
+	return rows
+}
+
+// submissionFormFieldOptions resolves the value/label pairs a select field
+// renders publicly. The category field keeps the event's category IDs as
+// values, because the routing engine and state.Category both key on ID, not
+// on the field's display-name options; every other select field renders its
+// own declared options as both the value and the label.
+func submissionFormFieldOptions(state domain.State, field domain.FormField) []map[string]string {
+	if field.ID == "category" {
+		options := make([]map[string]string, 0, len(state.Event.Categories))
+		for _, category := range state.Event.Categories {
+			options = append(options, map[string]string{"value": category.ID, "label": category.Name})
+		}
+		return options
+	}
+	options := make([]map[string]string, 0, len(field.Options))
+	for _, option := range field.Options {
+		options = append(options, map[string]string{"value": option, "label": option})
+	}
+	return options
+}
+
+// FormFieldOptionValues returns the set of values a select field accepts on
+// submission. It mirrors submissionFormFieldOptions's category special case
+// so app/submit/page.server.go validates against exactly what the public
+// form actually offered.
+func FormFieldOptionValues(state domain.State, field domain.FormField) []string {
+	options := submissionFormFieldOptions(state, field)
+	values := make([]string, 0, len(options))
+	for _, option := range options {
+		values = append(values, option["value"])
+	}
+	return values
 }
 
 func SpeakerPortal(state domain.State, speakerID string, submitted bool) (map[string]any, error) {

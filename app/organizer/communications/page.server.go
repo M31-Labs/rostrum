@@ -20,7 +20,7 @@ import (
 func init() {
 	if err := route.RegisterFileModuleHere(route.FileModuleOptions{
 		Load: func(ctx *route.RouteContext, page route.FilePage) (any, error) {
-			return present.Communications(appstate.MustGet().Snapshot(), ctx.Query("template")), nil
+			return present.Communications(appstate.MustGet().Snapshot(), ctx.Query("template"), ctx.Query("recipient")), nil
 		},
 		Metadata: func(ctx *route.RouteContext, page route.FilePage, data any) (server.Metadata, error) {
 			return server.Metadata{Title: server.Title{Default: "Communications — Programma"}, Description: "Template, schedule, and preview speaker communications and calendar invites."}, nil

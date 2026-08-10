@@ -51,6 +51,9 @@ func updateStatus(ctx *action.Context) error {
 		}
 		submission.Status = status
 		title = submission.Title
+		if status == domain.SubmissionAccepted {
+			state.AddSessionForSubmission(id)
+		}
 		return nil
 	}); err != nil {
 		return err

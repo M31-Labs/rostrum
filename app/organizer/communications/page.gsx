@@ -44,7 +44,7 @@ func Page() Node {
 				<Each of={data.templates} as="template">
 					<a
 						class={template.class}
-						href={"/organizer/communications?template=" + template.id}
+						href={"/organizer/communications?template=" + template.id + "&recipient=" + data.preview.recipientId}
 						data-gosx-link
 					>
 						<div>
@@ -54,6 +54,22 @@ func Page() Node {
 						<If cond={template.calendar}>
 							<span title="Calendar attached">iCal</span>
 						</If>
+					</a>
+				</Each>
+				<header>
+					<p class="panel-kicker">Preview as</p>
+					<h2>Recipients</h2>
+				</header>
+				<Each of={data.recipients} as="recipient">
+					<a
+						class={recipient.class}
+						href={"/organizer/communications?template=" + data.preview.id + "&recipient=" + recipient.id}
+						data-gosx-link
+					>
+						<div>
+							<strong>{recipient.name}</strong>
+							<small>{recipient.email}</small>
+						</div>
 					</a>
 				</Each>
 			</aside>
@@ -104,7 +120,7 @@ func Page() Node {
 						<span>Recipient</span>
 						<select name="speaker_id">
 							<Each of={data.recipients} as="recipient">
-								<option value={recipient.id}>
+								<option value={recipient.id} selected={recipient.id == data.preview.recipientId}>
 									{recipient.name}
 									·
 									{recipient.email}

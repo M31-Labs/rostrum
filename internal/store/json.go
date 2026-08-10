@@ -15,11 +15,35 @@ import (
 // JSONStore is a small durable store for the hackathon and self-hosted path.
 // Mutations use copy-on-write validation and an atomic rename, so a failed
 // action never leaves partially updated state in memory or on disk.
+//
+// Snapshot cache contract: JSONStore clones store.state once per successful
+// write (Open, Update, Reset) and caches the clone in store.snapshot.
+// Snapshot() returns that cached value directly, under RLock, without
+// cloning. This makes reads O(1) instead of O(state size) per request.
+//
+// Read-only contract: the domain.State returned by Snapshot() is shared
+// across every concurrent caller and MUST be treated as immutable.
+//   - Never assign into a field, slice element, or map entry reached through
+//     the returned value (for example `snapshot.Speakers[0].Name = x` or
+//     `snapshot.Integrations["x"] = y`): slices and maps are reference types,
+//     so such a write mutates the shared cache and every other reader,
+//     including the store's own state, without holding the store's lock.
+//   - A top-level `append` to a slice field of the returned value (for
+//     example `snapshot.Speakers = append(snapshot.Speakers, s)`) is safe: it
+//     only ever changes the local copy of the slice header. It may share
+//     backing array capacity with the cached snapshot, but never grows the
+//     cached snapshot's observable length, and any element it does share is
+//     only visible through the local variable, not the cache.
+//   - Callers that need a private, independently mutable copy must clone the
+//     snapshot themselves (for example via the unexported clone helper's
+//     approach: JSON marshal/unmarshal, or a targeted deep copy) rather than
+//     mutate the value Snapshot() returns.
 type JSONStore struct {
-	mu    sync.RWMutex
-	path  string
-	seed  domain.State
-	state domain.State
+	mu       sync.RWMutex
+	path     string
+	seed     domain.State
+	state    domain.State
+	snapshot domain.State
 }
 
 func Open(path string, seed domain.State) (*JSONStore, error) {
@@ -29,6 +53,7 @@ func Open(path string, seed domain.State) (*JSONStore, error) {
 	store := &JSONStore{path: filepath.Clean(path), seed: clone(seed), state: clone(seed)}
 	if path == "" || path == ":memory:" {
 		store.path = ""
+		store.snapshot = clone(store.state)
 		return store, nil
 	}
 
@@ -51,13 +76,17 @@ func Open(path string, seed domain.State) (*JSONStore, error) {
 	default:
 		return nil, fmt.Errorf("read %s: %w", store.path, err)
 	}
+	store.snapshot = clone(store.state)
 	return store, nil
 }
 
+// Snapshot returns the cached, immutable copy of the store's state. It does
+// not clone on every call: the clone happens once per successful write (see
+// the JSONStore doc comment for the read-only contract callers must honor).
 func (store *JSONStore) Snapshot() domain.State {
 	store.mu.RLock()
 	defer store.mu.RUnlock()
-	return clone(store.state)
+	return store.snapshot
 }
 
 func (store *JSONStore) Update(change func(*domain.State) error) error {
@@ -82,6 +111,9 @@ func (store *JSONStore) Update(change func(*domain.State) error) error {
 		store.state = previous
 		return err
 	}
+	// One clone per write, taken only after persistLocked succeeds, so
+	// readers never observe a snapshot for state that failed to persist.
+	store.snapshot = clone(store.state)
 	return nil
 }
 
@@ -90,7 +122,13 @@ func (store *JSONStore) Reset() error {
 	defer store.mu.Unlock()
 	store.state = clone(store.seed)
 	store.state.UpdatedAt = time.Now().UTC()
-	return store.persistLocked()
+	// Reset has no rollback path (matching its pre-existing behavior): the
+	// in-memory state always becomes the seed, whether or not persisting it
+	// succeeds. Keep the cached snapshot in lockstep with store.state so
+	// Snapshot() reports exactly what it always has here.
+	err := store.persistLocked()
+	store.snapshot = clone(store.state)
+	return err
 }
 
 func (store *JSONStore) Path() string {

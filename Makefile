@@ -7,16 +7,16 @@ dev:
 	DEMO_MODE=memory go run .
 
 test:
-	go list ./... | rg -v '/dist(/|$$)' | xargs go test
-	go list ./... | rg -v '/dist(/|$$)' | xargs go test -race
+	go list ./... | grep -v '/dist' | xargs go test
+	go list ./... | grep -v '/dist' | xargs go test -race
 
 check:
-	test -z "$$(gofmt -l $$(rg --files -g '*.go' -g '!dist/**' -g '!build/**'))"
+	test -z "$$(gofmt -l $$(find . -name '*.go' -not -path './dist/*' -not -path './build/*'))"
 	$(GOSX) fmt --check app
 	for policy_file in rules/*.arb; do arbiter check "$$policy_file"; done
-	go list ./... | rg -v '/dist(/|$$)' | xargs go vet
-	go list ./... | rg -v '/dist(/|$$)' | xargs go test
-	go list ./... | rg -v '/dist(/|$$)' | xargs go test -race
+	go list ./... | grep -v '/dist' | xargs go vet
+	go list ./... | grep -v '/dist' | xargs go test
+	go list ./... | grep -v '/dist' | xargs go test -race
 
 build:
 	rm -rf -- dist
