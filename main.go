@@ -67,8 +67,10 @@ func main() {
 			log.Fatal("production cannot use DEMO_MODE=memory")
 		}
 	}
+	overHTTP := strings.HasPrefix(publicBase, "http://")
 	sessions, err := session.New(sessionSecret, session.Options{
-		Secure: !strings.HasPrefix(publicBase, "http://"),
+		Secure:        !overHTTP,
+		AllowInsecure: overHTTP,
 	})
 	if err != nil {
 		log.Fatal(err)

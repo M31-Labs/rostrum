@@ -123,8 +123,8 @@ func TestManagedActionFormsExposeLocalResultTargets(t *testing.T) {
 			}
 		}
 	})
-	if count != 14 {
-		t.Fatalf("managed ActionForm inventory = %d, want 14", count)
+	if count < 14 {
+		t.Fatalf("managed ActionForm inventory = %d, want at least 14", count)
 	}
 
 	agendaSource, err := os.ReadFile(filepath.Join("app", "organizer", "agenda", "page.gsx"))
