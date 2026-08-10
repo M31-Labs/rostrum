@@ -4,13 +4,8 @@ go 1.26
 
 require (
 	m31labs.dev/arbiter v1.9.0
-	m31labs.dev/gosx v0.36.0
+	m31labs.dev/gosx v0.38.0
 )
-
-// Rostrum exercises the next GoSX island VM surface while it is developed
-// alongside this repository. Remove this replace after that GoSX revision is
-// released and update the requirement above to the published version.
-replace m31labs.dev/gosx => ../gosx-programma-islands
 
 require (
 	github.com/BurntSushi/toml v1.6.0 // indirect
