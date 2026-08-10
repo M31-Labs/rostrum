@@ -7,7 +7,10 @@ import (
 	"github.com/m31-labs/rostrum/internal/domain"
 )
 
-func TestReviewKeepsAIAssistOutOfHumanCoverageAndAggregate(t *testing.T) {
+// TestReviewHumanCoverageAndAggregateSkipUnscoredCandidate asserts that a
+// candidate with no recorded human evaluation contributes zero to coverage
+// and renders an em-dash aggregate score, rather than a false zero.
+func TestReviewHumanCoverageAndAggregateSkipUnscoredCandidate(t *testing.T) {
 	view := Review(domain.Seed(time.Now().UTC()))
 	plans := view["plans"].([]map[string]any)
 	active := plans[len(plans)-1]
@@ -19,9 +22,6 @@ func TestReviewKeepsAIAssistOutOfHumanCoverageAndAggregate(t *testing.T) {
 	for _, candidate := range candidates {
 		if candidate["id"] != "sub_ai_review" {
 			continue
-		}
-		if !candidate["hasAI"].(bool) {
-			t.Fatal("expected seeded AI assist provenance")
 		}
 		if got := candidate["evaluationCount"].(int); got != 0 {
 			t.Fatalf("human evaluation count = %d, want 0", got)

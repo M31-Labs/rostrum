@@ -86,8 +86,7 @@ volume. Back up the volume, including `data/uploads`, and test restoration.
 
 ## Operational configuration
 
-- Use a secret manager for the session, SMTP, OpenAI, and Accelevents
-  credentials.
+- Use a secret manager for the session, SMTP, and Accelevents credentials.
 - Restrict outbound egress to the provider APIs you configure.
 - Poll `GET /api/health`; it returns the application name, version, and
   timestamp.

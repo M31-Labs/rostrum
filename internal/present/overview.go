@@ -74,7 +74,7 @@ func Overview(state domain.State) map[string]any {
 	attention := []map[string]any{
 		{"tone": "critical", "value": hardConflicts, "title": "hard schedule conflicts", "detail": "Speaker and room collisions must be cleared before publication.", "href": "/organizer/agenda"},
 		{"tone": "accent", "value": totalAssignments - completedAssignments, "title": "outstanding speaker tasks", "detail": "Profile, headshot, agreement, AV, and slide requests are tracked live.", "href": "/organizer/portal"},
-		{"tone": "neutral", "value": expectedEvaluations - completedEvaluations, "title": "reviews still due", "detail": "Human and AI-assisted scores share the same weighted rubric.", "href": "/organizer/review"},
+		{"tone": "neutral", "value": expectedEvaluations - completedEvaluations, "title": "reviews still due", "detail": "Weighted rubric shared across all assigned reviewers.", "href": "/organizer/review"},
 	}
 
 	return map[string]any{

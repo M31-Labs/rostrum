@@ -39,24 +39,3 @@ func TestSubmissionDetailReportsNotFound(t *testing.T) {
 		t.Fatal("expected an error for an unknown submission id")
 	}
 }
-
-func TestSubmissionDetailKeepsAIEvaluationsVisible(t *testing.T) {
-	state := domain.Seed(time.Now().UTC())
-	view, err := SubmissionDetail(state, "sub_ai_review")
-	if err != nil {
-		t.Fatalf("SubmissionDetail: %v", err)
-	}
-	evaluations := view["evaluations"].([]map[string]any)
-	sawAI := false
-	for _, evaluation := range evaluations {
-		if evaluation["isAI"].(bool) {
-			sawAI = true
-			if evaluation["model"].(string) == "" {
-				t.Fatal("expected the AI row to carry its model")
-			}
-		}
-	}
-	if !sawAI {
-		t.Fatal("expected sub_ai_review to include its seeded AI evaluation")
-	}
-}

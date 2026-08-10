@@ -13,7 +13,6 @@ import (
 	"github.com/m31-labs/rostrum/internal/domain"
 	"github.com/m31-labs/rostrum/internal/live"
 	"github.com/m31-labs/rostrum/internal/present"
-	"github.com/m31-labs/rostrum/internal/reviewassist"
 	"github.com/m31-labs/rostrum/internal/token"
 	"m31labs.dev/gosx/action"
 	"m31labs.dev/gosx/route"
@@ -30,9 +29,9 @@ func init() {
 			return data, nil
 		},
 		Metadata: func(ctx *route.RouteContext, page route.FilePage, data any) (server.Metadata, error) {
-			return server.Metadata{Title: server.Title{Default: "Review — Rostrum"}, Description: "Multi-round rubric review with attributable AI assistance."}, nil
+			return server.Metadata{Title: server.Title{Default: "Review — Rostrum"}, Description: "Multi-round rubric review with attributable scoring."}, nil
 		},
-		Actions: route.FileActions{"aiAssist": addAIAssist, "saveReview": saveReview},
+		Actions: route.FileActions{"saveReview": saveReview},
 	}); err != nil {
 		log.Fatal(err)
 	}
@@ -176,79 +175,6 @@ func saveReview(ctx *action.Context) error {
 	session.AddFlash(ctx.Request, "notice", verb+" a human rubric review from "+reviewer.Name+".")
 	live.Broadcast("review:updated", map[string]string{"submission": submissionID, "source": "human"})
 	actionflow.Redirect(ctx, "/organizer/review#candidates")
-	return nil
-}
-
-func addAIAssist(ctx *action.Context) error {
-	submissionID := strings.TrimSpace(ctx.FormData["submission_id"])
-	if submissionID == "" {
-		return fmt.Errorf("submission is required")
-	}
-
-	snapshot := appstate.MustGet().Snapshot()
-	plan, found := snapshot.ReviewPlan("plan_round_two")
-	if !found {
-		return fmt.Errorf("active review plan not found")
-	}
-	submission, found := snapshot.Submission(submissionID)
-	if !found {
-		return fmt.Errorf("submission %s not found", submissionID)
-	}
-	for _, evaluation := range snapshot.Evaluations {
-		if evaluation.PlanID == plan.ID && evaluation.SubmissionID == submissionID && evaluation.Source != "human" {
-			session.AddFlash(ctx.Request, "notice", "An assisted evaluation already exists for “"+submission.Title+"”.")
-			actionflow.Redirect(ctx, "/organizer/review")
-			return nil
-		}
-	}
-
-	assessment, err := reviewassist.NewFromEnv().Evaluate(ctx.Request.Context(), *plan, *submission)
-	if err != nil {
-		session.AddFlash(ctx.Request, "notice", "Review assist could not run: "+err.Error())
-		actionflow.Redirect(ctx, "/organizer/review")
-		return nil
-	}
-
-	added := false
-	if err := appstate.MustGet().Update(func(state *domain.State) error {
-		currentPlan, found := state.ReviewPlan(plan.ID)
-		if !found {
-			return fmt.Errorf("active review plan not found")
-		}
-		if _, found := state.Submission(submissionID); !found {
-			return fmt.Errorf("submission %s not found", submissionID)
-		}
-		for _, evaluation := range state.Evaluations {
-			if evaluation.PlanID == currentPlan.ID && evaluation.SubmissionID == submissionID && evaluation.Source != "human" {
-				return nil
-			}
-		}
-		now := time.Now().UTC()
-		state.Evaluations = append(state.Evaluations, domain.Evaluation{
-			ID:             domain.NewID("eval"),
-			PlanID:         currentPlan.ID,
-			SubmissionID:   submissionID,
-			ReviewerID:     "rev_virtual_practitioner",
-			Scores:         assessment.Scores,
-			Comments:       assessment.Comments,
-			Recommendation: assessment.Recommendation,
-			Source:         assessment.Provider,
-			Model:          assessment.Model,
-			CreatedAt:      now,
-			UpdatedAt:      now,
-		})
-		added = true
-		return nil
-	}); err != nil {
-		return err
-	}
-	message := "An assisted evaluation already exists for “" + submission.Title + "”."
-	if added {
-		message = "Added a rubric-grounded second opinion for “" + submission.Title + "” via " + assessment.Provider + "."
-	}
-	session.AddFlash(ctx.Request, "notice", message)
-	live.Broadcast("review:updated", map[string]string{"submission": submissionID, "source": assessment.Provider})
-	actionflow.Redirect(ctx, "/organizer/review")
 	return nil
 }
 

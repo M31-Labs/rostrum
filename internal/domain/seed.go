@@ -126,7 +126,7 @@ func Seed(now time.Time) State {
 			{
 				ID: "plan_round_two", Name: "Round 2 - program fit", Round: 2, Status: "open",
 				Instructions: "Balance the full program. Prefer concrete evidence, complementary viewpoints, and responsible claims.",
-				DueAt:        at(2026, time.August, 22, 17, 0), Anonymous: false, WeeklyReminders: true, IncludeFiles: true, AIAssist: true,
+				DueAt:        at(2026, time.August, 22, 17, 0), Anonymous: false, WeeklyReminders: true, IncludeFiles: true,
 				ReviewerIDs:   []string{"rev_ada", "rev_marcus", "rev_ines", "rev_virtual_practitioner"},
 				SubmissionIDs: []string{"sub_eval", "sub_workspace", "sub_ai_review", "sub_open_models", "sub_accessibility"},
 				Criteria: []RubricCriterion{
@@ -221,7 +221,6 @@ func seedEvaluations(now time.Time) []Evaluation {
 		{ID: "eval_004", PlanID: "plan_round_one", SubmissionID: "sub_browser", ReviewerID: "rev_ines", Scores: map[string]float64{"relevance": 5, "clarity": 4, "originality": 5, "applicability": 4}, Comments: "Distinctive architecture with a compelling interface thesis.", Recommendation: "strong_yes", Source: "human", CreatedAt: now.Add(-9 * 24 * time.Hour), UpdatedAt: now.Add(-9 * 24 * time.Hour)},
 		{ID: "eval_005", PlanID: "plan_round_one", SubmissionID: "sub_vectors", ReviewerID: "rev_marcus", Scores: map[string]float64{"relevance": 4, "clarity": 4, "originality": 4, "applicability": 5}, Comments: "Technical but grounded in measurements.", Recommendation: "yes", Source: "human", CreatedAt: now.Add(-8 * 24 * time.Hour), UpdatedAt: now.Add(-8 * 24 * time.Hour)},
 		{ID: "eval_006", PlanID: "plan_round_two", SubmissionID: "sub_eval", ReviewerID: "rev_ada", Scores: map[string]float64{"program_fit": 5, "evidence": 5, "novelty": 4, "audience_value": 5}, Comments: "A useful working session and a strong complement to the review track.", Recommendation: "strong_yes", Source: "human", CreatedAt: now.Add(-2 * 24 * time.Hour), UpdatedAt: now.Add(-2 * 24 * time.Hour)},
-		{ID: "eval_007", PlanID: "plan_round_two", SubmissionID: "sub_ai_review", ReviewerID: "rev_virtual_practitioner", Scores: map[string]float64{"program_fit": 4.6, "evidence": 4.2, "novelty": 4.4, "audience_value": 4.8}, Comments: "Strong fit. Ask the speaker to include one failed rubric and the correction it prompted.", Recommendation: "yes", Source: "ai", Model: "seeded-demo-assist", CreatedAt: now.Add(-9 * time.Hour), UpdatedAt: now.Add(-9 * time.Hour)},
 	}
 }
 

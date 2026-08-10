@@ -44,9 +44,6 @@ func ReviewPlanCard(props any) Node {
 			<If cond={props.anonymous}>
 				<span>Anonymous</span>
 			</If>
-			<If cond={props.aiAssist}>
-				<span>AI assist</span>
-			</If>
 		</div>
 		<details class="rubric-details">
 			<summary>Weighted rubric</summary>
@@ -61,15 +58,6 @@ func ReviewPlanCard(props any) Node {
 			</div>
 		</details>
 	</article>
-}
-
-func AIAssistButton(props any) Node {
-	return <ActionForm actionName="aiAssist">
-		<input type="hidden" name="csrf_token" value={csrf.token}></input>
-		<input type="hidden" name="submission_id" value={props.id}></input>
-		<p class="form-status" role="status" aria-live="polite">{action.message}</p>
-		<button class="button button-compact" type="submit">Add AI second opinion</button>
-	</ActionForm>
 }
 
 func ReviewMethodDialog() Node {
@@ -107,10 +95,10 @@ func ReviewMethodDialog() Node {
 					Program staff define the weighted rubric.
 				</li>
 				<li>
-					Human and virtual reviewers score identical criteria.
+					Every assigned reviewer scores the same criteria.
 				</li>
 				<li>
-					Assisted outputs retain provider, model, timestamp, and comments.
+					Every recorded score keeps its reviewer, timestamp, and comments.
 				</li>
 				<li>
 					Only program staff change acceptance status.
@@ -127,7 +115,7 @@ func Page() Node {
 				<p class="eyebrow">Defensible decisions</p>
 				<h1>Multi-round review</h1>
 				<p>
-					Human judgment stays primary. Optional AI review uses the same rubric and keeps its provenance.
+					Human judgment stays primary. Every score follows the same weighted rubric.
 				</p>
 			</div>
 			<div class="workspace-header-actions">
@@ -150,10 +138,6 @@ func Page() Node {
 					</p>
 					<h2>Candidate scorecard</h2>
 				</div>
-				<span class="ai-legend">
-					<i>AI</i>
-					Second opinions are labeled
-				</span>
 			</header>
 			<div class="review-table" role="table" aria-label="Round two candidate scores">
 				<div class="review-head" role="row">
@@ -162,7 +146,6 @@ func Page() Node {
 					<span>Reviews</span>
 					<span>Weighted score</span>
 					<span>Recommendation</span>
-					<span>Assist</span>
 				</div>
 				<Each of={data.candidates} as="candidate">
 					<article class="review-row" role="row">
@@ -186,19 +169,6 @@ func Page() Node {
 							<span class={"status-pill status-" + candidate.tone}>{candidate.status}</span>
 							<small>{candidate.recommendations}</small>
 						</div>
-						<div role="cell">
-							<If cond={candidate.hasAI}>
-								<span class="ai-complete">Assist logged</span>
-								<small>
-									{candidate.assistSource}
-									·
-									{candidate.assistModel}
-								</small>
-							</If>
-							<If cond={!candidate.hasAI}>
-								<AIAssistButton id={candidate.id}></AIAssistButton>
-							</If>
-						</div>
 					</article>
 				</Each>
 			</div>
@@ -209,7 +179,6 @@ func Page() Node {
 					<p class="panel-kicker">Human judgment</p>
 					<h2>Record a rubric review</h2>
 				</div>
-				<span>AI assists do not count toward coverage</span>
 			</header>
 			<p>
 				Scored here on behalf of the reviewer by program staff. A reviewer with a review link (below) can score their own proposals directly instead.

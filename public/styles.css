@@ -109,7 +109,7 @@
   --min-metric: 12rem;
   --min-card: 17rem;
   --table-wide: 66rem;
-  --table-review: 68rem;
+  --table-review: 55rem;
   --table-routing: 58rem;
   --avatar-sm: 2.25rem;
   --avatar-md: 3rem;
@@ -2510,8 +2510,7 @@ code {
   gap: var(--space-xs);
 }
 
-.plan-flags span,
-.ai-complete {
+.plan-flags span {
   padding: var(--space-3xs) var(--space-xs);
   border: var(--border-thin) solid var(--color-line);
   border-radius: var(--radius-sm);
@@ -2560,26 +2559,11 @@ code {
   font-size: var(--type-xs);
 }
 
-.ai-legend {
-  color: var(--color-text-muted);
-  font-size: var(--type-xs);
-}
-
-.ai-legend i {
-  margin-right: var(--space-2xs);
-  padding: var(--space-3xs) var(--space-xs);
-  color: var(--color-accent-strong);
-  background: var(--color-accent-soft);
-  border-radius: var(--radius-sm);
-  font-family: var(--font-mono);
-  font-style: normal;
-}
-
 .review-head,
 .review-row {
   min-width: var(--table-review);
   display: grid;
-  grid-template-columns: minmax(15rem, 1.5fr) minmax(8rem, 0.7fr) minmax(4.5rem, 0.35fr) minmax(5.5rem, 0.45fr) minmax(10rem, 0.8fr) minmax(12rem, 0.85fr);
+  grid-template-columns: minmax(15rem, 1.5fr) minmax(8rem, 0.7fr) minmax(4.5rem, 0.35fr) minmax(5.5rem, 0.45fr) minmax(10rem, 0.8fr);
   gap: var(--space-sm);
   align-items: center;
 }

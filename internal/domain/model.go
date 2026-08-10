@@ -216,7 +216,6 @@ type ReviewPlan struct {
 	Anonymous          bool              `json:"anonymous"`
 	WeeklyReminders    bool              `json:"weeklyReminders"`
 	IncludeFiles       bool              `json:"includeFiles"`
-	AIAssist           bool              `json:"aiAssist"`
 	ReviewerIDs        []string          `json:"reviewerIds"`
 	SubmissionIDs      []string          `json:"submissionIds"`
 	Criteria           []RubricCriterion `json:"criteria"`
@@ -248,7 +247,6 @@ type Evaluation struct {
 	Comments       string             `json:"comments"`
 	Recommendation string             `json:"recommendation"`
 	Source         string             `json:"source"`
-	Model          string             `json:"model"`
 	CreatedAt      time.Time          `json:"createdAt"`
 	UpdatedAt      time.Time          `json:"updatedAt"`
 }

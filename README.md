@@ -149,10 +149,6 @@ Rostrum runs complete with zero credentials. Add these when you want them:
   confirmation email. Without it, messages record to a visible demo outbox.
 - **Accelevents.** Set `ACCELEVENTS_API_KEY` and `ACCELEVENTS_EVENT_URL` to
   unlock live publishing. Dry runs work without either.
-- **AI second opinion.** Set `OPENAI_API_KEY` to let a model score the same
-  organizer rubric. The result is labeled with provider and model, excludes
-  speaker personal data from the request, and never changes human coverage
-  or human aggregates.
 
 See [.env.example](.env.example) for every setting.
 

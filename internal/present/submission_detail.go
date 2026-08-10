@@ -119,9 +119,8 @@ func submissionAnswerRows(state domain.State, submission domain.Submission) []ma
 
 // submissionEvaluationRows lists every evaluation recorded for the
 // submission, across every review plan, each labeled with its plan name,
-// reviewer, per-criterion scores, and — for an assisted row — its source and
-// model. It never filters out an AI row: unlike the review scorecard's
-// human-only coverage and averages, the detail view is a full audit trail.
+// reviewer, per-criterion scores, and recommendation. It is a full audit
+// trail of every human review, unfiltered by review round or coverage.
 func submissionEvaluationRows(state domain.State, submissionID string) []map[string]any {
 	rows := make([]map[string]any, 0)
 	for _, evaluation := range state.Evaluations {
@@ -152,7 +151,6 @@ func submissionEvaluationRows(state domain.State, submissionID string) []map[str
 				break
 			}
 		}
-		isAI := evaluation.Source != "" && evaluation.Source != "human"
 		rows = append(rows, map[string]any{
 			"id":             evaluation.ID,
 			"planName":       planName,
@@ -160,9 +158,6 @@ func submissionEvaluationRows(state domain.State, submissionID string) []map[str
 			"scores":         scores,
 			"comments":       evaluation.Comments,
 			"recommendation": StatusLabel(evaluation.Recommendation),
-			"isAI":           isAI,
-			"source":         StatusLabel(evaluation.Source),
-			"model":          evaluation.Model,
 			"updated":        DateTime(evaluation.UpdatedAt),
 		})
 	}

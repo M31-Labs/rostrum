@@ -32,7 +32,6 @@ func Review(state domain.State) map[string]any {
 			"due":           DateTime(plan.DueAt),
 			"instructions":  plan.Instructions,
 			"anonymous":     plan.Anonymous,
-			"aiAssist":      plan.AIAssist,
 			"reviewers":     len(plan.ReviewerIDs),
 			"proposals":     len(plan.SubmissionIDs),
 			"completed":     len(completed),
@@ -53,19 +52,9 @@ func Review(state domain.State) map[string]any {
 		evaluations := evaluationsFor(state, active.ID, submissionID)
 		humanReviews := humanEvaluations(evaluations)
 		score := weightedAverage(active, humanReviews)
-		hasAI := false
-		assistModel := ""
-		assistSource := ""
-		recommendations := make([]string, 0, len(evaluations))
-		for _, evaluation := range evaluations {
-			if evaluation.Source != "" && evaluation.Source != "human" {
-				hasAI = true
-				assistModel = evaluation.Model
-				assistSource = StatusLabel(evaluation.Source)
-			}
-			if evaluation.Source == "human" {
-				recommendations = append(recommendations, StatusLabel(evaluation.Recommendation))
-			}
+		recommendations := make([]string, 0, len(humanReviews))
+		for _, evaluation := range humanReviews {
+			recommendations = append(recommendations, StatusLabel(evaluation.Recommendation))
 		}
 		candidates = append(candidates, map[string]any{
 			"id":              submission.ID,
@@ -76,9 +65,6 @@ func Review(state domain.State) map[string]any {
 			"targetCount":     active.EvaluationsPerItem,
 			"score":           scoreLabel(score, len(humanReviews)),
 			"scoreValue":      score,
-			"hasAI":           hasAI,
-			"assistModel":     assistModel,
-			"assistSource":    assistSource,
 			"recommendations": strings.Join(recommendations, " · "),
 			"status":          StatusLabel(submission.Status),
 			"tone":            StatusTone(submission.Status),
@@ -118,7 +104,7 @@ func Review(state domain.State) map[string]any {
 	return map[string]any{
 		"section":        "review",
 		"plans":          plans,
-		"activePlan":     map[string]any{"id": active.ID, "name": active.Name, "aiAssist": active.AIAssist, "criteria": activeCriteria},
+		"activePlan":     map[string]any{"id": active.ID, "name": active.Name, "criteria": activeCriteria},
 		"candidates":     candidates,
 		"reviewers":      reviewers,
 		"humanReviewers": humanReviewers,

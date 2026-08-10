@@ -76,13 +76,6 @@ func EvaluationRow(props any) Node {
 					{props.updated}
 				</small>
 			</div>
-			<If cond={props.isAI}>
-				<span class="ai-complete">
-					AI ·
-					{props.source}
-					{props.model}
-				</span>
-			</If>
 		</header>
 		<div class="detail-evaluation-scores">
 			<Each of={props.scores} as="score">
@@ -95,7 +88,7 @@ func EvaluationRow(props any) Node {
 			</Each>
 		</div>
 		<p>
-			<span class={"status-pill status-" + (props.isAI ? "accent" : "neutral")}>{props.recommendation}</span>
+			<span class="status-pill status-neutral">{props.recommendation}</span>
 		</p>
 		<p>{props.comments}</p>
 	</article>
@@ -173,10 +166,6 @@ func Page() Node {
 									)
 								</h2>
 							</div>
-							<span class="ai-legend">
-								<i>AI</i>
-								Second opinions are labeled
-							</span>
 						</header>
 						<div class="detail-evaluation-list">
 							<Each of={data.evaluations} as="evaluation">
