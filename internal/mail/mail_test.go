@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"mime"
+	"mime/multipart"
 	netmail "net/mail"
 	"strings"
 	"testing"
@@ -197,6 +198,109 @@ func TestFormatMessageEncodesNonASCIISubject(t *testing.T) {
 	}
 	if decoded != "café" {
 		t.Fatalf("decoded Subject = %q, want %q", decoded, "café")
+	}
+}
+
+// TestFormatMessageAttachesCalendarPart proves FormatMessage composes a
+// multipart/mixed body carrying both a text/plain part and a
+// text/calendar; method=REQUEST part when a Message sets Calendar — the
+// shape a calendar-invite send (SendInvite, or an AttachCalendar template)
+// needs so Gmail and Outlook render a native accept/decline card. It
+// decodes the output with the standard library's own mail and multipart
+// readers rather than checking substrings, so it proves the composed
+// message actually parses, not just that it contains the right text.
+func TestFormatMessageAttachesCalendarPart(t *testing.T) {
+	msg := Message{
+		To:       "ada@example.com",
+		ToName:   "Ada Lovelace",
+		Subject:  "Invite: Memory Without Mystery",
+		TextBody: "Hi Ada,\n\nYou're invited.\n",
+		Calendar: []byte(testICS),
+	}
+	raw := FormatMessage(`"Rostrum" <noreply@example.com>`, msg)
+
+	parsed, err := netmail.ReadMessage(bytes.NewReader(raw))
+	if err != nil {
+		t.Fatalf("net/mail could not parse FormatMessage's output: %v\n--- raw ---\n%s", err, raw)
+	}
+	contentType := parsed.Header.Get("Content-Type")
+	mediaType, params, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		t.Fatalf("Content-Type header %q did not parse: %v", contentType, err)
+	}
+	if mediaType != "multipart/mixed" {
+		t.Fatalf("media type = %q, want %q", mediaType, "multipart/mixed")
+	}
+	boundary := params["boundary"]
+	if boundary == "" {
+		t.Fatalf("Content-Type %q carries no boundary param", contentType)
+	}
+
+	body, err := io.ReadAll(parsed.Body)
+	if err != nil {
+		t.Fatalf("could not read parsed body: %v", err)
+	}
+	reader := multipart.NewReader(bytes.NewReader(body), boundary)
+	var sawText, sawCalendar bool
+	for {
+		part, err := reader.NextPart()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("could not read a MIME part: %v", err)
+		}
+		content, err := io.ReadAll(part)
+		if err != nil {
+			t.Fatalf("could not read a MIME part's content: %v", err)
+		}
+		partType := part.Header.Get("Content-Type")
+		switch {
+		case strings.HasPrefix(partType, "text/plain"):
+			sawText = true
+			if !strings.Contains(string(content), "You're invited.") {
+				t.Fatalf("text/plain part missing the message body: %q", content)
+			}
+		case strings.HasPrefix(partType, "text/calendar"):
+			sawCalendar = true
+			partMediaType, partParams, err := mime.ParseMediaType(partType)
+			if err != nil {
+				t.Fatalf("text/calendar Content-Type %q did not parse: %v", partType, err)
+			}
+			if partMediaType != "text/calendar" || partParams["method"] != "REQUEST" {
+				t.Fatalf("calendar part Content-Type = %q, want text/calendar; method=REQUEST", partType)
+			}
+			if disp := part.Header.Get("Content-Disposition"); !strings.Contains(disp, `filename="invite.ics"`) {
+				t.Fatalf("calendar part Content-Disposition = %q, want an invite.ics attachment", disp)
+			}
+			if string(content) != testICS {
+				t.Fatalf("calendar part content did not round-trip the ics bytes exactly.\ngot:\n%q\nwant:\n%q", content, testICS)
+			}
+		}
+	}
+	if !sawText {
+		t.Fatal("no text/plain part found in the composed message")
+	}
+	if !sawCalendar {
+		t.Fatal("no text/calendar part found in the composed message")
+	}
+}
+
+// TestFormatMessageOmitsCalendarPartWhenUnset proves a Message with no
+// Calendar set still renders the plain text/plain shape every other
+// message (for example SendConfirmation's) uses, so adding the Calendar
+// field never changes composition for a caller that does not set it.
+func TestFormatMessageOmitsCalendarPartWhenUnset(t *testing.T) {
+	raw := FormatMessage("from@example.com", Message{To: "a@example.com", Subject: "plain", TextBody: "body"})
+	parsed, err := netmail.ReadMessage(bytes.NewReader(raw))
+	if err != nil {
+		t.Fatalf("net/mail could not parse the message: %v", err)
+	}
+	if got := parsed.Header.Get("Content-Type"); !strings.HasPrefix(got, "text/plain") {
+		t.Fatalf("Content-Type = %q, want a text/plain header", got)
+	}
+	if got := parsed.Header.Get("Content-Transfer-Encoding"); got != "8bit" {
+		t.Fatalf("Content-Transfer-Encoding = %q, want %q", got, "8bit")
 	}
 }
 

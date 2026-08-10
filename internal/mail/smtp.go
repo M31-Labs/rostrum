@@ -44,7 +44,7 @@ func (s *SMTPSender) Send(msg Message) error {
 	if strings.TrimSpace(s.Username) != "" {
 		auth = smtp.PlainAuth("", s.Username, s.Password, s.Host)
 	}
-	return smtp.SendMail(addr, auth, addressOnly(s.From), []string{msg.To}, body)
+	return smtp.SendMail(addr, auth, AddressOnly(s.From), []string{msg.To}, body)
 }
 
 func (s *SMTPSender) port() string {
@@ -56,10 +56,16 @@ func (s *SMTPSender) port() string {
 
 // FormatMessage renders msg as an RFC 5322 message ready to hand to
 // smtp.SendMail: a header block (From, To, Subject, Date, MIME-Version,
-// Content-Type, Content-Transfer-Encoding), a blank line, then the text
-// body with every line ending in CRLF as RFC 5322 requires. It performs no
-// network I/O, so a test can call it directly to check composition without
-// dialing a relay.
+// Content-Type, and, for a plain-text message, Content-Transfer-Encoding),
+// a blank line, then the body with every line ending in CRLF as RFC 5322
+// requires. It performs no network I/O, so a test can call it directly to
+// check composition without dialing a relay.
+//
+// When msg.Calendar is set, the body is instead a multipart/mixed entity
+// (InviteMIME) carrying msg.TextBody as its text/plain part and
+// msg.Calendar as a "text/calendar; method=REQUEST" part — the shape
+// Gmail and Outlook render as a native accept/decline card, and any other
+// client offers as an invite.ics attachment.
 func FormatMessage(from string, msg Message) []byte {
 	var b strings.Builder
 	headers := []string{
@@ -68,15 +74,31 @@ func FormatMessage(from string, msg Message) []byte {
 		"Subject: " + encodeSubject(msg.Subject),
 		"Date: " + time.Now().Format(time.RFC1123Z),
 		"MIME-Version: 1.0",
-		`Content-Type: text/plain; charset="UTF-8"`,
-		"Content-Transfer-Encoding: 8bit",
+	}
+	body := toCRLF(msg.TextBody)
+	if len(msg.Calendar) > 0 {
+		multipartBody, err := InviteMIME(inviteBoundary, msg.TextBody, msg.Calendar)
+		if err == nil {
+			// A multipart entity declares its own per-part transfer
+			// encoding (InviteMIME sets 8bit on both parts), so the
+			// top-level header omits Content-Transfer-Encoding here.
+			headers = append(headers, "Content-Type: "+InviteContentType(inviteBoundary))
+			body = multipartBody
+		} else {
+			// inviteBoundary is a fixed, valid boundary, so this branch is
+			// unreachable in practice; fall back to a plain-text message
+			// rather than silently drop the calendar invite from view.
+			headers = append(headers, `Content-Type: text/plain; charset="UTF-8"`, "Content-Transfer-Encoding: 8bit")
+		}
+	} else {
+		headers = append(headers, `Content-Type: text/plain; charset="UTF-8"`, "Content-Transfer-Encoding: 8bit")
 	}
 	for _, header := range headers {
 		b.WriteString(header)
 		b.WriteString("\r\n")
 	}
 	b.WriteString("\r\n")
-	b.WriteString(toCRLF(msg.TextBody))
+	b.WriteString(body)
 	return []byte(b.String())
 }
 
@@ -91,10 +113,13 @@ func formatAddress(name, address string) string {
 	return fmt.Sprintf("%q <%s>", name, address)
 }
 
-// addressOnly strips a "Name <addr>" header value down to the bare
+// AddressOnly strips a "Name <addr>" header value down to the bare
 // address smtp.SendMail expects for its envelope-sender argument. It
-// returns from unchanged when no angle brackets are present.
-func addressOnly(from string) string {
+// returns from unchanged when no angle brackets are present. Exported so a
+// caller that needs a bare address from a "Name <addr>" value configured
+// elsewhere (for example calendar.Invite's organizerEmail argument, sourced
+// from MAIL_FROM) can reuse this instead of duplicating the parsing.
+func AddressOnly(from string) string {
 	open := strings.IndexByte(from, '<')
 	shut := strings.IndexByte(from, '>')
 	if open >= 0 && shut > open {

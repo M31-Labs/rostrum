@@ -1,6 +1,10 @@
 package domain
 
-import "testing"
+import (
+	"errors"
+	"strings"
+	"testing"
+)
 
 func TestAddSessionForSubmissionIsIdempotent(t *testing.T) {
 	state := &State{
@@ -117,5 +121,56 @@ func TestQueueAcceptanceCommunicationIsIdempotent(t *testing.T) {
 	}
 	if len(state.Communications) != 2 {
 		t.Fatalf("communications after repeat queue = %d, want 2", len(state.Communications))
+	}
+}
+
+func TestMarkCommunicationSentRecordsSuccess(t *testing.T) {
+	state := &State{Event: Event{Name: "M31 Systems Forum 2026"}}
+	state.QueueAcceptanceCommunication("ses_1", []string{"speaker_1"})
+
+	found := state.MarkCommunicationSent(AcceptanceTemplateID, "speaker_1", "ses_1", "demo-outbox", nil)
+	if !found {
+		t.Fatal("MarkCommunicationSent found = false, want true for a queued row")
+	}
+	comm := state.Communications[0]
+	if comm.Status != "sent" {
+		t.Fatalf("comm.Status = %q, want sent", comm.Status)
+	}
+	if comm.Provider != "demo-outbox" {
+		t.Fatalf("comm.Provider = %q, want demo-outbox", comm.Provider)
+	}
+	if comm.SentAt.IsZero() {
+		t.Fatal("comm.SentAt is zero, want a stamped time")
+	}
+	if comm.Error != "" {
+		t.Fatalf("comm.Error = %q, want empty on success", comm.Error)
+	}
+}
+
+func TestMarkCommunicationSentRecordsFailureWithoutRawError(t *testing.T) {
+	state := &State{Event: Event{Name: "M31 Systems Forum 2026"}}
+	state.QueueAcceptanceCommunication("ses_1", []string{"speaker_1"})
+
+	sendErr := errors.New("dial tcp 10.0.0.1:587: connection refused")
+	found := state.MarkCommunicationSent(AcceptanceTemplateID, "speaker_1", "ses_1", "smtp", sendErr)
+	if !found {
+		t.Fatal("MarkCommunicationSent found = false, want true for a queued row")
+	}
+	comm := state.Communications[0]
+	if comm.Status != "failed" {
+		t.Fatalf("comm.Status = %q, want failed", comm.Status)
+	}
+	if comm.Error == "" {
+		t.Fatal("comm.Error is empty, want a sanitized category")
+	}
+	if strings.Contains(comm.Error, "10.0.0.1") || strings.Contains(comm.Error, "connection refused") {
+		t.Fatalf("comm.Error = %q, leaked the raw send error (M8)", comm.Error)
+	}
+}
+
+func TestMarkCommunicationSentReportsNotFoundForNoMatchingRow(t *testing.T) {
+	state := &State{}
+	if found := state.MarkCommunicationSent(AcceptanceTemplateID, "speaker_1", "ses_1", "demo-outbox", nil); found {
+		t.Fatal("MarkCommunicationSent found = true with no queued row, want false")
 	}
 }

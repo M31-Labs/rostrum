@@ -328,25 +328,31 @@ func (state *State) AssignAcceptedOnlyTasks(speakerIDs []string) (assigned int) 
 	return assigned
 }
 
+// HasAcceptanceCommunication reports whether a Communication already exists
+// for the (AcceptanceTemplateID, speakerID, sessionID) triple --
+// QueueAcceptanceCommunication's own idempotency check, exposed so a caller
+// that also sends the message (not just queues the row, for example the
+// accept-time transition in app/organizer/submissions/page.server.go) can
+// tell, before queuing, which speakers are new and so actually need a send.
+func (state *State) HasAcceptanceCommunication(sessionID, speakerID string) bool {
+	for _, existing := range state.Communications {
+		if existing.TemplateID == AcceptanceTemplateID && existing.SpeakerID == speakerID && existing.SessionID == sessionID {
+			return true
+		}
+	}
+	return false
+}
+
 // QueueAcceptanceCommunication appends one queued Communication per speaker
 // in speakerIDs, addressed to sessionID and using the AcceptanceTemplateID
-// template. It is idempotent per (speakerID, sessionID) pair: if a
-// Communication already exists on that template for the pair, it is
-// skipped, so accepting the same submission twice never double-queues the
-// acceptance message. It reports how many rows it appended.
+// template. It is idempotent per (speakerID, sessionID) pair (see
+// HasAcceptanceCommunication): if a Communication already exists on that
+// template for the pair, it is skipped, so accepting the same submission
+// twice never double-queues the acceptance message. It reports how many
+// rows it appended.
 func (state *State) QueueAcceptanceCommunication(sessionID string, speakerIDs []string) (queued int) {
 	for _, speakerID := range speakerIDs {
-		if speakerID == "" {
-			continue
-		}
-		already := false
-		for _, existing := range state.Communications {
-			if existing.TemplateID == AcceptanceTemplateID && existing.SpeakerID == speakerID && existing.SessionID == sessionID {
-				already = true
-				break
-			}
-		}
-		if already {
+		if speakerID == "" || state.HasAcceptanceCommunication(sessionID, speakerID) {
 			continue
 		}
 		state.Communications = append(state.Communications, Communication{
@@ -361,6 +367,41 @@ func (state *State) QueueAcceptanceCommunication(sessionID string, speakerIDs []
 		queued++
 	}
 	return queued
+}
+
+// MarkCommunicationSent finds the queued Communication row addressed to
+// speakerID on templateID for sessionID — the row QueueAcceptanceCommunication
+// (or an equivalent queuing step) already appended — and records the
+// outcome of actually sending it: Status "sent" and Provider on a nil
+// sendErr, or Status "failed" with a sanitized Error category otherwise
+// (never the raw error text — M8; a caller logs the detail separately).
+// SentAt is stamped either way, marking when delivery was attempted. It
+// reports whether it found and updated a matching row; a caller that sent
+// a message with no matching queued row (for example a race with a second
+// accept) should append a fresh Communication row instead of losing the
+// outcome.
+//
+// Call this from a second, small Update — after the Send call has
+// returned, outside any store lock — the same two-step shape submitProposal
+// and queueMessage use to record a real send's outcome.
+func (state *State) MarkCommunicationSent(templateID, speakerID, sessionID, provider string, sendErr error) bool {
+	for index := range state.Communications {
+		item := &state.Communications[index]
+		if item.TemplateID != templateID || item.SpeakerID != speakerID || item.SessionID != sessionID || item.Status != "queued" {
+			continue
+		}
+		item.Provider = provider
+		item.SentAt = time.Now().UTC()
+		if sendErr != nil {
+			item.Status = "failed"
+			item.Error = "delivery failed"
+		} else {
+			item.Status = "sent"
+			item.Error = ""
+		}
+		return true
+	}
+	return false
 }
 
 type Task struct {

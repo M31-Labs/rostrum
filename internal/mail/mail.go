@@ -30,6 +30,18 @@ type Message struct {
 	ToName   string // recipient display name, for example "Ada Lovelace"
 	Subject  string
 	TextBody string
+
+	// Calendar carries an optional RFC 5545 calendar invite (for example
+	// calendar.Invite's return value) to attach alongside TextBody. Leave
+	// it nil for a plain-text message. When set, FormatMessage composes a
+	// multipart/mixed body carrying TextBody as its text/plain part and
+	// Calendar as a "text/calendar; method=REQUEST" part named
+	// invite.ics — the shape Gmail and Outlook render as a native
+	// accept/decline card. A Sender that only records messages (for
+	// example OutboxSender) keeps Calendar as a separate field rather than
+	// folding it into TextBody, so a test or an outbox viewer can inspect
+	// the invite bytes directly instead of parsing MIME out of the body.
+	Calendar []byte
 }
 
 // Sender delivers one Message. Send returns a non-nil error only when the

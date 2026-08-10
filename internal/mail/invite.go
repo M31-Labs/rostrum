@@ -28,11 +28,11 @@ type InviteSession struct {
 const inviteBoundary = "rostrum-invite-4f8f9d2b"
 
 // SendInvite renders and sends a calendar-invite email for one speaker and
-// one session: a short human-readable body plus the session's iCal
-// invite, composed as a multipart/mixed body (InviteMIME) carrying a
-// text/calendar; method=REQUEST part — the shape Gmail and Outlook render
-// as a native accept/decline card, and any other client offers as an
-// invite.ics attachment.
+// one session: a short human-readable body plus the session's iCal invite,
+// attached as Message.Calendar — a "text/calendar; method=REQUEST" MIME
+// part once FormatMessage renders the message for delivery — the shape
+// Gmail and Outlook render as a native accept/decline card, and any other
+// client offers as an invite.ics attachment.
 //
 // Pass ics as the []byte calendar.Invite(state, session, speaker,
 // organizerEmail) returns; this package stays self-contained and never
@@ -43,10 +43,10 @@ const inviteBoundary = "rostrum-invite-4f8f9d2b"
 //
 // Call this after the durable mutation that makes the invite valid has
 // committed, and outside any store lock — Send is a network operation,
-// the same rule SendConfirmation's doc comment states. This unit
-// (calendar invites) delivers the capability; wiring the call sites is a
-// separate unit. Per the calendar-invite spec, wire SendInvite from three
-// places:
+// the same rule SendConfirmation's doc comment states. Wire SendInvite (or
+// build a Message with Calendar set directly, the shape queueMessage and
+// the acceptance flow use to merge a template first) from every place the
+// calendar-invite spec calls for:
 //
 //   - publishAgenda (app/organizer/agenda/page.server.go), once per
 //     speaker, right after a session's Status flips to "published";
@@ -68,15 +68,12 @@ func SendInvite(sender Sender, speaker Recipient, session InviteSession, ics []b
 	if len(ics) == 0 {
 		return fmt.Errorf("mail: SendInvite requires a non-empty calendar invite")
 	}
-	body, err := InviteMIME(inviteBoundary, inviteText(speaker, session), ics)
-	if err != nil {
-		return fmt.Errorf("mail: could not compose the invite MIME body: %w", err)
-	}
 	msg := Message{
 		To:       speaker.Email,
 		ToName:   speaker.Name,
 		Subject:  inviteSubject(session),
-		TextBody: body,
+		TextBody: inviteText(speaker, session),
+		Calendar: ics,
 	}
 	return sender.Send(msg)
 }
@@ -90,11 +87,9 @@ func SendInvite(sender Sender, speaker Recipient, session InviteSession, ics []b
 //
 // The returned bytes are the MIME entity's body only; the top-level
 // message also needs a Content-Type header carrying this same boundary —
-// see InviteContentType — which is why SendInvite documents the follow-up
-// this leaves for whoever wires actual SMTP delivery: today's
-// Message/FormatMessage pipeline (internal/mail/mail.go, smtp.go) has no
-// field for a caller to override the outer Content-Type header the way a
-// multipart message needs. Extending it is a small, separate change.
+// see InviteContentType. FormatMessage (internal/mail/smtp.go) calls both
+// of these directly whenever a Message carries a non-empty Calendar field,
+// so a caller never needs to call InviteMIME itself outside a test.
 func InviteMIME(boundary, textBody string, ics []byte) (string, error) {
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)

@@ -162,14 +162,14 @@ func TestSendInviteSendsThroughTheGivenSender(t *testing.T) {
 	if msg.Subject != wantSubject {
 		t.Fatalf("Subject = %q, want %q", msg.Subject, wantSubject)
 	}
-	if !strings.Contains(msg.TextBody, "text/calendar; method=REQUEST") {
-		t.Fatalf("composed body missing the text/calendar; method=REQUEST part header:\n%s", msg.TextBody)
+	if string(msg.Calendar) != testICS {
+		t.Fatalf("Calendar did not carry the ics bytes verbatim:\ngot:\n%q\nwant:\n%q", msg.Calendar, testICS)
 	}
-	if !strings.Contains(msg.TextBody, testICS) {
-		t.Fatalf("composed body did not carry the ics bytes verbatim:\n%s", msg.TextBody)
+	if strings.Contains(msg.TextBody, "text/calendar; method=REQUEST") {
+		t.Fatalf("TextBody carries composed MIME instead of plain text; the calendar part belongs on Message.Calendar, composed later by FormatMessage:\n%s", msg.TextBody)
 	}
 	if !strings.Contains(msg.TextBody, "Meridian Room, San Francisco, California") {
-		t.Fatalf("composed body missing the session location:\n%s", msg.TextBody)
+		t.Fatalf("body missing the session location:\n%s", msg.TextBody)
 	}
 }
 

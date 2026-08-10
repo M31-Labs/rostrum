@@ -53,25 +53,37 @@ func Communications(state domain.State, templateID string, recipientID ...string
 	}
 
 	sampleSpeaker := selectRecipient(state, selectedRecipientID)
-	sampleSession, hasSession := recipientSession(state, sampleSpeaker.ID)
+	sampleSession, hasSession := RecipientSession(state, sampleSpeaker.ID)
 	if !hasSession {
 		// Per spec: omit session placeholders rather than borrow an
 		// unrelated speaker's session.
 		sampleSession = domain.Session{}
 	}
-	subject, body := renderCommunication(state, selected, sampleSpeaker, sampleSession)
+	subject, body := RenderCommunication(state, selected, sampleSpeaker, sampleSession)
 	gmail := "https://mail.google.com/mail/?view=cm&fs=1&to=" + url.QueryEscape(sampleSpeaker.Email) + "&su=" + url.QueryEscape(subject) + "&body=" + url.QueryEscape(body)
 	outlook := "https://outlook.office.com/mail/deeplink/compose?to=" + url.QueryEscape(sampleSpeaker.Email) + "&subject=" + url.QueryEscape(subject) + "&body=" + url.QueryEscape(body)
 
+	// TODO(reminders): tick queued communications. A background scheduler
+	// belongs upstream of this view: promote each "queued" row past its
+	// ScheduledFor to "sent" once its window arrives (a gmail/outlook
+	// hand-off, or a reminder template's row seeded by
+	// internal/domain/seed.go). Out of scope for this change; this view
+	// only renders whatever status the store already carries.
 	outbox := make([]map[string]any, 0, len(state.Communications))
 	queued, sent := 0, 0
 	for index := len(state.Communications) - 1; index >= 0; index-- {
 		item := state.Communications[index]
 		when := item.ScheduledFor
-		if item.Status == "sent" {
+		switch item.Status {
+		case "sent":
 			sent++
 			when = item.SentAt
-		} else {
+		case "failed":
+			// A failed send was attempted, not queued: it counts toward
+			// neither pill, but still shows its attempt time rather than
+			// a stale ScheduledFor.
+			when = item.SentAt
+		default:
 			queued++
 		}
 		outbox = append(outbox, map[string]any{
@@ -140,10 +152,13 @@ func selectRecipient(state domain.State, recipientID string) domain.Speaker {
 	return domain.Speaker{}
 }
 
-// recipientSession returns the recipient's first session by membership
-// (matching on Session.SpeakerIDs), so the preview never shows a session
-// placeholder that belongs to a different speaker.
-func recipientSession(state domain.State, speakerID string) (domain.Session, bool) {
+// RecipientSession returns the recipient's first session by membership
+// (matching on Session.SpeakerIDs), so a preview or a merged send never
+// carries a session placeholder that belongs to a different speaker.
+// Exported so app/organizer/communications/page.server.go's queueMessage
+// action can resolve the same session the preview pane already shows,
+// rather than duplicating this lookup at the call site.
+func RecipientSession(state domain.State, speakerID string) (domain.Session, bool) {
 	if speakerID == "" {
 		return domain.Session{}, false
 	}
@@ -157,7 +172,14 @@ func recipientSession(state domain.State, speakerID string) (domain.Session, boo
 	return domain.Session{}, false
 }
 
-func renderCommunication(state domain.State, template domain.EmailTemplate, speaker domain.Speaker, item domain.Session) (string, string) {
+// RenderCommunication merges template's Subject and Body with speaker and
+// item (the speaker's session, or a zero Session when none applies) and
+// returns the merged subject and body. Exported so a real send path
+// (app/organizer/communications/page.server.go's queueMessage, and the
+// submission-acceptance flow in app/organizer/submissions/page.server.go)
+// composes the exact text the preview pane already renders, instead of
+// duplicating the merge-field map at each call site.
+func RenderCommunication(state domain.State, template domain.EmailTemplate, speaker domain.Speaker, item domain.Session) (string, string) {
 	subject := template.Subject
 	body := template.Body
 	sessionTitle, sessionStart, sessionRoom := "", "", ""
