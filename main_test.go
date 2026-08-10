@@ -12,8 +12,10 @@ import (
 
 	"github.com/m31-labs/rostrum/internal/appstate"
 	"github.com/m31-labs/rostrum/internal/domain"
+	"github.com/m31-labs/rostrum/internal/identity"
 	"github.com/m31-labs/rostrum/internal/store"
 	"github.com/m31-labs/rostrum/internal/token"
+	"m31labs.dev/gosx/auth"
 	"m31labs.dev/gosx/session"
 )
 
@@ -37,6 +39,20 @@ func testSessionManager(t *testing.T) *session.Manager {
 		t.Fatalf("session.New: %v", err)
 	}
 	return manager
+}
+
+// signInAs returns a middleware that signs a user carrying role into the
+// request's session before calling next. It must run after
+// session.Manager.Middleware (which attaches the session store the sign-in
+// writes to) and before auth.Manager.Middleware (which reads it back), the
+// same ordering main.go uses in production.
+func signInAs(authManager *auth.Manager, role string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			authManager.SignIn(r, auth.User{ID: "test-" + role, Email: "test-" + role + "@example.com", Roles: []string{role}})
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 func TestSecurityHeadersAuthorizeOnlyTheGoSXInlineRuntime(t *testing.T) {
@@ -97,6 +113,7 @@ func TestFrameAncestorsScopedToPublicRoutes(t *testing.T) {
 
 func TestSubmissionsCSVRequiresOrganizerSessionAndEscapesFormulas(t *testing.T) {
 	manager := testSessionManager(t)
+	authManager := identity.New(manager)
 
 	var submissionID string
 	if err := appstate.MustGet().Update(func(state *domain.State) error {
@@ -115,11 +132,10 @@ func TestSubmissionsCSVRequiresOrganizerSessionAndEscapesFormulas(t *testing.T) 
 		t.Fatalf("seed submission: %v", err)
 	}
 
-	// SE-5b: a request that never passed through organizerContext must be
-	// refused, not served a row of data.
+	// SE-5b: a cookie-less request must be refused, not served a row of data.
 	unauth := httptest.NewRequest(http.MethodGet, "/organizer/export/submissions.csv", nil)
 	unauthRecorder := httptest.NewRecorder()
-	manager.Middleware(http.HandlerFunc(submissionsCSV)).ServeHTTP(unauthRecorder, unauth)
+	manager.Middleware(authManager.Middleware(http.HandlerFunc(submissionsCSV))).ServeHTTP(unauthRecorder, unauth)
 	if unauthRecorder.Code != http.StatusForbidden {
 		t.Fatalf("unauthenticated export status = %d, want 403", unauthRecorder.Code)
 	}
@@ -127,12 +143,20 @@ func TestSubmissionsCSVRequiresOrganizerSessionAndEscapesFormulas(t *testing.T) 
 		t.Fatal("unauthenticated export leaked submission data")
 	}
 
-	// An organizer session (the same binding organizerContext sets for any
-	// /organizer/ visit) may fetch the export, and a formula-looking title
+	// An observer session reaches /organizer but never this export: it
+	// carries speaker PII the read-only role must not receive.
+	observed := httptest.NewRequest(http.MethodGet, "/organizer/export/submissions.csv", nil)
+	observedRecorder := httptest.NewRecorder()
+	manager.Middleware(signInAs(authManager, identity.RoleObserver)(authManager.Middleware(http.HandlerFunc(submissionsCSV)))).ServeHTTP(observedRecorder, observed)
+	if observedRecorder.Code != http.StatusForbidden {
+		t.Fatalf("observer export status = %d, want 403", observedRecorder.Code)
+	}
+
+	// An organizer session may fetch the export, and a formula-looking title
 	// exports neutralized (SE-5).
 	authed := httptest.NewRequest(http.MethodGet, "/organizer/export/submissions.csv", nil)
 	authedRecorder := httptest.NewRecorder()
-	manager.Middleware(organizerContext()(http.HandlerFunc(submissionsCSV))).ServeHTTP(authedRecorder, authed)
+	manager.Middleware(signInAs(authManager, identity.RoleOrganizer)(authManager.Middleware(http.HandlerFunc(submissionsCSV)))).ServeHTTP(authedRecorder, authed)
 	if authedRecorder.Code != http.StatusOK {
 		t.Fatalf("authorized export status = %d, want 200", authedRecorder.Code)
 	}

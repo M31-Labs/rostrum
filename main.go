@@ -20,13 +20,17 @@ import (
 	"github.com/m31-labs/rostrum/internal/appstate"
 	programcalendar "github.com/m31-labs/rostrum/internal/calendar"
 	"github.com/m31-labs/rostrum/internal/domain"
+	"github.com/m31-labs/rostrum/internal/identity"
 	"github.com/m31-labs/rostrum/internal/live"
+	"github.com/m31-labs/rostrum/internal/mail"
 	"github.com/m31-labs/rostrum/internal/present"
 	"github.com/m31-labs/rostrum/internal/publicapi"
+	"github.com/m31-labs/rostrum/internal/ratelimit"
 	"github.com/m31-labs/rostrum/internal/store"
 	"github.com/m31-labs/rostrum/internal/token"
 	_ "github.com/m31-labs/rostrum/modules"
 	"m31labs.dev/gosx"
+	"m31labs.dev/gosx/auth"
 	"m31labs.dev/gosx/controller"
 	"m31labs.dev/gosx/env"
 	"m31labs.dev/gosx/hydrate"
@@ -37,17 +41,14 @@ import (
 
 const developmentSessionSecret = "rostrum-development-secret-change-me"
 
-// Session keys shared with the portal route module
-// (app/portal/page.server.go). portalSpeakerSessionKey mirrors that
-// package's private portalSessionKey constant; keep the literal in sync if
-// either side changes it. portalAdminSessionKey is new here: organizerContext
-// sets it for any session that has visited the (documented, proxy-gated)
-// `/organizer` surface, and portalFile accepts it as an alternative to the
-// owning speaker's own binding.
-const (
-	portalSpeakerSessionKey = "portal_speaker"
-	portalAdminSessionKey   = "portal_admin"
-)
+// portalSpeakerSessionKey names the GoSX session value that binds a browser
+// session to one speaker ID, mirroring app/portal/page.server.go's private
+// portalSessionKey constant; keep the literal in sync if either side
+// changes it. There is no organizer counterpart to this key any more: an
+// organizer session is an auth.User with a role, resolved through
+// auth.Current(r), not a session flag any visitor to /organizer could earn
+// for free.
+const portalSpeakerSessionKey = "portal_speaker"
 
 func main() {
 	_, thisFile, _, _ := runtime.Caller(0)
@@ -61,7 +62,7 @@ func main() {
 	if strings.EqualFold(getenv("DEMO_MODE", "true"), "memory") {
 		dataPath = ":memory:"
 	}
-	workspace, err := store.Open(dataPath, domain.Seed(now))
+	workspace, err := store.Open(dataPath, selectSeed(getenv("SEED", "demo"), now))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -90,6 +91,37 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	// Identity plane (see specs/identity-plane.md): one auth.Manager over the
+	// session manager above, with magic-link, OAuth, and WebAuthn sign-in
+	// wired on top. mailConfigured tracks whether a real transport (not the
+	// demo outbox) is available, because the outbox has nowhere a
+	// self-hoster can read a link from — setup.go signs the browser in
+	// directly instead when it is false.
+	authManager := identity.New(sessions)
+	mailSender := mail.FromEnv()
+	mailConfigured := strings.TrimSpace(os.Getenv("SMTP_HOST")) != ""
+	magicLinks := authManager.MagicLinks(auth.MagicLinkOptions{
+		BaseURL:     publicBase,
+		SuccessPath: "/organizer",
+		FailurePath: "/login",
+		FlashKey:    identity.MagicLinkFlashKey,
+		Resolver:    auth.MagicLinkResolverFunc(identity.ResolveEmail),
+		Sender:      identity.MailSender{Sender: mailSender},
+		Store:       identity.DurableMagicLinkStore{},
+	})
+	oauthProviders := identity.Providers(publicBase)
+	oauthManager := authManager.OAuth(auth.OAuthOptions{
+		Providers:   oauthProviders,
+		SuccessPath: "/organizer",
+		FailurePath: "/login",
+	})
+	webAuthnManager := authManager.WebAuthn(auth.WebAuthnOptions{
+		RPName: "Rostrum",
+		Origin: publicBase,
+		Store:  identity.DurableWebAuthnStore{},
+	})
+	identity.SetSetup(identity.NewSetup(authManager, magicLinks, mailConfigured, publicBase))
 
 	router := route.NewRouter()
 	router.SetLayout(func(ctx *route.RouteContext, body gosx.Node) gosx.Node {
@@ -130,9 +162,10 @@ func main() {
 	// Runtime assets self-negotiate br/gzip in server.serveRuntimeFile, and
 	// dynamic HTML is compressed at the CDN edge. Restore this call once the
 	// framework Write path honors the skip.
-	app.Use(securityHeaders(publicBase, navigationScriptCSPHash()))
+	app.Use(securityHeaders(publicBase, navigationScriptCSPHash(), webAuthnScriptCSPHash()))
 	app.Use(sessions.Middleware)
-	app.Use(organizerContext())
+	app.Use(authManager.Middleware)
+	app.Use(organizerGate())
 	app.Use(bodyLimit())
 	app.Use(sessions.Protect)
 	app.SetPublicDir(filepath.Join(root, "public"))
@@ -164,6 +197,29 @@ func main() {
 	app.Mount("/organizer/export/submissions.csv", http.HandlerFunc(submissionsCSV))
 	app.Mount("/favicon.ico", http.RedirectHandler("/favicon.svg", http.StatusTemporaryRedirect))
 	app.Mount("/demo/reset", resetDemo(root))
+
+	// Identity plane routes. GET /auth/magic-link is the callback a clicked
+	// email link opens; POST /auth/magic-link is the sign-in form
+	// submission, rate-limited so the endpoint cannot be used to spam
+	// arbitrary addresses. Both pass session.Protect's CSRF check unbothered
+	// on the GET (Protect only guards POST/PUT/PATCH/DELETE) and via the
+	// hidden csrf_token field on the POST.
+	app.Mount("GET /auth/magic-link", magicLinks.CallbackHandler())
+	app.Mount("POST /auth/magic-link", magicLinkRequestGate(magicLinks.RequestHandler()))
+	for _, provider := range oauthProviders {
+		name := provider.Name
+		app.Mount("GET /auth/oauth/"+name, oauthManager.BeginHandler(name))
+		app.Mount("GET /auth/oauth/"+name+"/callback", oauthManager.CallbackHandler(name))
+	}
+	// Registration is a second factor of convenience: only an already
+	// signed-in user may register a passkey (authManager.Require blocks an
+	// anonymous POST with the framework's usual 401-JSON-or-redirect
+	// response). Login stays open to anyone -- it is how a not-yet-signed-in
+	// visitor authenticates in the first place.
+	app.Mount("POST /auth/webauthn/register-options", authManager.Require(webAuthnManager.RegisterOptionsHandler()))
+	app.Mount("POST /auth/webauthn/register", authManager.Require(webAuthnManager.RegisterHandler()))
+	app.Mount("POST /auth/webauthn/login-options", webAuthnManager.LoginOptionsHandler())
+	app.Mount("POST /auth/webauthn/login", webAuthnManager.LoginHandler())
 
 	rootHandler, err := router.BuildChecked()
 	if err != nil {
@@ -268,12 +324,17 @@ func refreshBindings(events ...string) []hydrate.HubBinding {
 	return bindings
 }
 
-func securityHeaders(publicBase, navigationHash string) server.Middleware {
+func securityHeaders(publicBase string, scriptHashes ...string) server.Middleware {
 	// GoSX islands execute the framework's compiled WebAssembly VM. Authorize
 	// WebAssembly compilation without opening generic eval or inline scripts.
+	// scriptHashes carries the navigation runtime and the WebAuthn runtime
+	// (see webAuthnScriptCSPHash): both are framework-owned inline scripts,
+	// authorized by exact content hash, never by a blanket 'unsafe-inline'.
 	scriptPolicy := "script-src 'self' 'wasm-unsafe-eval'"
-	if navigationHash != "" {
-		scriptPolicy += " " + navigationHash
+	for _, hash := range scriptHashes {
+		if hash != "" {
+			scriptPolicy += " " + hash
+		}
 	}
 	base := "default-src 'self'; base-uri 'self'; object-src 'none'; " + scriptPolicy + "; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' ws: wss:; frame-src 'self' https://www.youtube-nocookie.com https://player.vimeo.com; form-action 'self'"
 	secure := strings.HasPrefix(publicBase, "https://")
@@ -336,23 +397,97 @@ func bodyLimit() server.Middleware {
 	}
 }
 
-// organizerContext binds a visiting session to the organizer surface. The
-// `/organizer` prefix carries no application-level identity of its own —
-// docs/deployment.md documents that a production deployment must gate it at
-// the reverse proxy — so this middleware is the honest reflection of that
-// boundary: whoever the proxy already let reach `/organizer` is trusted as
-// an organizer for the rest of that session, including file downloads
-// through portalFile.
-func organizerContext() server.Middleware {
+// organizerGate requires an organizer, chair, or observer session on every
+// `/organizer` path (identity-plane spec AU-5). Anonymous or
+// under-privileged visitors get RequireAnyRole's usual response: a JSON
+// request gets 401, everything else redirects to /login with the original
+// path preserved. This replaces the deleted organizerContext, which trusted
+// whoever a reverse proxy already let reach `/organizer` -- the leak this
+// gate closes.
+//
+// /organizer/export/submissions.csv is deliberately excluded: it enforces
+// its own tighter, non-redirecting 403 in submissionsCSV (organizer and
+// chair only, never observer, because the export carries speaker PII), and
+// an API-shaped export must never answer a cookie-less request with a
+// browser redirect.
+//
+// GOSX_STATIC_EXPORT=1 disables the gate entirely. `gosx build --prod`
+// (cmd/gosx/prerender.go) launches this exact binary as a short-lived,
+// loopback-only subprocess to render every discovered route once and
+// measure its client bundle capabilities for cmd/sizecheck; a real
+// deployment never sets this variable. Gating /organizer during that pass
+// would export the /login shell's capabilities instead of the organizer
+// dashboard's, and cmd/sizecheck would flag every organizer route as
+// missing its islands and controllers.
+func organizerGate() server.Middleware {
+	if strings.TrimSpace(os.Getenv("GOSX_STATIC_EXPORT")) == "1" {
+		return func(next http.Handler) http.Handler { return next }
+	}
+	gate := identity.RequireAnyRole(identity.RoleOrganizer, identity.RoleChair, identity.RoleObserver)
 	return func(next http.Handler) http.Handler {
+		guarded := gate(next)
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			path := strings.TrimSuffix(r.URL.Path, "/")
-			if path == "/organizer" || strings.HasPrefix(path, "/organizer/") {
-				session.Current(r).Set(portalAdminSessionKey, "1")
+			if isOrganizerGatedPath(r.URL.Path) {
+				guarded.ServeHTTP(w, r)
+				return
 			}
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+func isOrganizerGatedPath(path string) bool {
+	trimmed := strings.TrimSuffix(path, "/")
+	if trimmed == "/organizer/export/submissions.csv" {
+		return false
+	}
+	return trimmed == "/organizer" || strings.HasPrefix(trimmed, "/organizer/")
+}
+
+// isOrganizerSession reports whether the request carries a session with any
+// organizer-facing role (organizer, chair, or observer) -- the replacement
+// for the deleted portalAdminSessionKey flag portalFile and
+// calendarDownload used to check.
+func isOrganizerSession(r *http.Request) bool {
+	user, ok := auth.Current(r)
+	if !ok {
+		return false
+	}
+	for _, role := range user.Roles {
+		switch role {
+		case identity.RoleOrganizer, identity.RoleChair, identity.RoleObserver:
+			return true
+		}
+	}
+	return false
+}
+
+// magicLinkIPLimiter and magicLinkSessionLimiter throttle POST
+// /auth/magic-link (SE-3b style): a rolling cap per client IP address so
+// one address cannot keep requesting links, and a lifetime cap per session
+// so one browser cannot either. Both use internal/ratelimit, the same
+// package the public submission and review flows already rely on.
+var (
+	magicLinkIPLimiter      = ratelimit.NewTokenBucket(10, time.Hour)
+	magicLinkSessionLimiter = ratelimit.NewCounter(20)
+)
+
+// magicLinkRequestGate wraps auth.MagicLinks.RequestHandler() with the rate
+// limiters above. It runs before the handler ever calls the resolver, so a
+// caller past their cap costs one map lookup, never a store write or an
+// outbound email.
+func magicLinkRequestGate(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if ip := ratelimit.ClientIP(r); ip != "" && !magicLinkIPLimiter.Allow(ip) {
+			http.Error(w, "Too many sign-in requests. Try again in a little while.", http.StatusTooManyRequests)
+			return
+		}
+		if key := ratelimit.RequestIdentity(r); key != "" && !magicLinkSessionLimiter.Allow(key) {
+			http.Error(w, "Too many sign-in requests. Try again in a little while.", http.StatusTooManyRequests)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func navigationScriptCSPHash() string {
@@ -366,22 +501,66 @@ func navigationScriptCSPHash() string {
 	return "'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) + "'"
 }
 
+// webAuthnScriptCSPHash hashes auth.WebAuthnScript() the same way
+// navigationScriptCSPHash hashes the navigation runtime: both are inline
+// <script> tags GoSX itself owns, so the CSP authorizes them by exact
+// content hash instead of a blanket 'unsafe-inline'.
+func webAuthnScriptCSPHash() string {
+	rendered := gosx.RenderHTML(auth.WebAuthnScript())
+	start := strings.Index(rendered, ">")
+	end := strings.LastIndex(rendered, "</script>")
+	if start < 0 || end <= start {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(rendered[start+1 : end]))
+	return "'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) + "'"
+}
+
+// selectSeed picks the initial workspace state from the SEED environment
+// variable: "demo" (the default) seeds the full polished demo dataset,
+// "fresh" seeds one placeholder event and one open call for proposals with
+// nothing else, and "empty" seeds only the event skeleton with no call for
+// proposals at all. An unrecognized value falls back to "demo".
+func selectSeed(mode string, now time.Time) domain.State {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "fresh":
+		return domain.FreshState(now)
+	case "empty":
+		return domain.EmptyState(now)
+	default:
+		return domain.Seed(now)
+	}
+}
+
+// canExportSubmissions reports whether the request carries an organizer or
+// chair session. Observers reach the rest of /organizer but never this
+// export: it carries speaker PII the read-only role must not receive.
+func canExportSubmissions(r *http.Request) bool {
+	user, ok := auth.Current(r)
+	if !ok {
+		return false
+	}
+	for _, role := range user.Roles {
+		if role == identity.RoleOrganizer || role == identity.RoleChair {
+			return true
+		}
+	}
+	return false
+}
+
 // submissionsCSV serves GET /organizer/export/submissions.csv.
 //
-// Authorization (SE-5b): the route sits under /organizer/, so
-// organizerContext has already bound portalAdminSessionKey for any request
-// that reaches it through the live router -- the same documented
-// proxy-boundary model portalFile uses for downloads. This check enforces
-// that boundary explicitly rather than relying only on the route's mount
-// path, so the export never silently starts serving data if the mount ever
-// moves outside /organizer/ or the handler is invoked directly. An
-// unauthenticated request gets 403, never a row of data.
+// Authorization (SE-5b): this handler enforces its own role check rather
+// than relying on organizerGate, which excludes this exact path (see
+// isOrganizerGatedPath) so an API-shaped export answers a cookie-less
+// request with 403, never a browser redirect. An unauthenticated or
+// under-privileged request gets 403, never a row of data.
 func submissionsCSV(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if session.Current(r).String(portalAdminSessionKey) != "1" {
+	if !canExportSubmissions(r) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
@@ -418,12 +597,12 @@ func submissionsCSV(w http.ResponseWriter, r *http.Request) {
 //
 // Authorization (SE-6): a visitor must be one of three things -- the
 // speaker's own bound portal session (portalSpeakerSessionKey, set by
-// app/portal/page.server.go's loadPortal), an organizer session
-// (portalAdminSessionKey, set by organizerContext), or the holder of a
-// signed portal token for this speaker, presented as ?key=<token> the way
-// an emailed calendar-subscribe link does (internal/token, reused from
-// PT-2). Any other request -- an unkeyed fetch from a stranger -- gets the
-// same friendly not-found response as an unknown speaker ID, never a file.
+// app/portal/page.server.go's loadPortal), an organizer-facing session
+// (isOrganizerSession), or the holder of a signed portal token for this
+// speaker, presented as ?key=<token> the way an emailed calendar-subscribe
+// link does (internal/token, reused from PT-2). Any other request -- an
+// unkeyed fetch from a stranger -- gets the same friendly not-found
+// response as an unknown speaker ID, never a file.
 func calendarDownload(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -432,7 +611,7 @@ func calendarDownload(w http.ResponseWriter, r *http.Request) {
 	speakerID := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/calendar/"), ".ics")
 
 	visitor := session.Current(r)
-	isOrganizer := visitor.String(portalAdminSessionKey) == "1"
+	isOrganizer := isOrganizerSession(r)
 	isBoundSpeaker := speakerID != "" && visitor.String(portalSpeakerSessionKey) == speakerID
 	isKeyed := false
 	if key := strings.TrimSpace(r.URL.Query().Get("key")); key != "" {
@@ -630,9 +809,9 @@ func sanitizeDownloadFilename(name string) string {
 //
 // Authorization: the requester must either be the speaker who owns the
 // completion (the portalSpeakerSessionKey session binding PT-2 sets in
-// app/portal/page.server.go) or an organizer (portalAdminSessionKey, set by
-// organizerContext above for any session that has reached `/organizer`).
-// A missing completion and an unauthorized one both render the same 404 —
+// app/portal/page.server.go) or carry an organizer-facing session
+// (isOrganizerSession). A missing completion and an unauthorized one both
+// render the same 404 —
 // no different status distinguishes "no such file" from "not yours" — so a
 // stranger cannot use the response to enumerate valid completion IDs
 // (mirrors loadPortal's identical treatment of unknown-speaker vs.
@@ -665,7 +844,7 @@ func portalFile(root string) http.HandlerFunc {
 
 		visitor := session.Current(r)
 		isOwner := completion.SpeakerID != "" && visitor.String(portalSpeakerSessionKey) == completion.SpeakerID
-		isOrganizer := visitor.String(portalAdminSessionKey) == "1"
+		isOrganizer := isOrganizerSession(r)
 		if !isOwner && !isOrganizer {
 			http.NotFound(w, r)
 			return

@@ -27,6 +27,9 @@ type State struct {
 	Communications  []Communication  `json:"communications"`
 	Integrations    []Integration    `json:"integrations"`
 	SyncRuns        []SyncRun        `json:"syncRuns"`
+	Principals      []Principal      `json:"principals"`
+	AuthMagicLinks  []AuthMagicLink  `json:"authMagicLinks"`
+	AuthPasskeys    []AuthPasskey    `json:"authPasskeys"`
 	UpdatedAt       time.Time        `json:"updatedAt"`
 }
 
@@ -675,4 +678,47 @@ func firstRune(value string) string {
 		return string(character)
 	}
 	return ""
+}
+
+// Principal is one identity the organizer identity plane recognizes: an
+// email address, the roles it carries, and when it first and last signed in.
+// internal/identity grants RoleOrganizer to a Principal either through the
+// ORGANIZER_EMAILS allowlist or through the break-glass setup flow; a
+// magic-link or OAuth sign-in then upserts this record so the granted role
+// survives a restart.
+type Principal struct {
+	ID         string    `json:"id"`
+	Email      string    `json:"email"`
+	Name       string    `json:"name"`
+	Roles      []string  `json:"roles"`
+	CreatedAt  time.Time `json:"createdAt"`
+	LastSeenAt time.Time `json:"lastSeenAt"`
+}
+
+// AuthMagicLink is one issued, not-yet-consumed magic-link sign-in token.
+// Token holds the SHA-256 hex digest of the token, never the token itself,
+// so a leaked backup or log line never hands out a working sign-in link.
+// UserJSON carries the auth.User the token signs in on consumption, encoded
+// as JSON so this package does not import the auth package.
+type AuthMagicLink struct {
+	Token     string    `json:"token"`
+	Email     string    `json:"email"`
+	UserJSON  string    `json:"userJson"`
+	Next      string    `json:"next,omitempty"`
+	ExpiresAt time.Time `json:"expiresAt"`
+}
+
+// AuthPasskey is one registered WebAuthn credential. PublicKey and the
+// signature counter are exactly what the WebAuthn ceremony needs to verify
+// the next assertion; UserJSON carries the auth.User the credential signs
+// in, encoded as JSON for the same reason AuthMagicLink.UserJSON is.
+type AuthPasskey struct {
+	ID         string    `json:"id"`
+	UserJSON   string    `json:"userJson"`
+	PublicKey  []byte    `json:"publicKey"`
+	Algorithm  int       `json:"algorithm"`
+	SignCount  uint32    `json:"signCount"`
+	Transports []string  `json:"transports,omitempty"`
+	CreatedAt  time.Time `json:"createdAt"`
+	LastUsedAt time.Time `json:"lastUsedAt"`
 }

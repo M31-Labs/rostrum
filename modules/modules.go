@@ -3,6 +3,7 @@ package modules
 
 import (
 	_ "github.com/m31-labs/rostrum/app"
+	_ "github.com/m31-labs/rostrum/app/login"
 	_ "github.com/m31-labs/rostrum/app/organizer"
 	_ "github.com/m31-labs/rostrum/app/organizer/agenda"
 	_ "github.com/m31-labs/rostrum/app/organizer/communications"
@@ -17,5 +18,6 @@ import (
 	_ "github.com/m31-labs/rostrum/app/portal"
 	_ "github.com/m31-labs/rostrum/app/public"
 	_ "github.com/m31-labs/rostrum/app/review"
+	_ "github.com/m31-labs/rostrum/app/setup"
 	_ "github.com/m31-labs/rostrum/app/submit"
 )

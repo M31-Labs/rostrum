@@ -53,26 +53,77 @@ works; every other route sends `frame-ancestors 'none'`. Do not add a
 blanket `X-Frame-Options` header. If your proxy replaces the application
 CSP (Content Security Policy), keep the policy route-aware.
 
-## Access boundary
+## Identity and access
 
-The application enforces identity on most private routes itself:
+Rostrum enforces organizer identity itself; it needs no identity-aware
+proxy in front of `/organizer`. Sign-in happens at `/login`, which offers
+every configured method: an emailed magic link, GitHub, Google, and a
+registered passkey.
 
+- `/organizer/*` requires a session carrying the `organizer`, `chair`, or
+  `observer` role. An anonymous visitor is redirected to
+  `/login?next=<path>`; a JSON request gets 401.
+- `/organizer/export/submissions.csv` requires `organizer` or `chair`
+  specifically. `observer` reaches the rest of `/organizer` but never this
+  export, because it carries speaker PII (personally identifiable
+  information). A cookie-less request gets 403, never a redirect.
 - `/portal/*`, `/calendar/*`, and `/portal-file/*` require a signed speaker
   link or a bound session.
-- `/review/{token}` requires a signed reviewer link on every request.
-- `/organizer/export/submissions.csv` returns 403 without an organizer
-  session.
+- `/review/{token}` requires a signed reviewer link on every request (this
+  compatibility window is documented in
+  `hypha://m31labs/programma/specs/identity-plane.md`).
 
-The organizer workspace is the exception: `/organizer/*` carries no
-application login in this release. Gate it at an identity-aware proxy.
-Whoever the proxy admits to `/organizer` is trusted as an organizer for the
-rest of that session. Cloudflare Tunnel plus Access is one suitable
-topology; Rostrum does not depend on Cloudflare.
+### Organizer allowlist
 
-Keep these routes reachable by the public: `/`, `/submit/*`, `/public/*`,
-`/api/health`, `/api/v1/*`, `/portal/*`, and `/review/*`. The last two must
-stay reachable because speakers and reviewers open their signed links from
-an inbox.
+Set `ORGANIZER_EMAILS` to a comma-separated list of addresses. A magic-link
+or OAuth (Open Authorization) sign-in from one of these addresses is
+granted the organizer role and recorded as a workspace Principal, so the
+grant survives a restart even if you later change the allowlist.
+
+### Break-glass bootstrap
+
+A fresh self-host with `ORGANIZER_EMAILS` empty and no stored organizer logs
+a one-time setup URL at startup:
+
+```
+Rostrum has no organizer yet. Finish setup at: https://program.example.com/setup?token=...
+```
+
+Open that URL, enter your email and name, and Rostrum creates the first
+organizer Principal. The token is single-use and process-wide: a restart
+with an existing organizer never re-arms it, and `/setup` returns 404 once
+the token is spent. Prefer `ORGANIZER_EMAILS` for a deployment you can
+configure before first boot; break-glass covers the one you cannot.
+
+### OAuth providers
+
+Set both variables in a pair to show that provider's button on `/login`.
+Each provider's redirect URL derives from `PUBLIC_URL`:
+
+- GitHub: `AUTH_GITHUB_CLIENT_ID`, `AUTH_GITHUB_CLIENT_SECRET`. Redirect URL
+  `{PUBLIC_URL}/auth/oauth/github/callback`.
+- Google: `AUTH_GOOGLE_CLIENT_ID`, `AUTH_GOOGLE_CLIENT_SECRET`. Redirect URL
+  `{PUBLIC_URL}/auth/oauth/google/callback`.
+
+### Passkeys
+
+Passkey sign-in (`/auth/webauthn/*`) needs no configuration beyond
+`PUBLIC_URL`: it is the WebAuthn (Web Authentication) origin the browser's
+passkey ceremony verifies against. Register a passkey from a signed-in
+organizer session.
+
+### Storage note for the identity plane
+
+Issued magic-link tokens and registered passkeys persist in the same JSON
+workspace file as everything else, so they follow the single-replica rule
+below: run exactly one application replica. A future multi-instance
+deployment needs a shared store behind the same `MagicLinkStore` and
+`WebAuthnStore` interfaces.
+
+Keep these routes reachable by the public: `/`, `/login`, `/submit/*`,
+`/public/*`, `/api/health`, `/api/v1/*`, `/portal/*`, and `/review/*`. The
+last two must stay reachable because speakers and reviewers open their
+signed links from an inbox.
 
 `POST /demo/reset` restores the seeded workspace. Set `RESET_SECRET` to
 require a matching secret. In production with no secret set, reset is
