@@ -303,6 +303,65 @@ func (state *State) AddSessionForSubmission(submissionID string) (created bool) 
 	return true
 }
 
+// AssignAcceptedOnlyTasks appends each speaker in speakerIDs to every Task
+// in state.Tasks marked AcceptedOnly, skipping a speaker already listed on
+// that task. This is the accept-time counterpart to the task_profile
+// assignment submitProposal already does at submit time
+// (app/submit/page.server.go). It is idempotent: calling it twice with the
+// same speakerIDs assigns nothing the second time. It reports how many
+// (task, speaker) assignments it added.
+func (state *State) AssignAcceptedOnlyTasks(speakerIDs []string) (assigned int) {
+	for index := range state.Tasks {
+		task := &state.Tasks[index]
+		if !task.AcceptedOnly {
+			continue
+		}
+		for _, speakerID := range speakerIDs {
+			if speakerID == "" || contains(task.AssignedSpeakerIDs, speakerID) {
+				continue
+			}
+			task.AssignedSpeakerIDs = append(task.AssignedSpeakerIDs, speakerID)
+			assigned++
+		}
+	}
+	return assigned
+}
+
+// QueueAcceptanceCommunication appends one queued Communication per speaker
+// in speakerIDs, addressed to sessionID and using the AcceptanceTemplateID
+// template. It is idempotent per (speakerID, sessionID) pair: if a
+// Communication already exists on that template for the pair, it is
+// skipped, so accepting the same submission twice never double-queues the
+// acceptance message. It reports how many rows it appended.
+func (state *State) QueueAcceptanceCommunication(sessionID string, speakerIDs []string) (queued int) {
+	for _, speakerID := range speakerIDs {
+		if speakerID == "" {
+			continue
+		}
+		already := false
+		for _, existing := range state.Communications {
+			if existing.TemplateID == AcceptanceTemplateID && existing.SpeakerID == speakerID && existing.SessionID == sessionID {
+				already = true
+				break
+			}
+		}
+		if already {
+			continue
+		}
+		state.Communications = append(state.Communications, Communication{
+			ID:         NewID("comm"),
+			TemplateID: AcceptanceTemplateID,
+			SpeakerID:  speakerID,
+			SessionID:  sessionID,
+			Subject:    "You're joining " + state.Event.Name,
+			Status:     "queued",
+			Provider:   "demo-outbox",
+		})
+		queued++
+	}
+	return queued
+}
+
 type Task struct {
 	ID                 string      `json:"id"`
 	Title              string      `json:"title"`
@@ -370,6 +429,12 @@ type Communication struct {
 	Error        string    `json:"error"`
 }
 
+// AcceptanceTemplateID names the seeded EmailTemplate ("tpl_acceptance",
+// internal/domain/seed.go) that QueueAcceptanceCommunication and the
+// accept-time transition in app/organizer/submissions/page.server.go send
+// an accepted speaker.
+const AcceptanceTemplateID = "tpl_acceptance"
+
 type Integration struct {
 	ID            string    `json:"id"`
 	Kind          string    `json:"kind"`
@@ -423,6 +488,18 @@ func (state *State) Submission(id string) (*Submission, bool) {
 func (state *State) Session(id string) (*Session, bool) {
 	for index := range state.Sessions {
 		if state.Sessions[index].ID == id {
+			return &state.Sessions[index], true
+		}
+	}
+	return nil, false
+}
+
+// SessionBySubmission finds the Session linked to submissionID, the same
+// link AddSessionForSubmission establishes at accept time. It returns false
+// when the submission has no session yet.
+func (state *State) SessionBySubmission(submissionID string) (*Session, bool) {
+	for index := range state.Sessions {
+		if state.Sessions[index].SubmissionID == submissionID {
 			return &state.Sessions[index], true
 		}
 	}

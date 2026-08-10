@@ -64,6 +64,7 @@ func PublicSpeakers(state domain.State, slug string, embedded bool) (map[string]
 			active[id] = struct{}{}
 		}
 	}
+	headshot := findHeadshotTask(state)
 	speakers := make([]map[string]any, 0, len(active))
 	for _, speaker := range state.Speakers {
 		if _, found := active[speaker.ID]; !found {
@@ -75,17 +76,20 @@ func PublicSpeakers(state domain.State, slug string, embedded bool) (map[string]
 				talks = append(talks, map[string]string{"title": item.Title, "time": TimeRange(item.StartsAt, item.EndsAt), "room": RoomName(state, item.RoomID)})
 			}
 		}
+		headshotURL := publicHeadshotURL(state, headshot, speaker.ID)
 		speakers = append(speakers, map[string]any{
-			"id":        speaker.ID,
-			"name":      speaker.Name(),
-			"initials":  speaker.Initials(),
-			"role":      speaker.Role,
-			"company":   speaker.Company,
-			"biography": speaker.Biography,
-			"city":      speaker.City,
-			"website":   speaker.WebsiteURL,
-			"linkedin":  speaker.LinkedInURL,
-			"talks":     talks,
+			"id":          speaker.ID,
+			"name":        speaker.Name(),
+			"initials":    speaker.Initials(),
+			"role":        speaker.Role,
+			"company":     speaker.Company,
+			"biography":   speaker.Biography,
+			"city":        speaker.City,
+			"website":     speaker.WebsiteURL,
+			"linkedin":    speaker.LinkedInURL,
+			"talks":       talks,
+			"headshotURL": headshotURL,
+			"hasHeadshot": headshotURL != "",
 		})
 	}
 	sort.Slice(speakers, func(i, j int) bool { return speakers[i]["name"].(string) < speakers[j]["name"].(string) })
@@ -141,4 +145,59 @@ func initialSet(state domain.State, ids []string) string {
 		values = append(values, Initials(state, id))
 	}
 	return strings.Join(values, " · ")
+}
+
+// findHeadshotTask returns the event's headshot-upload task, or nil when no
+// task is assigned that role.
+func findHeadshotTask(state domain.State) *domain.Task {
+	for index := range state.Tasks {
+		if IsHeadshotTask(state.Tasks[index]) {
+			return &state.Tasks[index]
+		}
+	}
+	return nil
+}
+
+// IsHeadshotTask reports whether task is the speaker headshot-upload task.
+// "headshot" is the PT-4 task-create type; the seeded task_headshot
+// predates that vocabulary and still carries Type "file", so this also
+// matches its well-known ID until the seed is updated to Type "headshot"
+// (see the PT-3 unit report). Exported so app/organizer/portal's
+// approveTask (the headshot publish-on-approve step) shares one
+// definition with the gallery lookup here instead of drifting apart.
+func IsHeadshotTask(task domain.Task) bool {
+	return task.Type == "headshot" || task.ID == "task_headshot"
+}
+
+// publicHeadshotURL returns the unauthenticated gallery image path for
+// speakerID, or empty when the speaker has no approved headshot.
+//
+// The public gallery must not link the authenticated /portal-file/ route
+// (an anonymous visitor cannot open it), so this never reuses
+// Speaker.HeadshotURL. Instead it derives the path organizer approveTask
+// (app/organizer/portal/page.server.go) copies the approved upload bytes
+// to: public/headshots/<speakerID><ext>, served statically at
+// /headshots/<speakerID><ext>. Approval is the publication consent gate —
+// this returns empty for any completion that is not domain.TaskApproved —
+// and both sides derive the same extension from the completion's stored
+// FileName, so no filesystem probe is needed here.
+func publicHeadshotURL(state domain.State, headshotTask *domain.Task, speakerID string) string {
+	if headshotTask == nil {
+		return ""
+	}
+	item, found := completion(state, headshotTask.ID, speakerID)
+	if !found || item.Status != domain.TaskApproved || item.FileName == "" {
+		return ""
+	}
+	return "/headshots/" + speakerID + fileExtension(item.FileName)
+}
+
+// fileExtension returns the lowercased, dotted extension of name (for
+// example ".jpg"), defaulting to ".jpg" when name has none. Shared naming
+// convention with organizer approveTask's public headshot copy.
+func fileExtension(name string) string {
+	if dot := strings.LastIndex(name, "."); dot >= 0 {
+		return strings.ToLower(name[dot:])
+	}
+	return ".jpg"
 }

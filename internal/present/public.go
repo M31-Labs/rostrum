@@ -90,10 +90,17 @@ func submissionFormFieldRows(state domain.State, fields []domain.FormField, sect
 			inputType = "email"
 		}
 		rows = append(rows, map[string]any{
-			"id":          field.ID,
-			"label":       field.Label,
-			"type":        field.Type,
-			"inputType":   inputType,
+			"id":        field.ID,
+			"label":     field.Label,
+			"type":      field.Type,
+			"inputType": inputType,
+			// Concrete branch flags: a string comparison like
+			// props.field.type == "select" does not evaluate inside a child
+			// component whose prop is a map[string]any value, so the render
+			// path is decided here in Go and passed as plain bools.
+			"isTextarea":  field.Type == "textarea",
+			"isSelect":    field.Type == "select",
+			"isInput":     field.Type != "textarea" && field.Type != "select",
 			"required":    field.Required,
 			"placeholder": field.Placeholder,
 			"help":        field.Help,
@@ -137,6 +144,41 @@ func FormFieldOptionValues(state domain.State, field domain.FormField) []string 
 	return values
 }
 
+// taskFieldRows renders a task's declared FormFields as the rows the
+// portal's completeTask ActionForm draws (PT-3): select, checkbox, textarea,
+// and a plain text row for any other declared type. values carries the
+// speaker's most recent completion.Values for this task, so a resubmit
+// pre-fills every field with what was submitted before — that pre-fill is
+// how the card displays the submitted values back, matching a checked
+// checkbox, a selected option, or filled text to what completeTask stored.
+func taskFieldRows(fields []domain.FormField, values map[string]string) []map[string]any {
+	rows := make([]map[string]any, 0, len(fields))
+	for _, field := range fields {
+		value := values[field.ID]
+		options := make([]map[string]string, 0, len(field.Options))
+		for _, option := range field.Options {
+			options = append(options, map[string]string{"value": option, "label": option})
+		}
+		rows = append(rows, map[string]any{
+			"id":          field.ID,
+			"label":       field.Label,
+			"type":        field.Type,
+			"required":    field.Required,
+			"placeholder": field.Placeholder,
+			"help":        field.Help,
+			"options":     options,
+			"value":       value,
+			"checked":     value == "yes",
+			// isText marks the plain-text-input fallback row: any declared
+			// type other than checkbox, select, or textarea. Computed here,
+			// not as a long negated condition in the template, so the
+			// portal's TaskFieldRow component stays a simple type switch.
+			"isText": field.Type != "checkbox" && field.Type != "select" && field.Type != "textarea",
+		})
+	}
+	return rows
+}
+
 func SpeakerPortal(state domain.State, speakerID string, submitted bool) (map[string]any, error) {
 	speaker, found := state.Speaker(speakerID)
 	if !found {
@@ -174,6 +216,8 @@ func SpeakerPortal(state domain.State, speakerID string, submitted bool) (map[st
 			"hasFile":     fileName != "",
 			"fileURL":     fileURL,
 			"complete":    status == domain.TaskApproved || status == domain.TaskSubmitted,
+			"fields":      taskFieldRows(task.FormFields, completion.Values),
+			"hasFields":   len(task.FormFields) > 0,
 		})
 	}
 
@@ -250,6 +294,13 @@ func SpeakerPortal(state domain.State, speakerID string, submitted bool) (map[st
 			"city":      speaker.City,
 			"linkedIn":  speaker.LinkedInURL,
 			"website":   speaker.WebsiteURL,
+			// headshotURL is the authenticated /portal-file/ link a speaker's
+			// own session (and an organizer's portal_admin session) may open;
+			// it is empty until an upload sets Speaker.HeadshotURL (PT-3
+			// upload hook — see the unit report). hasHeadshot drives the
+			// template's initials fallback.
+			"headshotURL": speaker.HeadshotURL,
+			"hasHeadshot": speaker.HeadshotURL != "",
 		},
 		"readiness": map[string]any{
 			"complete": complete,

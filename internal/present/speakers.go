@@ -43,13 +43,20 @@ func Speakers(state domain.State, query string) map[string]any {
 			}
 		}
 		rows = append(rows, map[string]any{
-			"id":              speaker.ID,
-			"name":            speaker.Name(),
-			"initials":        speaker.Initials(),
-			"email":           speaker.Email,
-			"role":            speaker.Role,
-			"company":         speaker.Company,
-			"city":            speaker.City,
+			"id":       speaker.ID,
+			"name":     speaker.Name(),
+			"initials": speaker.Initials(),
+			"email":    speaker.Email,
+			"role":     speaker.Role,
+			"company":  speaker.Company,
+			"city":     speaker.City,
+			// headshotURL reuses the authenticated /portal-file/ link: an
+			// organizer's session already carries portal_admin (set on any
+			// visit to /organizer), so portalFile authorizes it the same as
+			// the owning speaker. hasHeadshot drives the initials fallback
+			// in the speaker card template.
+			"headshotURL":     speaker.HeadshotURL,
+			"hasHeadshot":     speaker.HeadshotURL != "",
 			"readiness":       readiness,
 			"readinessStyle":  fmt.Sprintf("%d%%", readiness),
 			"readinessLabel":  readinessLabel(readiness, len(tasks)),

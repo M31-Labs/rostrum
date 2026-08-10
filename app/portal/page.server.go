@@ -100,6 +100,22 @@ func updateProfile(ctx *action.Context) error {
 	if len(strings.TrimSpace(ctx.FormData["biography"])) < 40 {
 		return action.Validation("Add a little more detail to your biography.", map[string]string{"biography": "Use at least 40 characters."}, ctx.FormData)
 	}
+	// SE-4: reject any scheme other than http or https at write time, so a
+	// javascript: URL can never reach an href on this page or the public
+	// /api/v1/speakers JSON. A blank value stays allowed -- it clears the
+	// link -- but anything non-blank must be an absolute http(s) URL.
+	linkedin := strings.TrimSpace(ctx.FormData["linkedin"])
+	website := strings.TrimSpace(ctx.FormData["website"])
+	urlErrors := map[string]string{}
+	if !present.AllowedURL(linkedin) {
+		urlErrors["linkedin"] = "Use a link that starts with http:// or https://."
+	}
+	if !present.AllowedURL(website) {
+		urlErrors["website"] = "Use a link that starts with http:// or https://."
+	}
+	if len(urlErrors) > 0 {
+		return action.Validation("Use http:// or https:// links only.", urlErrors, ctx.FormData)
+	}
 	if err := appstate.MustGet().Update(func(state *domain.State) error {
 		speaker, found := state.Speaker(speakerID)
 		if !found {
@@ -110,8 +126,8 @@ func updateProfile(ctx *action.Context) error {
 		speaker.Company = strings.TrimSpace(ctx.FormData["company"])
 		speaker.Biography = strings.TrimSpace(ctx.FormData["biography"])
 		speaker.City = strings.TrimSpace(ctx.FormData["city"])
-		speaker.LinkedInURL = strings.TrimSpace(ctx.FormData["linkedin"])
-		speaker.WebsiteURL = strings.TrimSpace(ctx.FormData["website"])
+		speaker.LinkedInURL = linkedin
+		speaker.WebsiteURL = website
 		speaker.UpdatedAt = time.Now().UTC()
 		upsertCompletion(state, "task_profile", speakerID, domain.TaskSubmitted, nil)
 		return nil

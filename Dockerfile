@@ -1,14 +1,12 @@
-# The server binary is CGO-linked against glibc (gotreesitter, corkscrewdb),
-# so it needs a glibc base — musl Alpine lacks its ELF interpreter. Use a
-# slim Debian base and an explicit numeric UID so Kubernetes can verify the
-# container runs non-root.
-FROM debian:bookworm-slim
+# Rostrum builds to a pure-Go, statically-linked binary (Makefile sets
+# CGO_ENABLED=0) — gotreesitter exists precisely to avoid cgo, so there is no
+# libc dependency. A lean Alpine base is plenty (it would even run on scratch).
+# The explicit numeric UID lets Kubernetes verify the container runs non-root.
+FROM alpine:3.23
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates tzdata \
-    && rm -rf /var/lib/apt/lists/* \
-    && groupadd -r -g 10001 rostrum \
-    && useradd -r -u 10001 -g rostrum -s /usr/sbin/nologin rostrum
+RUN apk add --no-cache ca-certificates tzdata \
+    && addgroup -S -g 10001 rostrum \
+    && adduser -S -u 10001 -G rostrum rostrum
 
 WORKDIR /app
 COPY --chown=rostrum:rostrum dist/server/app ./rostrum

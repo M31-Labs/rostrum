@@ -20,7 +20,7 @@ check:
 
 build:
 	rm -rf -- dist
-	$(GOSX) build --prod .
+	CGO_ENABLED=0 $(GOSX) build --prod .
 	find dist/assets/runtime -type f -name '*.map' -delete
 	find dist/app -type f -name '*.go' -delete
 

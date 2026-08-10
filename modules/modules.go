@@ -16,5 +16,6 @@ import (
 	_ "github.com/m31-labs/rostrum/app/organizer/submissions"
 	_ "github.com/m31-labs/rostrum/app/portal"
 	_ "github.com/m31-labs/rostrum/app/public"
+	_ "github.com/m31-labs/rostrum/app/review"
 	_ "github.com/m31-labs/rostrum/app/submit"
 )

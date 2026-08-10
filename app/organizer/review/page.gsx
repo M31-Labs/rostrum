@@ -1,5 +1,7 @@
 package review
 
+import "github.com/m31-labs/rostrum/app/organizer/embeds"
+
 func ReviewPlanCard(props any) Node {
 	return <article class="review-plan-card">
 		<div class="summary-top">
@@ -209,6 +211,9 @@ func Page() Node {
 				</div>
 				<span>AI assists do not count toward coverage</span>
 			</header>
+			<p>
+				Scored here on behalf of the reviewer by program staff. A reviewer with a review link (below) can score their own proposals directly instead.
+			</p>
 			<ActionForm class="review-entry-form" actionName="saveReview">
 				<input type="hidden" name="csrf_token" value={csrf.token}></input>
 				<input type="hidden" name="plan_id" value={data.activePlan.id}></input>
@@ -310,6 +315,35 @@ func Page() Node {
 							{reviewer.completed}
 							done
 						</span>
+					</article>
+				</Each>
+			</div>
+		</section>
+		<section class="panel reviewer-panel">
+			<header class="panel-header">
+				<div>
+					<p class="panel-kicker">Reviewer sign-in</p>
+					<h2>Reviewer links</h2>
+				</div>
+				<span>No reviewer accounts needed</span>
+			</header>
+			<div class="reviewer-grid">
+				<Each of={data.reviewerLinks} as="reviewer">
+					<article class="reviewer-card">
+						<span class="avatar">{reviewer.initials}</span>
+						<div>
+							<strong>{reviewer.name}</strong>
+							<small>{reviewer.kind}</small>
+						</div>
+						<If cond={reviewer.canReview}>
+							<details class="embed-code-disclosure">
+								<summary>Copy review link</summary>
+								<embeds.EmbedClipboard code={reviewer.link}></embeds.EmbedClipboard>
+							</details>
+						</If>
+						<If cond={!reviewer.canReview}>
+							<span class="mono">No sign-in needed</span>
+						</If>
 					</article>
 				</Each>
 			</div>

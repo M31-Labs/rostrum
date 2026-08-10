@@ -156,6 +156,12 @@ func publishAgenda(ctx *action.Context) error {
 		}
 		now := time.Now().UTC()
 		for index := range state.Sessions {
+			// M5: only a scheduled session (non-zero start and end) goes
+			// public. An unscheduled bank session keeps its status, so it
+			// never leaks into the public schedule with a zero-value date.
+			if !state.Sessions[index].Scheduled() {
+				continue
+			}
 			state.Sessions[index].Status = "published"
 			state.Sessions[index].LastPublishedAt = now
 		}

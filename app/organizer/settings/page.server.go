@@ -54,6 +54,13 @@ func saveEvent(ctx *action.Context) error {
 	if domain.Slugify(ctx.FormData["slug"]) != ctx.FormData["slug"] {
 		fieldErrors["slug"] = "Use lowercase letters, numbers, and hyphens."
 	}
+	// SE-4: reject any scheme other than http or https at write time, so a
+	// javascript: URL saved here can never reach an href on the public event
+	// page. A blank value stays allowed -- it clears the link.
+	website := strings.TrimSpace(ctx.FormData["website"])
+	if !present.AllowedURL(website) {
+		fieldErrors["website"] = "Use a link that starts with http:// or https://."
+	}
 	if len(fieldErrors) > 0 {
 		return action.Validation("Correct the event settings.", fieldErrors, ctx.FormData)
 	}
@@ -64,7 +71,7 @@ func saveEvent(ctx *action.Context) error {
 		state.Event.Name = strings.TrimSpace(ctx.FormData["name"])
 		state.Event.Slug = strings.TrimSpace(ctx.FormData["slug"])
 		state.Event.Type = strings.TrimSpace(ctx.FormData["type"])
-		state.Event.WebsiteURL = strings.TrimSpace(ctx.FormData["website"])
+		state.Event.WebsiteURL = website
 		state.Event.Location = strings.TrimSpace(ctx.FormData["location"])
 		state.Event.TimeZone = strings.TrimSpace(ctx.FormData["timezone"])
 		state.Event.StartsAt = startsAt

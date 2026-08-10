@@ -8,7 +8,36 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/m31-labs/rostrum/internal/appstate"
+	"github.com/m31-labs/rostrum/internal/domain"
+	"github.com/m31-labs/rostrum/internal/store"
+	"github.com/m31-labs/rostrum/internal/token"
+	"m31labs.dev/gosx/session"
 )
+
+// TestMain seeds the package-wide appstate singleton once with an in-memory
+// workspace, the same way main() does, so the handler tests below (which
+// call appstate.MustGet() the same way the real handlers do) have state to
+// read and mutate.
+func TestMain(m *testing.M) {
+	workspace, err := store.Open(":memory:", domain.Seed(time.Now().UTC()))
+	if err != nil {
+		panic(err)
+	}
+	appstate.Set(workspace)
+	os.Exit(m.Run())
+}
+
+func testSessionManager(t *testing.T) *session.Manager {
+	t.Helper()
+	manager, err := session.New("test-session-secret-at-least-32-bytes-long", session.Options{AllowInsecure: true})
+	if err != nil {
+		t.Fatalf("session.New: %v", err)
+	}
+	return manager
+}
 
 func TestSecurityHeadersAuthorizeOnlyTheGoSXInlineRuntime(t *testing.T) {
 	hash := navigationScriptCSPHash()
@@ -38,6 +67,140 @@ func TestSecurityHeadersAuthorizeOnlyTheGoSXInlineRuntime(t *testing.T) {
 	if strings.Contains(policy, "'unsafe-eval'") {
 		t.Fatalf("CSP should authorize only WebAssembly compilation, not generic eval: %s", policy)
 	}
+}
+
+func TestFrameAncestorsScopedToPublicRoutes(t *testing.T) {
+	hash := navigationScriptCSPHash()
+	handler := securityHeaders("https://rostrum.example", hash)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	cases := []struct {
+		path string
+		want string
+	}{
+		{"/public/summit/agenda", "frame-ancestors *"},
+		{"/organizer", "frame-ancestors 'none'"},
+		{"/organizer/settings", "frame-ancestors 'none'"},
+		{"/portal/spk_maya", "frame-ancestors 'none'"},
+		{"/", "frame-ancestors 'none'"},
+	}
+	for _, test := range cases {
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, test.path, nil))
+		policy := recorder.Header().Get("Content-Security-Policy")
+		if !strings.Contains(policy, test.want) {
+			t.Errorf("path %s: CSP = %q, want to contain %q", test.path, policy, test.want)
+		}
+	}
+}
+
+func TestSubmissionsCSVRequiresOrganizerSessionAndEscapesFormulas(t *testing.T) {
+	manager := testSessionManager(t)
+
+	var submissionID string
+	if err := appstate.MustGet().Update(func(state *domain.State) error {
+		now := time.Now().UTC()
+		submissionID = domain.NewID("sub")
+		state.Submissions = append(state.Submissions, domain.Submission{
+			ID:          submissionID,
+			EventID:     state.Event.ID,
+			Title:       `=HYPERLINK("https://evil.example")`,
+			Status:      domain.SubmissionPending,
+			SubmittedAt: now,
+			UpdatedAt:   now,
+		})
+		return nil
+	}); err != nil {
+		t.Fatalf("seed submission: %v", err)
+	}
+
+	// SE-5b: a request that never passed through organizerContext must be
+	// refused, not served a row of data.
+	unauth := httptest.NewRequest(http.MethodGet, "/organizer/export/submissions.csv", nil)
+	unauthRecorder := httptest.NewRecorder()
+	manager.Middleware(http.HandlerFunc(submissionsCSV)).ServeHTTP(unauthRecorder, unauth)
+	if unauthRecorder.Code != http.StatusForbidden {
+		t.Fatalf("unauthenticated export status = %d, want 403", unauthRecorder.Code)
+	}
+	if strings.Contains(unauthRecorder.Body.String(), submissionID) {
+		t.Fatal("unauthenticated export leaked submission data")
+	}
+
+	// An organizer session (the same binding organizerContext sets for any
+	// /organizer/ visit) may fetch the export, and a formula-looking title
+	// exports neutralized (SE-5).
+	authed := httptest.NewRequest(http.MethodGet, "/organizer/export/submissions.csv", nil)
+	authedRecorder := httptest.NewRecorder()
+	manager.Middleware(organizerContext()(http.HandlerFunc(submissionsCSV))).ServeHTTP(authedRecorder, authed)
+	if authedRecorder.Code != http.StatusOK {
+		t.Fatalf("authorized export status = %d, want 200", authedRecorder.Code)
+	}
+	body := authedRecorder.Body.String()
+	if !strings.Contains(body, `'=HYPERLINK`) {
+		t.Fatalf("export did not neutralize a formula-looking title: %s", body)
+	}
+}
+
+func TestCalendarDownloadRequiresKeyOrSession(t *testing.T) {
+	manager := testSessionManager(t)
+
+	snapshot := appstate.MustGet().Snapshot()
+	if len(snapshot.Speakers) == 0 {
+		t.Fatal("seed has no speakers to exercise the calendar gate")
+	}
+	speakerID := snapshot.Speakers[0].ID
+
+	// SE-6: an unkeyed, unauthenticated fetch gets the friendly not-found,
+	// never a calendar file.
+	unauth := httptest.NewRequest(http.MethodGet, "/calendar/"+speakerID+".ics", nil)
+	unauthRecorder := httptest.NewRecorder()
+	manager.Middleware(http.HandlerFunc(calendarDownload)).ServeHTTP(unauthRecorder, unauth)
+	if unauthRecorder.Code != http.StatusNotFound {
+		t.Fatalf("unkeyed calendar fetch status = %d, want 404", unauthRecorder.Code)
+	}
+
+	// A valid signed portal token for this speaker (the emailed
+	// subscribe-link flow) unlocks the same route.
+	signed := token.New().Sign(speakerID)
+	keyed := httptest.NewRequest(http.MethodGet, "/calendar/"+speakerID+".ics?key="+signed, nil)
+	keyedRecorder := httptest.NewRecorder()
+	manager.Middleware(http.HandlerFunc(calendarDownload)).ServeHTTP(keyedRecorder, keyed)
+	if keyedRecorder.Code != http.StatusOK {
+		t.Fatalf("keyed calendar fetch status = %d, want 200", keyedRecorder.Code)
+	}
+
+	// A token signed for a different speaker must not unlock this one.
+	otherKeyed := httptest.NewRequest(http.MethodGet, "/calendar/"+speakerID+".ics?key="+token.New().Sign("spk_someone_else"), nil)
+	otherRecorder := httptest.NewRecorder()
+	manager.Middleware(http.HandlerFunc(calendarDownload)).ServeHTTP(otherRecorder, otherKeyed)
+	if otherRecorder.Code != http.StatusNotFound {
+		t.Fatalf("mismatched-speaker key status = %d, want 404", otherRecorder.Code)
+	}
+}
+
+func TestClearUploadsRemovesFilesButKeepsDirectory(t *testing.T) {
+	root := t.TempDir()
+	uploadDir := filepath.Join(root, "data", "uploads")
+	if err := os.MkdirAll(uploadDir, 0o750); err != nil {
+		t.Fatalf("prepare upload dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(uploadDir, "upload_abc.pdf"), []byte("content"), 0o600); err != nil {
+		t.Fatalf("seed upload file: %v", err)
+	}
+
+	clearUploads(root)
+
+	entries, err := os.ReadDir(uploadDir)
+	if err != nil {
+		t.Fatalf("read upload dir after clear: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("uploads directory still has %d entries after clearUploads", len(entries))
+	}
+
+	// A missing uploads directory (a fresh workspace) must not be an error.
+	clearUploads(filepath.Join(root, "never-created"))
 }
 
 func TestBrowserBehaviorHasNoBespokeJavaScript(t *testing.T) {

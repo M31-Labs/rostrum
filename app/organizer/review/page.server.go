@@ -3,6 +3,7 @@ package review
 import (
 	"fmt"
 	"log"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/m31-labs/rostrum/internal/live"
 	"github.com/m31-labs/rostrum/internal/present"
 	"github.com/m31-labs/rostrum/internal/reviewassist"
+	"github.com/m31-labs/rostrum/internal/token"
 	"m31labs.dev/gosx/action"
 	"m31labs.dev/gosx/route"
 	"m31labs.dev/gosx/server"
@@ -22,7 +24,10 @@ import (
 func init() {
 	if err := route.RegisterFileModuleHere(route.FileModuleOptions{
 		Load: func(ctx *route.RouteContext, page route.FilePage) (any, error) {
-			return present.Review(appstate.MustGet().Snapshot()), nil
+			snapshot := appstate.MustGet().Snapshot()
+			data := present.Review(snapshot)
+			data["reviewerLinks"] = reviewerLinkRows(snapshot)
+			return data, nil
 		},
 		Metadata: func(ctx *route.RouteContext, page route.FilePage, data any) (server.Metadata, error) {
 			return server.Metadata{Title: server.Title{Default: "Review — Rostrum"}, Description: "Multi-round rubric review with attributable AI assistance."}, nil
@@ -31,6 +36,68 @@ func init() {
 	}); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// reviewerLinkRows builds the RV-2 "Copy review link" list: one row per
+// reviewer, carrying a signed /review/{token} URL for a human reviewer, or
+// none for the virtual practitioner (an AI reviewer never signs in). The
+// token itself comes from internal/token's reviewer-kind signer
+// (token.NewReviewer, internal/token/reviewer.go) — a distinct key from the
+// speaker/portal token, so this link can never double as a portal link.
+func reviewerLinkRows(state domain.State) []map[string]any {
+	rows := make([]map[string]any, 0, len(state.Reviewers))
+	for _, reviewer := range state.Reviewers {
+		canReview := reviewer.Kind == "human"
+		link := ""
+		if canReview {
+			link = reviewerLinkURL(reviewer.ID)
+		}
+		rows = append(rows, map[string]any{
+			"id":        reviewer.ID,
+			"name":      reviewer.Name,
+			"initials":  reviewerLinkInitials(reviewer.Name),
+			"kind":      present.StatusLabel(reviewer.Kind),
+			"canReview": canReview,
+			"link":      link,
+		})
+	}
+	return rows
+}
+
+// reviewerLinkInitials mirrors present's unexported nameInitials
+// (internal/present/review.go), duplicated here in ~8 lines because that
+// helper is unexported and this package does not own internal/present.
+func reviewerLinkInitials(name string) string {
+	parts := strings.Fields(name)
+	if len(parts) == 0 {
+		return "—"
+	}
+	result := string([]rune(parts[0])[0])
+	if len(parts) > 1 {
+		result += string([]rune(parts[len(parts)-1])[0])
+	}
+	return strings.ToUpper(result)
+}
+
+// reviewerLinkURL builds the absolute /review/{token} URL an organizer's
+// "Copy review link" button copies, so the copied text is ready to paste
+// into an email or chat message with no domain to fill in by hand.
+func reviewerLinkURL(reviewerID string) string {
+	return publicBaseURL() + "/review/" + token.NewReviewer().SignReviewer(reviewerID)
+}
+
+// publicBaseURL mirrors app/submit/page.server.go's helper of the same
+// name: the absolute base a reviewer link must use, because it is followed
+// from an inbox or chat client outside the browser session that copied it.
+func publicBaseURL() string {
+	if base := strings.TrimSpace(os.Getenv("PUBLIC_URL")); base != "" {
+		return base
+	}
+	port := strings.TrimSpace(os.Getenv("PORT"))
+	if port == "" {
+		port = "8080"
+	}
+	return "http://localhost:" + port
 }
 
 func saveReview(ctx *action.Context) error {

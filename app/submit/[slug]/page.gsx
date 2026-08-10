@@ -17,7 +17,7 @@ func FormFieldRow(props any) Node {
 				<b>Required</b>
 			</If>
 		</span>
-		<If cond={props.field.type == "textarea"}>
+		<If cond={props.field.isTextarea}>
 			<textarea
 				name={props.field.id}
 				maxlength={props.field.maxLength}
@@ -26,7 +26,7 @@ func FormFieldRow(props any) Node {
 				required={props.field.required}
 			>{props.value}</textarea>
 		</If>
-		<If cond={props.field.type == "select"}>
+		<If cond={props.field.isSelect}>
 			<select
 				name={props.field.id}
 				aria-describedby={props.field.id + "-error"}
@@ -38,7 +38,7 @@ func FormFieldRow(props any) Node {
 				</Each>
 			</select>
 		</If>
-		<If cond={props.field.type != "textarea" && props.field.type != "select"}>
+		<If cond={props.field.isInput}>
 			<input
 				type={props.field.inputType}
 				name={props.field.id}

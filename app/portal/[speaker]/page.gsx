@@ -1,15 +1,98 @@
 package portal
 
+// TaskFieldRow renders one row of a task's declared FormFields
+// (present.SpeakerPortal's taskFieldRows): checkbox, select, textarea, and a
+// plain text row for any other declared type. This is a server component,
+// not an island, so a task's real fields — not a generic confirmation
+// checkbox — appear inside TaskAction's completeTask ActionForm. The
+// field's current value pre-fills from the speaker's last submission, which
+// is how a resubmitted card shows its previously submitted answers back.
+func TaskFieldRow(props any) Node {
+	return <div class="field-row">
+		<If cond={props.field.type == "checkbox"}>
+			<label class="checkbox-control">
+				<input
+					type="checkbox"
+					name={props.field.id}
+					value="yes"
+					checked={props.field.checked}
+					required={props.field.required}
+				></input>
+				<span>
+					{props.field.label}
+					<If cond={props.field.required}>
+						<b>Required</b>
+					</If>
+				</span>
+			</label>
+		</If>
+		<If cond={props.field.type == "select"}>
+			<label>
+				<span>
+					{props.field.label}
+					<If cond={props.field.required}>
+						<b>Required</b>
+					</If>
+				</span>
+				<select name={props.field.id} required={props.field.required}>
+					<option value="">{"Choose " + props.field.label}</option>
+					<Each of={props.field.options} as="option">
+						<option value={option.value} selected={option.value == props.field.value}>{option.label}</option>
+					</Each>
+				</select>
+			</label>
+		</If>
+		<If cond={props.field.type == "textarea"}>
+			<label>
+				<span>
+					{props.field.label}
+					<If cond={props.field.required}>
+						<b>Required</b>
+					</If>
+				</span>
+				<textarea name={props.field.id} placeholder={props.field.placeholder} required={props.field.required}>{props.field.value}</textarea>
+			</label>
+		</If>
+		<If cond={props.field.isText}>
+			<label>
+				<span>
+					{props.field.label}
+					<If cond={props.field.required}>
+						<b>Required</b>
+					</If>
+				</span>
+				<input
+					type="text"
+					name={props.field.id}
+					value={props.field.value}
+					placeholder={props.field.placeholder}
+					required={props.field.required}
+				></input>
+			</label>
+		</If>
+		<If cond={props.field.help != ""}>
+			<small>{props.field.help}</small>
+		</If>
+	</div>
+}
+
 func TaskAction(props any) Node {
 	return <ActionForm class="portal-task-action" actionName="completeTask">
 		<input type="hidden" name="csrf_token" value={csrf.token}></input>
 		<input type="hidden" name="task_id" value={props.id}></input>
 		<p class="form-error" data-gosx-field-error="task" aria-live="polite"></p>
-		<If cond={props.kind == "form"}>
+		<If cond={!props.hasFields}>
 			<label class="checkbox-control">
 				<input type="checkbox" name="confirmed" value="yes" required></input>
 				<span>I confirm these details are complete.</span>
 			</label>
+		</If>
+		<If cond={props.hasFields}>
+			<div class="task-field-list">
+				<Each of={props.fields} as="field">
+					<TaskFieldRow field={field}></TaskFieldRow>
+				</Each>
+			</div>
 		</If>
 		<p class="form-status" role="status" aria-live="polite">{action.message}</p>
 		<button class="button button-compact" type="submit">
@@ -112,7 +195,16 @@ func Page() Node {
 			<p class="portal-flash">{flash.notice}</p>
 			<section class="portal-hero">
 				<div class="portal-profile-summary">
-					<span class="avatar portal-avatar">{data.speaker.initials}</span>
+					<If cond={data.speaker.hasHeadshot}>
+						<img
+							class="avatar portal-avatar"
+							src={data.speaker.headshotURL}
+							alt={"Headshot of " + data.speaker.name}
+						></img>
+					</If>
+					<If cond={!data.speaker.hasHeadshot}>
+						<span class="avatar portal-avatar">{data.speaker.initials}</span>
+					</If>
 					<div>
 						<p class="eyebrow">Speaker portal</p>
 						<h1>

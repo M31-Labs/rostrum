@@ -53,6 +53,10 @@ func updateStatus(ctx *action.Context) error {
 		title = submission.Title
 		if status == domain.SubmissionAccepted {
 			state.AddSessionForSubmission(id)
+			state.AssignAcceptedOnlyTasks(submission.SpeakerIDs)
+			if accepted, found := state.SessionBySubmission(submission.ID); found {
+				state.QueueAcceptanceCommunication(accepted.ID, submission.SpeakerIDs)
+			}
 		}
 		return nil
 	}); err != nil {

@@ -24,6 +24,7 @@ import (
 	"github.com/m31-labs/rostrum/internal/present"
 	"github.com/m31-labs/rostrum/internal/publicapi"
 	"github.com/m31-labs/rostrum/internal/store"
+	"github.com/m31-labs/rostrum/internal/token"
 	_ "github.com/m31-labs/rostrum/modules"
 	"m31labs.dev/gosx"
 	"m31labs.dev/gosx/controller"
@@ -154,7 +155,7 @@ func main() {
 	app.Mount("/portal-file/", http.HandlerFunc(portalFile(root)))
 	app.Mount("/organizer/export/submissions.csv", http.HandlerFunc(submissionsCSV))
 	app.Mount("/favicon.ico", http.RedirectHandler("/favicon.svg", http.StatusTemporaryRedirect))
-	app.Mount("/demo/reset", http.HandlerFunc(resetDemo))
+	app.Mount("/demo/reset", resetDemo(root))
 
 	rootHandler, err := router.BuildChecked()
 	if err != nil {
@@ -266,13 +267,14 @@ func securityHeaders(publicBase, navigationHash string) server.Middleware {
 	if navigationHash != "" {
 		scriptPolicy += " " + navigationHash
 	}
-	policy := "default-src 'self'; base-uri 'self'; object-src 'none'; " + scriptPolicy + "; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' ws: wss:; frame-src 'self' https://www.youtube-nocookie.com https://player.vimeo.com; frame-ancestors *; form-action 'self'"
+	base := "default-src 'self'; base-uri 'self'; object-src 'none'; " + scriptPolicy + "; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' ws: wss:; frame-src 'self' https://www.youtube-nocookie.com https://player.vimeo.com; form-action 'self'"
 	secure := strings.HasPrefix(publicBase, "https://")
-	if secure {
-		policy += "; upgrade-insecure-requests"
-	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			policy := base + "; " + frameAncestorsDirective(r.URL.Path)
+			if secure {
+				policy += "; upgrade-insecure-requests"
+			}
 			w.Header().Set("Content-Security-Policy", policy)
 			w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
 			w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -283,6 +285,19 @@ func securityHeaders(publicBase, navigationHash string) server.Middleware {
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// frameAncestorsDirective returns the CSP frame-ancestors directive for
+// path (SE-8/M7). Only the /public/ surface -- the embeddable agenda widget
+// present.EmbedAdmin hands organizers a snippet for -- may be framed by
+// another site. Every other route, including /organizer and /portal, must
+// never be embeddable, so a malicious page cannot dress either surface up
+// for clickjacking.
+func frameAncestorsDirective(path string) string {
+	if path == "/public" || strings.HasPrefix(path, "/public/") {
+		return "frame-ancestors *"
+	}
+	return "frame-ancestors 'none'"
 }
 
 // Upload body sizing. uploadBodyEnvelope bounds the whole multipart request
@@ -343,9 +358,23 @@ func navigationScriptCSPHash() string {
 	return "'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) + "'"
 }
 
+// submissionsCSV serves GET /organizer/export/submissions.csv.
+//
+// Authorization (SE-5b): the route sits under /organizer/, so
+// organizerContext has already bound portalAdminSessionKey for any request
+// that reaches it through the live router -- the same documented
+// proxy-boundary model portalFile uses for downloads. This check enforces
+// that boundary explicitly rather than relying only on the route's mount
+// path, so the export never silently starts serving data if the mount ever
+// moves outside /organizer/ or the handler is invoked directly. An
+// unauthenticated request gets 403, never a row of data.
 func submissionsCSV(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if session.Current(r).String(portalAdminSessionKey) != "1" {
+		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
 	state := appstate.MustGet().Snapshot()
@@ -355,10 +384,20 @@ func submissionsCSV(w http.ResponseWriter, r *http.Request) {
 	writer := csv.NewWriter(w)
 	_ = writer.Write([]string{"id", "title", "status", "category", "format", "level", "speakers", "routed_owner", "submitted_at"})
 	for _, submission := range state.Submissions {
+		// SE-5: present.CSVSafe prefixes any cell a spreadsheet application
+		// would read as a formula (=, +, -, @, tab, or CR) with a single
+		// quote, so a submission title of =HYPERLINK(...) exports as inert
+		// text instead of a formula the export's opener evaluates.
 		_ = writer.Write([]string{
-			submission.ID, submission.Title, submission.Status, present.CategoryName(state, submission.CategoryID),
-			submission.Format, submission.Level, present.SpeakerNames(state, submission.SpeakerIDs),
-			submission.RoutedOwner, submission.SubmittedAt.Format(time.RFC3339),
+			present.CSVSafe(submission.ID),
+			present.CSVSafe(submission.Title),
+			present.CSVSafe(submission.Status),
+			present.CSVSafe(present.CategoryName(state, submission.CategoryID)),
+			present.CSVSafe(submission.Format),
+			present.CSVSafe(submission.Level),
+			present.CSVSafe(present.SpeakerNames(state, submission.SpeakerIDs)),
+			present.CSVSafe(submission.RoutedOwner),
+			present.CSVSafe(submission.SubmittedAt.Format(time.RFC3339)),
 		})
 	}
 	writer.Flush()
@@ -367,12 +406,37 @@ func submissionsCSV(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// calendarDownload serves GET /calendar/{speaker}.ics.
+//
+// Authorization (SE-6): a visitor must be one of three things -- the
+// speaker's own bound portal session (portalSpeakerSessionKey, set by
+// app/portal/page.server.go's loadPortal), an organizer session
+// (portalAdminSessionKey, set by organizerContext), or the holder of a
+// signed portal token for this speaker, presented as ?key=<token> the way
+// an emailed calendar-subscribe link does (internal/token, reused from
+// PT-2). Any other request -- an unkeyed fetch from a stranger -- gets the
+// same friendly not-found response as an unknown speaker ID, never a file.
 func calendarDownload(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	speakerID := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/calendar/"), ".ics")
+
+	visitor := session.Current(r)
+	isOrganizer := visitor.String(portalAdminSessionKey) == "1"
+	isBoundSpeaker := speakerID != "" && visitor.String(portalSpeakerSessionKey) == speakerID
+	isKeyed := false
+	if key := strings.TrimSpace(r.URL.Query().Get("key")); key != "" {
+		if id, ok := token.New().Verify(key); ok && id == speakerID {
+			isKeyed = true
+		}
+	}
+	if !isOrganizer && !isBoundSpeaker && !isKeyed {
+		http.NotFound(w, r)
+		return
+	}
+
 	data, filename, err := programcalendar.SpeakerCalendar(appstate.MustGet().Snapshot(), speakerID)
 	if err != nil {
 		http.NotFound(w, r)
@@ -626,35 +690,68 @@ func portalFile(root string) http.HandlerFunc {
 	}
 }
 
-func resetDemo(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	// Reset wipes the workspace, so it must not be reachable by any visitor
-	// who merely holds a session CSRF token (SE-8/M2). Require a shared secret
-	// when RESET_SECRET is configured; refuse entirely in production when none
-	// is set, so a deployed demo cannot be wiped out from under a judge.
-	if secret := strings.TrimSpace(getenv("RESET_SECRET", "")); secret != "" {
-		provided := r.URL.Query().Get("secret")
-		if provided == "" {
-			provided = r.FormValue("secret")
+func resetDemo(root string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
 		}
-		if subtle.ConstantTimeCompare([]byte(provided), []byte(secret)) != 1 {
+		// Reset wipes the workspace, so it must not be reachable by any
+		// visitor who merely holds a session CSRF token (SE-8/M2). Require a
+		// shared secret when RESET_SECRET is configured; refuse entirely in
+		// production when none is set, so a deployed demo cannot be wiped out
+		// from under a judge.
+		if secret := strings.TrimSpace(getenv("RESET_SECRET", "")); secret != "" {
+			provided := r.URL.Query().Get("secret")
+			if provided == "" {
+				provided = r.FormValue("secret")
+			}
+			if subtle.ConstantTimeCompare([]byte(provided), []byte(secret)) != 1 {
+				http.NotFound(w, r)
+				return
+			}
+		} else if strings.EqualFold(getenv("APP_ENV", "development"), "production") {
 			http.NotFound(w, r)
 			return
 		}
-	} else if strings.EqualFold(getenv("APP_ENV", "development"), "production") {
-		http.NotFound(w, r)
+		if err := appstate.MustGet().Reset(); err != nil {
+			writeMutationError(w, r, http.StatusInternalServerError, err.Error())
+			return
+		}
+		// SE-8/M6: Reset only rewinds the JSONStore's in-memory and on-disk
+		// state; it never touches the filesystem. Without this, a speaker's
+		// uploaded file (main.go's portalUpload) would survive a reset with
+		// no TaskCompletion left pointing at it -- an orphaned file outliving
+		// the workspace that thinks it discarded it.
+		clearUploads(root)
+		session.AddFlash(r, "notice", "Workspace restored to the polished demo baseline.")
+		live.Broadcast("workspace:reset", map[string]any{"at": time.Now().UTC()})
+		writeMutationSuccess(w, r, "Workspace restored to the polished demo baseline.", "/organizer")
+	}
+}
+
+// clearUploads removes every file under data/uploads so a workspace reset
+// (SE-8/M6) discards speaker-uploaded artifacts along with the state that
+// referenced them. A missing uploads directory is not an error -- a
+// workspace nobody has uploaded to yet has none -- and a single file that
+// resists removal is logged and skipped rather than failing the reset.
+func clearUploads(root string) {
+	uploadDir := filepath.Join(root, "data", "uploads")
+	entries, err := os.ReadDir(uploadDir)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			log.Printf("reset: could not read %s: %v", uploadDir, err)
+		}
 		return
 	}
-	if err := appstate.MustGet().Reset(); err != nil {
-		writeMutationError(w, r, http.StatusInternalServerError, err.Error())
-		return
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		if err := os.Remove(filepath.Join(uploadDir, entry.Name())); err != nil {
+			log.Printf("reset: could not remove upload %s: %v", entry.Name(), err)
+		}
 	}
-	session.AddFlash(r, "notice", "Workspace restored to the polished demo baseline.")
-	live.Broadcast("workspace:reset", map[string]any{"at": time.Now().UTC()})
-	writeMutationSuccess(w, r, "Workspace restored to the polished demo baseline.", "/organizer")
 }
 
 func writeMutationSuccess(w http.ResponseWriter, r *http.Request, message, redirect string) {

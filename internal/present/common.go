@@ -2,6 +2,7 @@ package present
 
 import (
 	"fmt"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -96,6 +97,49 @@ func Percent(part, total int) int {
 
 func Score(value float64) string {
 	return fmt.Sprintf("%.1f", value)
+}
+
+// AllowedURL reports whether raw is safe to store and later render as an
+// href or in the public /api/v1/speakers JSON (SE-4). A blank value is
+// allowed -- callers use it to represent "no link set" -- but any non-blank
+// value must parse as an absolute URL with scheme http or https. This
+// rejects javascript:, data:, and every other scheme a browser might
+// execute or render unexpectedly, before the value ever reaches storage.
+func AllowedURL(raw string) bool {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return true
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	scheme := strings.ToLower(parsed.Scheme)
+	return (scheme == "http" || scheme == "https") && parsed.Host != ""
+}
+
+// csvFormulaPrefixes lists the leading bytes a spreadsheet application
+// (Excel, Google Sheets, LibreOffice Calc) treats as the start of a formula
+// when it opens a CSV file. A tab or carriage return is included because
+// some spreadsheet importers still evaluate a cell that begins with either
+// after trimming, and both can also be used to break a naive CSV parser's
+// column alignment.
+const csvFormulaPrefixes = "=+-@\t\r"
+
+// CSVSafe neutralizes formula injection (SE-5): when cell begins with a
+// byte in csvFormulaPrefixes, it prefixes cell with a single quote so the
+// spreadsheet application that opens the export renders the value as
+// literal text instead of evaluating it as a formula. Every CSV (and any
+// future XLSX) export must route each cell through this helper before
+// writing it.
+func CSVSafe(cell string) string {
+	if cell == "" {
+		return cell
+	}
+	if strings.ContainsRune(csvFormulaPrefixes, rune(cell[0])) {
+		return "'" + cell
+	}
+	return cell
 }
 
 func SortedSessions(sessions []domain.Session) []domain.Session {
