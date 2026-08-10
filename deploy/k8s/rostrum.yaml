@@ -1,0 +1,138 @@
+# Rostrum — single-instance deployment.
+#
+# The JSON store is single-writer, so run exactly one replica against a
+# ReadWriteOnce volume and use the Recreate strategy. Substitute the four
+# __PLACEHOLDER__ values (image tag, hostname, ingress class, cert issuer),
+# then apply the rostrum-secrets Secret (see secret.example.yaml) before this.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: rostrum
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: rostrum-data
+  namespace: rostrum
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rostrum
+  namespace: rostrum
+  labels:
+    app: rostrum
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: rostrum
+  template:
+    metadata:
+      labels:
+        app: rostrum
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: rostrum
+          image: harbor.draco.quest/m31labs.dev/rostrum:__IMAGE_TAG__
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          env:
+            - name: APP_ENV
+              value: "production"
+            - name: PORT
+              value: "8080"
+            - name: PUBLIC_URL
+              value: "https://__HOSTNAME__"
+            - name: DATA_PATH
+              value: "/app/data/rostrum.json"
+            - name: DEMO_MODE
+              value: "false"
+          envFrom:
+            - secretRef:
+                name: rostrum-secrets
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 8080
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "1"
+              memory: "512Mi"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: rostrum-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rostrum
+  namespace: rostrum
+spec:
+  selector:
+    app: rostrum
+  ports:
+    - port: 80
+      targetPort: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: rostrum
+  namespace: rostrum
+  annotations:
+    cert-manager.io/cluster-issuer: "__CLUSTER_ISSUER__"
+    # Keep the /live WebSocket connection open through the proxy.
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+spec:
+  ingressClassName: __INGRESS_CLASS__
+  tls:
+    - hosts:
+        - __HOSTNAME__
+      secretName: rostrum-tls
+  rules:
+    - host: __HOSTNAME__
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: rostrum
+                port:
+                  number: 80
