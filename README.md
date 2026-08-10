@@ -1,250 +1,200 @@
 # Rostrum
 
-**A calm operating system for complicated event programs.**
+**Run your event's speaker program from one calm workspace.**
 
-Rostrum is a GoSX-native, open-source SaaS foundation for calls for speakers,
-multi-round review, speaker onboarding, conflict-aware scheduling, and public
-program publishing. It implements the complete workflow in the supplied
-[Sessionboard-style product brief](https://docs.google.com/document/d/1rBHJtiNKHv4i43tdf2Rm0sDEYuIcajhmAPoBKR_Az-A/edit)
-while making a different bet: workflow automation should be governed,
-inspectable, and reversible.
+Rostrum is a self-hosted, open-source tool for event speaker programs. It
+carries a proposal from an open call, through review and scheduling, to a
+published agenda. Every routing and scheduling decision shows its rule and a
+readable reason.
 
-The demo event is **M31 Systems Forum 2026**. It is intentionally dense enough
-to show the product under real operational pressure, including conditional
-intake, competing rooms and speakers, incomplete onboarding, multi-round
-rubrics, external publishing, and an optional AI second opinion.
+**Live demo:** [rostrum.m31labs.dev](https://rostrum.m31labs.dev). The seeded
+event is M31 Systems Forum 2026. The demo leaves the organizer workspace open
+so you can explore every surface.
 
-## Why this submission is different
+## What Rostrum does today
 
-- **Decisions are product data.** Arbiter policies control CFP routing,
-  conditional questions, and scheduling severity; the UI exposes the rule and
-  human-readable trace.
-- **AI remains visibly subordinate.** Human evaluations alone determine review
-  coverage and aggregate scores. OpenAI assistance uses the same organizer
-  rubric, excludes speaker PII, returns a strict schema, and retains provider
-  and model provenance.
-- **One canonical program.** A committed schedule feeds speaker portals,
-  mobile embeds, JSON, iCalendar, and a deliberate one-way Accelevents export.
-- **A useful zero-credential mode.** The full judging path runs with an atomic
-  JSON store, deterministic AI preview, demo outbox, integration dry runs, and
-  no paid infrastructure.
-- **No bespoke browser JavaScript.** GoSX server components, named Actions,
-  focused binary islands, Controllers, and Hubs own the whole interaction
-  model. The only browser JavaScript shipped is GoSX's generic runtime.
-- **Fast at operator speed.** A searchable quick switcher, route chords, and a
-  persistent compact rail make every organizer surface reachable without a
-  reload or a trip through nested menus.
+- **Call for proposals (CFP).** A hosted public form collects proposals.
+  Conditional questions appear only when they apply; for example, workshop
+  logistics appear only for workshop proposals. A routing policy assigns each
+  proposal a queue, an owner, and a track, and stores a readable trace.
+- **Form builder.** Add, edit, reorder, and remove form fields from the
+  organizer workspace. Open or close the call, set a close date the server
+  enforces, and edit the success page.
+- **Speaker portal.** Each submitter gets a portal through a signed link. No
+  account, no password. Speakers update their profile, complete tasks, and
+  upload slides and headshots. Uploads are capped at 10 MiB and limited to an
+  allow-list of file types.
+- **Multi-round review.** Each round has a weighted rubric. Reviewers open a
+  signed review link and score their own assignments. An organizer can also
+  record a score on a reviewer's behalf. Human scores alone set coverage and
+  aggregates.
+- **Conflict-aware agenda.** Drag sessions from an unscheduled bank onto the
+  board, or use the keyboard move controls. Switch among list, day, week,
+  track, and room views. Hard conflicts (a double-booked speaker or room)
+  block publication. Warnings (same-track overlap) explain themselves.
+- **Onboarding dashboard.** A live matrix shows each speaker's outstanding
+  tasks. Uploads wait for organizer approval. The view refreshes over a
+  WebSocket as speakers complete work.
+- **Communications.** A template library with merge fields, a per-recipient
+  preview, Gmail and Outlook compose links, a demo outbox, and a sent/queued
+  ledger. Each submission triggers a real confirmation email that carries the
+  speaker's portal link. Each speaker has a private iCalendar file.
+- **Publishing.** A public agenda with a personal itinerary stored on the
+  visitor's device, a speaker gallery, embeddable widgets, public JSON, and a
+  CSV (comma-separated values) export for organizers.
+- **Accelevents export.** A one-way publisher sends speakers, then published
+  sessions. A dry run needs no credential. A live sync needs an API key and
+  records each run in a visible ledger.
 
-## Capability coverage
+## Try the live demo
 
-| Brief requirement | Rostrum evidence |
-|---|---|
-| Conditional CFP and category routing | `/organizer/forms`, `/submit/systems-forum-cfp`, `rules/cfp-routing.arb`, `rules/form-visibility.arb` |
-| Speaker profiles, headshots, slides, and documents | `/portal/{speaker}`, guarded uploads, organizer readiness matrix |
-| Templates, reminders, Gmail/Outlook, calendar invites | `/organizer/communications`, provider handoff ledger, compose links, per-speaker `.ics` |
-| Multi-round scoring and optional AI review | `/organizer/review`, weighted human rubric entry, provenance-labeled second opinions |
-| Drag/drop agenda and conflict detection | `/organizer/agenda` with list/day/week/track/room views and Arbiter-backed hard/soft decisions |
-| Real-time onboarding dashboard | `/organizer/portal` over a GoSX WebSocket hub |
-| One-way Accelevents integration | `/organizer/integrations`, offline dry run, explicit credential-gated live publish, sync ledger |
-| Portal wiki/resources and HTML embeds | allowlisted article/link/embed resource catalog in every speaker portal |
-| Mobile gallery, schedule, itinerary | `/public/m31-systems-forum-2026/agenda` and `/speakers`, embeddable and backed by public JSON |
+1. Open the [public call](https://rostrum.m31labs.dev/submit/systems-forum-cfp)
+   and submit a proposal. Choose the "Workshop" format to see a conditional
+   question appear.
+2. Follow the success page into your new speaker portal. Update your profile
+   and complete a task.
+3. Open the [organizer workspace](https://rostrum.m31labs.dev/organizer) and
+   watch your submission arrive with its routing trace.
+4. Open the [agenda](https://rostrum.m31labs.dev/organizer/agenda), drag a
+   session into a conflict, and read the rule that blocks it.
+5. End at the [public agenda](https://rostrum.m31labs.dev/public/m31-systems-forum-2026/agenda)
+   and the [speaker gallery](https://rostrum.m31labs.dev/public/m31-systems-forum-2026/speakers).
 
-## Run locally
+## Quickstart
 
-Requirements: Go 1.26 or newer. No database or external credential is required.
+Requirements: Go 1.26 or newer. No database, no Node toolchain, no external
+credential.
 
 ```bash
+git clone https://github.com/m31-labs/rostrum
+cd rostrum
 cp .env.example .env
 go run .
 ```
 
-Open [http://localhost:8080](http://localhost:8080). The default JSON workspace
-is created at `data/rostrum.json`. To run a disposable, always-clean demo:
+Open [http://localhost:8080](http://localhost:8080). The first run creates
+`data/rostrum.json` with a fully seeded demo event. For a disposable
+in-memory workspace that resets on restart:
 
 ```bash
 DEMO_MODE=memory go run .
 ```
 
-Useful entry points:
+Entry points:
 
-- Organizer home: [http://localhost:8080/organizer](http://localhost:8080/organizer)
+- Organizer workspace: [http://localhost:8080/organizer](http://localhost:8080/organizer)
 - Public CFP: [http://localhost:8080/submit/systems-forum-cfp](http://localhost:8080/submit/systems-forum-cfp)
-- Speaker portal: [http://localhost:8080/portal/spk_maya](http://localhost:8080/portal/spk_maya)
 - Public agenda: [http://localhost:8080/public/m31-systems-forum-2026/agenda](http://localhost:8080/public/m31-systems-forum-2026/agenda)
+- Speaker portal: submit a proposal; the confirmation email and the success
+  page both carry a signed link into your portal.
 
-## Five-minute demo
+In the organizer workspace, press `Ctrl/Cmd K` for the search switcher, or
+press `G` plus a route key to jump to any surface.
 
-1. Start on **Today** and show submission, review, onboarding, and schedule
-   health in one operating view.
-2. Open **Forms & routing**; inspect the workshop-only logistics rule and the
-   category-to-owner decision trace. Submit a new workshop through the public
-   CFP and land directly in its new speaker portal.
-3. Update the profile and complete a task. Open **Portal & tasks** in another
-   tab to show live readiness updates.
-4. In **Review**, record a human weighted rubric, then add an optional AI second
-   opinion. Point out that the AI result is labeled and does not change human
-   coverage or the human aggregate.
-5. In **Agenda**, switch among day, week, track, and room views. Attempt a
-   collision, inspect the governing reason, and publish only after hard
-   conflicts are gone.
-6. Preview Gmail/Outlook handoff and download an iCalendar invite. Finish with
-   the mobile agenda/gallery and the Accelevents dry run or configured live
-   publish ledger.
+## How a program moves through Rostrum
 
-## Architecture
+1. **Submit.** A speaker completes the public form. The routing policy
+   assigns a queue, an owner, and a track. Rostrum sends a confirmation email
+   and opens the speaker's portal.
+2. **Review.** Organizers run one or more weighted rubric rounds. Reviewers
+   score through signed links; scores stay attributed to their author.
+3. **Schedule.** Organizers drag accepted sessions onto the agenda. Hard
+   conflicts block publication until an organizer resolves them.
+4. **Publish.** The committed schedule feeds the public agenda, the speaker
+   gallery, portals, calendar files, the JSON API, embeds, and the
+   Accelevents export. One record drives all of them.
 
-```mermaid
-flowchart LR
-    B["Browser"] --> R["GoSX routes + server components"]
-    B --> I["Route-scoped GoSX island VM"]
-    I --> C["Signals + Controller storage"]
-    B --> A["Named actions + CSRF"]
-    A --> S["Copy-on-write atomic store"]
-    R --> S
-    A --> P["Arbiter policies"]
-    S --> H["GoSX live hub"]
-    H --> B
-    S --> O["Public JSON + iCalendar + embeds"]
-    S --> X["Accelevents one-way publisher"]
-    A --> AI["Optional rubric second opinion"]
-    P --> A
-```
+## Built for self-hosters
 
-The store validates a cloned next state before atomically replacing the data
-file. External calls occur outside store locks. Live updates are broadcast only
-after a durable mutation succeeds.
+- **Passwordless access.** Speakers and reviewers authenticate with signed,
+  expiring links. There are no passwords to store, reset, or leak.
+- **Decisions you can defend.** Routing and scheduling rules live in
+  versioned policy files under `rules/`. Every decision keeps its rule name
+  and a human-readable reason.
+- **Your program in one file.** The whole workspace lives in one JSON file
+  with validated, atomic writes. Back it up with one copy command.
+- **One binary.** A single Go process serves every page, the live dashboard,
+  and the API. No database and no background workers.
+- **A careful public edge.** Public JSON serves only published sessions and
+  their speakers. It never includes email addresses, proposal text, review
+  data, or drafts. Rate limits guard the public form.
 
-### Interaction model
+## Identity model
 
-- `Ctrl/Cmd K` opens the searchable workspace switcher. Arrow keys and Enter
-  navigate it, Escape and backdrop clicks close it, and the same control stays
-  visible and touchable in the mobile organizer shell.
-- `G` followed by the visible route key jumps directly to an organizer surface;
-  `[` toggles the desktop rail between its full and 76 px modes. Chords are
-  deliberately inert while a user is typing, and rail preference persists.
-- GoSX's navigation runtime upgrades internal links and managed forms into
-  same-document page swaps with History API semantics. Every route still
-  renders complete HTML and works through native navigation without JavaScript.
-- Mutations invalidate prefetched page state before they run. Managed requests
-  receive a JSON action result and soft redirect; native form posts retain the
-  standard `303 See Other` flow.
-- CSRF stays enforced for managed forms, agenda drag/drop, and native posts.
-  Validation errors return to the originating form, announce through an ARIA
-  live region, and focus the first invalid control.
-- WebSocket updates refresh the affected server-rendered view through the same
-  soft-navigation path, preserving scroll and avoiding a document reload.
-- Reduced-motion preferences, keyboard move controls, native constraint
-  validation, and hard-navigation fallbacks are preserved throughout.
-
-## Optional adapters
-
-### OpenAI review assistance
-
-Set `OPENAI_API_KEY` to replace the deterministic offline rubric preview with a
-live Responses API call. Rostrum sends proposal content and the
-organizer-authored rubric—not speaker email, profile, onboarding, or private
-review data. Requests use strict structured output, `store: false`, a stable
-hashed safety identifier, bounded output, and explicit refusal/error handling.
-
-```bash
-OPENAI_API_KEY=... OPENAI_MODEL=gpt-5.6-terra go run .
-```
-
-### Accelevents
-
-Dry runs need no secret. Live publishing is unlocked only when an API key is
-present and always sends speakers before scheduled sessions.
-
-```bash
-ACCELEVENTS_API_KEY=... \
-ACCELEVENTS_EVENT_URL=m31-systems-forum-2026 \
-go run .
-```
-
-The adapter uses stable Rostrum IDs as external IDs, stops on the first
-remote error, and records completed or failed runs in the visible ledger.
+- Speakers hold signed portal links, sent by email, valid for 90 days. A
+  valid link binds the browser session to that one speaker.
+- Reviewers hold signed review links that an organizer copies from the
+  Review page. Each link authenticates one reviewer on every request.
+- The organizer workspace carries no login of its own in this release. Deploy
+  it behind an access-controlled reverse proxy; the application then trusts
+  any session the proxy admits to `/organizer`. The live demo leaves this
+  surface open on purpose. See [docs/deployment.md](docs/deployment.md).
 
 ## Public interfaces
 
 | Endpoint | Purpose | Cache |
 |---|---|---|
-| `GET /api/health` | Runtime health and GoSX version | 30 seconds |
+| `GET /api/health` | Application name, version, timestamp | 30 seconds |
 | `GET /api/v1/workspace` | Public discovery links and counts | 60 seconds |
 | `GET /api/v1/schedule` | Published sessions only | 60 seconds |
-| `GET /api/v1/speakers` | Speakers attached to published sessions only | 60 seconds |
-| `GET /calendar/{speaker}.ics` | Private per-speaker schedule download | private, 60 seconds |
+| `GET /api/v1/speakers` | Speakers on published sessions only | 60 seconds |
+| `GET /calendar/{speaker}.ics` | Private per-speaker calendar file | private, 60 seconds |
 | `GET /organizer/export/submissions.csv` | Organizer CSV export | private, no-store |
 
-Public JSON deliberately excludes email addresses, proposal bodies, review
-plans, evaluations, task state, upload paths, and draft sessions.
+## Optional integrations
 
-## Verify and build
+Rostrum runs complete with zero credentials. Add these when you want them:
 
-This development snapshot intentionally consumes the adjacent live GoSX
-worktree through the `replace m31labs.dev/gosx => ../gosx-programma-islands`
-directive in `go.mod`. It does not vendor the framework. Build a matching CLI
-from that worktree and install Arbiter if it is not already on the path:
+- **SMTP (Simple Mail Transfer Protocol).** Set `SMTP_HOST` to send real
+  confirmation email. Without it, messages record to a visible demo outbox.
+- **Accelevents.** Set `ACCELEVENTS_API_KEY` and `ACCELEVENTS_EVENT_URL` to
+  unlock live publishing. Dry runs work without either.
+- **AI second opinion.** Set `OPENAI_API_KEY` to let a model score the same
+  organizer rubric. The result is labeled with provider and model, excludes
+  speaker personal data from the request, and never changes human coverage
+  or human aggregates.
+
+See [.env.example](.env.example) for every setting.
+
+## Scope today
+
+One Rostrum instance runs one organization's program: one event workspace,
+one process, one JSON data file. This release has no tenant accounts and no
+role system.
+
+## Development
+
+Install the GoSX CLI and Arbiter for the full check suite:
 
 ```bash
-cd ../gosx-programma-islands
-go build -o ./bin/gosx ./cmd/gosx
-cd ../rostrum
+go install m31labs.dev/gosx/cmd/gosx@v0.38.0
 go install m31labs.dev/arbiter/cmd/arbiter@v1.9.0
 ```
 
 Then run:
 
 ```bash
-make check GOSX=../gosx-programma-islands/bin/gosx
-make release-check GOSX=../gosx-programma-islands/bin/gosx
-
-# With the disposable demo running on its default port:
-make perf-budget GOSX=../gosx-programma-islands/bin/gosx
+make check          # gofmt, template format, policy validation, vet, tests, race
+make build          # production bundle in dist/
+make release-check  # check plus the committed size budgets
 ```
 
-`make check` covers Go formatting, GoSX parsing/formatting, Arbiter policy
-validation, `go vet`, unit tests, and the race detector. `make release-check`
-adds a production build and rejects growth beyond [the committed byte
-budgets](size-budget.json). `make perf-budget` profiles the five representative
-routes under a Pixel 7 viewport and 4× CPU throttle against
-[the runtime budgets](perf-budget.json).
+## Technical notes
 
-The current production envelope is intentionally explicit:
-
-| Constraint | Measured | Ceiling |
-|---|---:|---:|
-| Bespoke application JavaScript | 0 files / 0 B | 0 files / 0 B |
-| Application CSS, gzip | 13,690 B | 14,500 B |
-| Largest static route | 140,050 B raw / 24,815 B gzip | 145,000 B / 26,000 B |
-| Largest island program | 11,883 B raw / 4,262 B gzip / 3,301 B Brotli | 12,500 B / 4,500 B / 3,500 B |
-| Largest route-scoped client transfer | 406,749 B gzip / 327,830 B Brotli | 420,000 B / 335,000 B |
-| GoSX cold-start runtime | 665,477 B gzip / 505,830 B Brotli | 675,840 B / 520,000 B |
-| Complete distribution | 68,214,273 B | 70,000,000 B |
-
-The public root remains navigation-only and references no external GoSX client
-asset. Organizer routes load the shared island VM, `WorkspaceChrome`, and the
-rail-persistence Controller; Today and Portal additionally load Hub refresh.
-Agenda adds its board island, and the dynamic public agenda loads only its
-itinerary island plus storage Controller. Six representative route contracts
-fail the build on any unexpected capability. Production contains five compact
-`.gxi` programs, with `WorkspaceChrome` the largest. `make build` writes the
-ignored `dist/` bundle and reproducibly removes generated sourcemaps and copied
-Go sources that are not needed at runtime.
+- Rostrum is built with GoSX, a server-rendered Go component framework. Every
+  route renders complete HTML and works without JavaScript. The application
+  ships no bespoke browser JavaScript of its own.
+- Scheduling and routing rules are Arbiter policy files in `rules/`; the UI
+  shows each fired rule and its reason.
+- The build enforces committed size budgets ([size-budget.json](size-budget.json))
+  and runtime budgets ([perf-budget.json](perf-budget.json)).
 
 ## Deploy
 
-The included runtime Dockerfile consumes the verified `dist/` bundle, runs as a
-non-root user, and keeps only the binary, route templates, used GoSX assets,
-public assets, timezone data, and CA roots. See
-[deployment guidance](docs/deployment.md) for a container run command,
-persistent volume, production secret requirements, and reverse-proxy boundary.
-
-This repository is a submission-grade single-workspace vertical slice, not a
-finished multi-tenant control plane. Before serving unrelated organizations,
-add tenant-scoped identity and authorization, a multi-instance transactional
-store, object storage, background delivery workers, audit retention, and billing.
-The organizer and speaker routes should be placed behind an identity-aware
-proxy or equivalent access layer in any production demonstration.
+The included Dockerfile packages the verified `dist/` bundle and runs as a
+non-root user. See [docs/deployment.md](docs/deployment.md) for the container
+run command, the persistent volume, production secret requirements, and the
+reverse-proxy boundary.
 
 ## License
 

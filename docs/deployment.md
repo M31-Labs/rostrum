@@ -1,28 +1,31 @@
 # Deployment guide
 
-Rostrum ships as one Go process plus the `app/` templates and `public/`
-assets. The default JSON store is appropriate for a single replica,
-self-hosted demonstration, or evaluation environment.
+Rostrum deploys as one Go process plus the `app/` templates and `public/`
+assets. One replica against one JSON data file serves a single-organization
+instance.
 
-## Production bundle
+## Build the production bundle
+
+Requirements:
+
+- Go 1.26 or newer.
+- The GoSX CLI: `go install m31labs.dev/gosx/cmd/gosx@v0.38.0`
+- The Arbiter CLI (used by `make check`): `go install m31labs.dev/arbiter/cmd/arbiter@v1.9.0`
 
 ```bash
-make build GOSX=../gosx-programma-islands/bin/gosx
-cd dist
-./run.sh
+make build
 ```
 
-The current module uses an adjacent `../gosx-programma-islands` development
-worktree and a matching CLI; GoSX is not vendored. The build contains the
-server binary, five binary island programs, only framework-owned browser
-runtime assets, and the runtime content tree. The packaging step removes
-generated sourcemaps and copied Go source that are not needed in production.
-Mount a writable directory for `DATA_PATH` and uploaded files.
+`make build` writes the `dist/` bundle: the static server binary at
+`dist/server/app`, the route templates, framework runtime assets, public
+files, and seeded data. The packaging step removes sourcemaps and Go source
+that production does not need. Mount a writable directory for `DATA_PATH`
+and for uploaded files under `data/uploads`.
 
 ## Container
 
 ```bash
-make build GOSX=../gosx-programma-islands/bin/gosx
+make build
 docker build -t rostrum:local .
 docker run --rm -p 8080:8080 \
   -e APP_ENV=production \
@@ -33,44 +36,64 @@ docker run --rm -p 8080:8080 \
   rostrum:local
 ```
 
-The Dockerfile consumes that verified `dist/` bundle rather than rebuilding
-against a different framework revision. It copies the stripped server, `.gsx`
-templates, hashed GoSX runtime/island assets, public files, and seeded data; it
-contains no Go source and runs as the non-root `rostrum` user. The process
-refuses to start in production with the development session secret, a
-non-HTTPS public URL, or the in-memory store.
+The Dockerfile copies the verified `dist/` bundle. The image contains no Go
+source and runs as the non-root `rostrum` user (UID 10001). In production
+the process refuses to start with:
 
-## Reverse proxy and identity boundary
+- the development session secret, or any secret shorter than 32 characters;
+- a `PUBLIC_URL` that is not HTTPS;
+- the in-memory store (`DEMO_MODE=memory`).
 
-Terminate TLS at a trusted reverse proxy and preserve WebSocket upgrades for
-`/live`. The application deliberately permits its public agenda and speaker
-gallery to be framed by other sites. Do not add a blanket `X-Frame-Options`
-header; use route-aware `frame-ancestors` policy if your proxy replaces the
-application CSP.
+## Reverse proxy
 
-This submission does not include a production tenant identity plane. Before a
-public deployment, protect `/organizer/*`, `/organizer/export/*`, `/portal/*`,
-`/calendar/*`, `/portal-upload/*`, and `/demo/reset` with an identity-aware
-proxy or application authentication. Keep `/`, `/submit/*`, `/public/*`,
-`/api/health`, and the intentionally public `/api/v1/*` projections open as
-needed. Cloudflare Tunnel plus Access is one suitable topology for a demo;
-Rostrum itself does not depend on Cloudflare.
+Terminate TLS (Transport Layer Security) at a trusted reverse proxy and
+preserve WebSocket upgrades for `/live`. Rostrum permits other sites to
+frame its `/public/*` pages, because that is how the embeddable agenda
+works; every other route sends `frame-ancestors 'none'`. Do not add a
+blanket `X-Frame-Options` header. If your proxy replaces the application
+CSP (Content Security Policy), keep the policy route-aware.
+
+## Access boundary
+
+The application enforces identity on most private routes itself:
+
+- `/portal/*`, `/calendar/*`, and `/portal-file/*` require a signed speaker
+  link or a bound session.
+- `/review/{token}` requires a signed reviewer link on every request.
+- `/organizer/export/submissions.csv` returns 403 without an organizer
+  session.
+
+The organizer workspace is the exception: `/organizer/*` carries no
+application login in this release. Gate it at an identity-aware proxy.
+Whoever the proxy admits to `/organizer` is trusted as an organizer for the
+rest of that session. Cloudflare Tunnel plus Access is one suitable
+topology; Rostrum does not depend on Cloudflare.
+
+Keep these routes reachable by the public: `/`, `/submit/*`, `/public/*`,
+`/api/health`, `/api/v1/*`, `/portal/*`, and `/review/*`. The last two must
+stay reachable because speakers and reviewers open their signed links from
+an inbox.
+
+`POST /demo/reset` restores the seeded workspace. Set `RESET_SECRET` to
+require a matching secret. In production with no secret set, reset is
+disabled entirely.
 
 ## Storage and replicas
 
-The JSON store uses copy-on-write validation, file synchronization, and atomic
-rename. Run exactly one application replica against a JSON data volume. A
-multi-replica SaaS deployment should replace the `appstate` storage boundary
-with tenant-scoped transactional storage and move uploads to object storage
-with antivirus scanning and signed download URLs.
+The JSON store validates a cloned next state, then replaces the data file
+with an atomic rename. Run exactly one application replica against one data
+volume. Back up the volume, including `data/uploads`, and test restoration.
 
 ## Operational configuration
 
-- Back up the data volume and test restoration.
-- Use a secret manager for session, OpenAI, and Accelevents credentials.
-- Restrict outbound egress to configured provider APIs.
-- Poll `GET /api/health`; it returns runtime name, version, and timestamp.
-- Preserve the Accelevents sync ledger and AI evaluation provenance as audit
-  data.
-- Put a body-size limit at the proxy no smaller than Rostrum's 12 MiB upload
-  envelope; accepted files are limited to 10 MiB.
+- Use a secret manager for the session, SMTP, OpenAI, and Accelevents
+  credentials.
+- Restrict outbound egress to the provider APIs you configure.
+- Poll `GET /api/health`; it returns the application name, version, and
+  timestamp.
+- Keep the Accelevents sync ledger and review provenance as audit data.
+- Set the proxy body-size limit to 12 MiB or more. Rostrum accepts uploads
+  to 10 MiB inside a 12 MiB request envelope and caps all other request
+  bodies at 1 MiB.
+- Public form submissions are rate limited per session and per IP address.
+  The limiters are in-memory and reset on restart.
