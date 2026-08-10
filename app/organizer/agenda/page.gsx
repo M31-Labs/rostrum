@@ -246,16 +246,15 @@ func Page() Node {
 				<p class="eyebrow">Conflict-aware scheduling</p>
 				<h1>Agenda</h1>
 				<p>
-					{data.sessionCount}
-					sessions ·
-					{data.hardCount}
-					hard conflicts ·
-					{data.warnCount}
-					program warnings.
+					{data.sessionLabel}
+					·
+					{data.hardLabel}
+					·
+					{data.warnLabel + "."}
 				</p>
 			</div>
 			<div class="workspace-header-actions">
-				<a class="button" href="/public/m31-systems-forum-2026/agenda" data-gosx-link>Preview public agenda</a>
+				<a class="button" href={data.workspace.publicAgendaHref} data-gosx-link>Preview public agenda</a>
 				<ActionForm actionName="publishAgenda">
 					<input type="hidden" name="csrf_token" value={csrf.token}></input>
 					<p class="form-error" data-gosx-field-error="agenda" aria-live="polite"></p>

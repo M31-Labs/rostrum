@@ -16,7 +16,7 @@ func Page() Node {
 				</p>
 			</div>
 			<div class="workspace-header-actions">
-				<a class="button" href="/public/m31-systems-forum-2026/speakers" data-gosx-link>Preview gallery</a>
+				<a class="button" href={data.workspace.publicSpeakersHref} data-gosx-link>Preview gallery</a>
 				<a class="button button-primary" href="/organizer/communications" data-gosx-link>Message cohort</a>
 			</div>
 		</header>

@@ -44,6 +44,7 @@ func PublicAgenda(state domain.State, slug string, embedded bool) (map[string]an
 		"embed":        embedded,
 		"pageClass":    pageClass,
 		"section":      "agenda",
+		"workspace":    WorkspaceIdentity(state),
 		"event":        publicEvent(state),
 		"tracks":       tracks,
 		"sessions":     sessions,
@@ -101,6 +102,7 @@ func PublicSpeakers(state domain.State, slug string, embedded bool) (map[string]
 		"embed":        embedded,
 		"pageClass":    pageClass,
 		"section":      "speakers",
+		"workspace":    WorkspaceIdentity(state),
 		"event":        publicEvent(state),
 		"speakers":     speakers,
 		"speakerCount": len(speakers),
@@ -112,9 +114,10 @@ func EmbedAdmin(state domain.State) map[string]any {
 	agendaSource := base + "/agenda?embed=1"
 	speakerSource := base + "/speakers?embed=1"
 	return map[string]any{
-		"section":  "embeds",
-		"demoMode": DemoMode(),
-		"event":    publicEvent(state),
+		"section":   "embeds",
+		"demoMode":  DemoMode(),
+		"workspace": WorkspaceIdentity(state),
+		"event":     publicEvent(state),
 		"agenda": map[string]any{
 			"src":  agendaSource,
 			"code": `<iframe src="` + agendaSource + `" title="` + state.Event.Name + ` agenda" loading="lazy" style="width:100%;min-height:720px;border:0"></iframe>`,

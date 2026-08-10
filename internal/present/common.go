@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -151,4 +152,78 @@ func SortedSessions(sessions []domain.Session) []domain.Session {
 		return result[i].StartsAt.Before(result[j].StartsAt)
 	})
 	return result
+}
+
+// PrimaryForm returns the call-for-proposals form the workspace's
+// navigation links to: the first open form, or, when no form is open, the
+// first form of any status. It reports ok=false when state.Forms is empty,
+// so a caller can hide the "New submission" link on a workspace that has
+// not created a form yet (SEED=empty).
+func PrimaryForm(state domain.State) (domain.SubmissionForm, bool) {
+	for _, form := range state.Forms {
+		if form.Status == "open" {
+			return form, true
+		}
+	}
+	if len(state.Forms) > 0 {
+		return state.Forms[0], true
+	}
+	return domain.SubmissionForm{}, false
+}
+
+// EventMonogram derives a short glyph for the workspace sidebar and
+// organizer chrome from the event name: the first letter of each of the
+// first two words, or the first two letters when the name is a single
+// word. An empty name falls back to "EV" so the sidebar never renders a
+// blank badge.
+func EventMonogram(name string) string {
+	words := strings.Fields(name)
+	switch len(words) {
+	case 0:
+		return "EV"
+	case 1:
+		runes := []rune(strings.ToUpper(words[0]))
+		if len(runes) == 1 {
+			return string(runes[0])
+		}
+		return string(runes[:2])
+	default:
+		first := []rune(strings.ToUpper(words[0]))
+		second := []rune(strings.ToUpper(words[1]))
+		return string(first[0]) + string(second[0])
+	}
+}
+
+// WorkspaceIdentity derives the branding every layout.gsx in app/ shares:
+// the event name, a short monogram, and the links to the primary call for
+// proposals and the public agenda and speaker gallery. Every organizer page
+// and the public-facing layouts add this under the "workspace" key so
+// app/layout.gsx and app/organizer/layout.gsx read live values instead of
+// a fixed demo event and form slug — the links stay correct on a fresh,
+// unseeded workspace (SEED=fresh or SEED=empty) as well as the seeded demo.
+func WorkspaceIdentity(state domain.State) map[string]any {
+	cfpSlug := ""
+	if form, ok := PrimaryForm(state); ok {
+		cfpSlug = form.Slug
+	}
+	return map[string]any{
+		"eventName":          state.Event.Name,
+		"monogram":           EventMonogram(state.Event.Name),
+		"hasCFP":             cfpSlug != "",
+		"cfpHref":            "/submit/" + cfpSlug,
+		"publicAgendaHref":   "/public/" + state.Event.Slug + "/agenda",
+		"publicSpeakersHref": "/public/" + state.Event.Slug + "/speakers",
+	}
+}
+
+// Pluralize returns singular when count is exactly 1, plural otherwise,
+// prefixed with the count itself (for example "1 hard conflict" or
+// "3 hard conflicts"). Every organizer count-plus-noun phrase routes
+// through this helper so a count of one never reads "1 conflicts".
+func Pluralize(count int, singular, plural string) string {
+	noun := plural
+	if count == 1 {
+		noun = singular
+	}
+	return strconv.Itoa(count) + " " + noun
 }

@@ -135,13 +135,35 @@ func main() {
 
 	router := route.NewRouter()
 	router.SetLayout(func(ctx *route.RouteContext, body gosx.Node) gosx.Node {
+		// MetadataBase resolves every relative canonical, icon, and Open
+		// Graph URL below to an absolute one, and — because no page sets
+		// its own Alternates.Canonical — also makes resolveCanonicalURL
+		// fall back to the current request path, so every route (not just
+		// the public agenda and speakers pages) gets a correct canonical
+		// link for free (N8).
 		ctx.SetMetadata(server.Metadata{
+			MetadataBase: publicBase,
 			Links: []server.LinkTag{
 				{Rel: "preconnect", Href: "https://fonts.googleapis.com"},
 				{Rel: "preconnect", Href: "https://fonts.gstatic.com", CrossOrigin: "anonymous"},
 				{Rel: "stylesheet", Href: "/styles.css"},
 				{Rel: "stylesheet", Href: "https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Instrument+Sans:wght@400;500;600&family=Spline+Sans+Mono:wght@400;500&display=swap"},
 				{Rel: "icon", Href: "/favicon.svg", Type: "image/svg+xml"},
+			},
+			Icons: &server.Icons{
+				Apple: []server.IconAsset{{URL: "/apple-touch-icon.png", Sizes: "180x180"}},
+			},
+			// A page-level Metadata func only ever sets Title/Description
+			// (see app/*/page.server.go), so this site default always wins
+			// the OpenGraph merge and every page gets a real preview image
+			// when shared, instead of the empty card a bare Title/Description
+			// pair renders as (N8).
+			OpenGraph: &server.OpenGraph{
+				Type:     "website",
+				SiteName: "Rostrum",
+				Images: []server.MediaAsset{
+					{URL: "/og-image.png", Width: 1200, Height: 630, Alt: "Rostrum — governed program operations"},
+				},
 			},
 		})
 		ctx.AddHead(gosx.El("meta", gosx.Attrs(

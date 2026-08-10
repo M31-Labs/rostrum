@@ -209,16 +209,16 @@ func WorkspaceChrome() Node {
 						<kbd>G X</kbd>
 					</a>
 					<a
-						href="/submit/systems-forum-cfp"
+						href={data.workspace.cfpHref}
 						data-gosx-link
 						data-command-entry
-						hidden={needle.Get() != "" && !"new submission submit proposal public cfp".contains(needle.Get())}
+						hidden={!data.workspace.hasCFP || (needle.Get() != "" && !"new submission submit proposal public cfp".contains(needle.Get()))}
 					>
 						<span>New submission</span>
 						<kbd>↵</kbd>
 					</a>
 					<a
-						href="/public/m31-systems-forum-2026/agenda"
+						href={data.workspace.publicAgendaHref}
 						data-gosx-link
 						data-command-entry
 						hidden={needle.Get() != "" && !"preview public event attendee itinerary agenda".contains(needle.Get())}
@@ -256,9 +256,9 @@ func Layout() Node {
 	return <div class="workspace-shell">
 		<aside class="workspace-sidebar" id="workspace-sidebar">
 			<div class="workspace-event">
-				<span class="event-monogram" aria-hidden="true">M31</span>
+				<span class="event-monogram" aria-hidden="true">{data.workspace.monogram}</span>
 				<div>
-					<strong>M31 Systems Forum</strong>
+					<strong>{data.workspace.eventName}</strong>
 					<small>Program workspace</small>
 				</div>
 			</div>

@@ -1,7 +1,9 @@
 package app
 
 import (
+	"fmt"
 	"log"
+	"strconv"
 	"time"
 
 	"github.com/m31-labs/rostrum/internal/appstate"
@@ -43,7 +45,8 @@ func landingData(state domain.State) map[string]any {
 		}
 	}
 	return map[string]any{
-		"demoMode": present.DemoMode(),
+		"demoMode":  present.DemoMode(),
+		"workspace": present.WorkspaceIdentity(state),
 		"event": map[string]any{
 			"name":     state.Event.Name,
 			"location": state.Event.Location,
@@ -68,12 +71,20 @@ func acceptedString(count int) string {
 }
 
 func conflictString(count int) string {
-	return formatCount(count) + " hard conflicts flagged"
+	return present.Pluralize(count, "hard conflict flagged", "hard conflicts flagged")
 }
 
+// formatCount zero-pads count to two digits below 100 and returns the plain
+// decimal at or above it, so a landing-page stat never prints a punctuation
+// character in place of a digit: the old rune-arithmetic version added
+// count/10 to the byte '0', which passes '9' into ':', ';', and so on for
+// any count of 100 or more.
 func formatCount(count int) string {
-	if count < 10 {
-		return "0" + string(rune('0'+count))
+	if count < 0 {
+		count = 0
 	}
-	return string(rune('0'+count/10)) + string(rune('0'+count%10))
+	if count < 100 {
+		return fmt.Sprintf("%02d", count)
+	}
+	return strconv.Itoa(count)
 }

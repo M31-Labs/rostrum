@@ -63,20 +63,21 @@ func init() {
 // app/portal/page.server.go): this route never lets a visitor tell a valid
 // but unassigned reviewer ID apart from a garbage one.
 func loadReview(ctx *route.RouteContext, page route.FilePage) (any, error) {
+	snapshot := appstate.MustGet().Snapshot()
 	reviewerID, ok := token.NewReviewer().VerifyReviewer(ctx.Param("token"))
 	if !ok {
-		return reviewUnavailable(), nil
+		return reviewUnavailable(snapshot), nil
 	}
-	snapshot := appstate.MustGet().Snapshot()
 	reviewer, found := findReviewer(snapshot, reviewerID)
 	if !found || reviewer.Kind != "human" {
-		return reviewUnavailable(), nil
+		return reviewUnavailable(snapshot), nil
 	}
 
 	plan, hasActivePlan := activeReviewPlan(snapshot)
 	if !hasActivePlan {
 		return map[string]any{
 			"available":       true,
+			"workspace":       present.WorkspaceIdentity(snapshot),
 			"reviewer":        reviewerSummary(reviewer),
 			"hasActiveRound":  false,
 			"submissions":     []map[string]any{},
@@ -87,6 +88,7 @@ func loadReview(ctx *route.RouteContext, page route.FilePage) (any, error) {
 	submissions := reviewerSubmissionRows(snapshot, plan, reviewer)
 	return map[string]any{
 		"available":      true,
+		"workspace":      present.WorkspaceIdentity(snapshot),
 		"reviewer":       reviewerSummary(reviewer),
 		"hasActiveRound": true,
 		"plan": map[string]any{
@@ -103,9 +105,11 @@ func loadReview(ctx *route.RouteContext, page route.FilePage) (any, error) {
 }
 
 // reviewUnavailable is the identical friendly response for a missing or
-// invalid token and an unknown or non-human reviewer ID.
-func reviewUnavailable() map[string]any {
-	return map[string]any{"available": false}
+// invalid token and an unknown or non-human reviewer ID. It still carries
+// "workspace" so app/layout.gsx's global nav renders a live Submit and
+// public-agenda link on this page too, not the fixed demo slug.
+func reviewUnavailable(state domain.State) map[string]any {
+	return map[string]any{"available": false, "workspace": present.WorkspaceIdentity(state)}
 }
 
 func reviewerSummary(reviewer domain.Reviewer) map[string]any {

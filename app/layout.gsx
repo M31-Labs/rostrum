@@ -9,8 +9,8 @@ func Layout() Node {
 				<span>Rostrum</span>
 			</a>
 			<nav class="global-nav" aria-label="Primary">
-				<a href="/submit/systems-forum-cfp" data-gosx-link>Submit</a>
-				<a href="/public/m31-systems-forum-2026/agenda" data-gosx-link>Public agenda</a>
+				<a href={data.workspace.cfpHref} data-gosx-link hidden={!data.workspace.hasCFP}>Submit</a>
+				<a href={data.workspace.publicAgendaHref} data-gosx-link>Public agenda</a>
 				<a class="button button-small" href="/organizer" data-gosx-link>Open workspace</a>
 			</nav>
 		</header>

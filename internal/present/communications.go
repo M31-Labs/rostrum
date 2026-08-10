@@ -102,6 +102,7 @@ func Communications(state domain.State, templateID string, recipientID ...string
 	return map[string]any{
 		"section":    "communications",
 		"demoMode":   DemoMode(),
+		"workspace":  WorkspaceIdentity(state),
 		"templates":  templates,
 		"recipients": recipients,
 		"outbox":     outbox,

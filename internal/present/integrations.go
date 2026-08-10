@@ -44,8 +44,9 @@ func Integrations(state domain.State) map[string]any {
 		credentialTone = "status-positive"
 	}
 	return map[string]any{
-		"section":  "integrations",
-		"demoMode": DemoMode(),
+		"section":   "integrations",
+		"demoMode":  DemoMode(),
+		"workspace": WorkspaceIdentity(state),
 		"integration": map[string]any{
 			"id":              integration.ID,
 			"name":            integration.Name,

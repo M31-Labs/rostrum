@@ -37,7 +37,7 @@ func Page() Node {
 					<a class="button button-primary" href="/organizer" data-gosx-link>
 						{data.demoMode ? "Enter the demo workspace" : "Enter the workspace"}
 					</a>
-					<a class="text-link" href="/submit/systems-forum-cfp" data-gosx-link>
+					<a class="text-link" href={data.workspace.cfpHref} data-gosx-link hidden={!data.workspace.hasCFP}>
 						Walk the speaker path
 						<span aria-hidden="true">→</span>
 					</a>

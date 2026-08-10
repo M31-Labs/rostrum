@@ -32,8 +32,16 @@ func init() {
 			return loadSubmissionDetail(ctx)
 		},
 		Metadata: func(ctx *route.RouteContext, page route.FilePage, data any) (server.Metadata, error) {
+			title := "Submission detail — Rostrum"
+			if fields, ok := data.(map[string]any); ok {
+				if found, _ := fields["found"].(bool); found {
+					if name, ok := fields["title"].(string); ok && name != "" {
+						title = name + " — Rostrum"
+					}
+				}
+			}
 			return server.Metadata{
-				Title:       server.Title{Default: "Submission detail — Rostrum"},
+				Title:       server.Title{Default: title},
 				Description: "Read the full abstract, routing trace, and evaluation history for one proposal.",
 			}, nil
 		},
@@ -53,9 +61,15 @@ func init() {
 // app/portal/page.server.go.
 func loadSubmissionDetail(ctx *route.RouteContext) (any, error) {
 	id := strings.TrimSpace(ctx.Param("id"))
-	data, err := present.SubmissionDetail(appstate.MustGet().Snapshot(), id)
+	snapshot := appstate.MustGet().Snapshot()
+	data, err := present.SubmissionDetail(snapshot, id)
 	if err != nil {
-		return map[string]any{"section": "submissions", "demoMode": present.DemoMode(), "found": false}, nil
+		return map[string]any{
+			"section":   "submissions",
+			"demoMode":  present.DemoMode(),
+			"workspace": present.WorkspaceIdentity(snapshot),
+			"found":     false,
+		}, nil
 	}
 	return data, nil
 }

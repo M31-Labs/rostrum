@@ -88,15 +88,15 @@ func loadPortal(ctx *route.RouteContext) (any, error) {
 		viewingAsOrganizer = true
 	}
 
+	snapshot := appstate.MustGet().Snapshot()
 	if bound != "" && bound == requested {
-		snapshot := appstate.MustGet().Snapshot()
 		if data, err := present.SpeakerPortal(snapshot, bound, ctx.Query("submitted") == "1"); err == nil {
 			data["available"] = true
 			data["viewingAsOrganizer"] = viewingAsOrganizer
 			return data, nil
 		}
 	}
-	return portalUnavailable(), nil
+	return portalUnavailable(snapshot), nil
 }
 
 // isOrganizerVisitor reports whether the request carries a session with any
@@ -119,9 +119,11 @@ func isOrganizerVisitor(r *http.Request) bool {
 }
 
 // portalUnavailable is the identical friendly response for an unbound
-// session, an invalid or expired key, and an unknown speaker (L8).
-func portalUnavailable() map[string]any {
-	return map[string]any{"available": false}
+// session, an invalid or expired key, and an unknown speaker (L8). It still
+// carries "workspace" so app/layout.gsx's global nav renders a live Submit
+// and public-agenda link on this page too, not the fixed demo slug.
+func portalUnavailable(state domain.State) map[string]any {
+	return map[string]any{"available": false, "workspace": present.WorkspaceIdentity(state)}
 }
 
 // boundSpeaker returns the speaker ID bound to the visiting session by

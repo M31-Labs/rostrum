@@ -12,7 +12,9 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/m31-labs/rostrum/internal/appstate"
 	"github.com/m31-labs/rostrum/internal/identity"
+	"github.com/m31-labs/rostrum/internal/present"
 	"m31labs.dev/gosx/auth"
 	"m31labs.dev/gosx/route"
 	"m31labs.dev/gosx/server"
@@ -39,6 +41,7 @@ func loadLogin(ctx *route.RouteContext, page route.FilePage) (any, error) {
 	next := sanitizeNext(ctx.Query("next"))
 	providers := oauthProviderLinks(next)
 	return map[string]any{
+		"workspace":       present.WorkspaceIdentity(appstate.MustGet().Snapshot()),
 		"next":            next,
 		"providers":       providers,
 		"hasProviders":    len(providers) > 0,

@@ -22,10 +22,19 @@ func register(source, kind string) {
 	if err := route.RegisterFileModule(route.FileModuleFor(source, route.FileModuleOptions{
 		Load: func(ctx *route.RouteContext, page route.FilePage) (any, error) {
 			state := appstate.MustGet().Snapshot()
+			var data map[string]any
+			var err error
 			if kind == "agenda" {
-				return present.PublicAgenda(state, ctx.Param("slug"), ctx.Query("embed") == "1")
+				data, err = present.PublicAgenda(state, ctx.Param("slug"), ctx.Query("embed") == "1")
+			} else {
+				data, err = present.PublicSpeakers(state, ctx.Param("slug"), ctx.Query("embed") == "1")
 			}
-			return present.PublicSpeakers(state, ctx.Param("slug"), ctx.Query("embed") == "1")
+			if err != nil {
+				// An unknown event slug is a routing miss, not a server
+				// fault: render the branded 404 instead of a raw 500.
+				return nil, route.NotFound(err.Error())
+			}
+			return data, nil
 		},
 		Metadata: func(ctx *route.RouteContext, page route.FilePage, data any) (server.Metadata, error) {
 			title := "Event agenda — Rostrum"

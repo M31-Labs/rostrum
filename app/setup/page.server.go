@@ -12,7 +12,9 @@ import (
 	"strings"
 
 	"github.com/m31-labs/rostrum/internal/actionflow"
+	"github.com/m31-labs/rostrum/internal/appstate"
 	"github.com/m31-labs/rostrum/internal/identity"
+	"github.com/m31-labs/rostrum/internal/present"
 	"m31labs.dev/gosx/action"
 	"m31labs.dev/gosx/route"
 	"m31labs.dev/gosx/server"
@@ -36,7 +38,10 @@ func loadSetup(ctx *route.RouteContext, page route.FilePage) (any, error) {
 	if manager == nil || !manager.Verify(token) {
 		return nil, route.NotFound("setup is not available")
 	}
-	return map[string]any{"token": token}, nil
+	return map[string]any{
+		"token":     token,
+		"workspace": present.WorkspaceIdentity(appstate.MustGet().Snapshot()),
+	}, nil
 }
 
 func completeSetup(ctx *action.Context) error {

@@ -64,10 +64,25 @@ func init() {
 	source := filepath.Join(slugDir, "page.gsx")
 	if err := route.RegisterFileModule(route.FileModuleFor(source, route.FileModuleOptions{
 		Load: func(ctx *route.RouteContext, page route.FilePage) (any, error) {
-			return present.SubmissionForm(appstate.MustGet().Snapshot(), ctx.Param("slug"))
+			data, err := present.SubmissionForm(appstate.MustGet().Snapshot(), ctx.Param("slug"))
+			if err != nil {
+				// An unknown or retired form slug is a routing miss, not a
+				// server fault: render the branded 404 (app/not-found.gsx)
+				// instead of the raw 500 a plain error would trigger.
+				return nil, route.NotFound(err.Error())
+			}
+			return data, nil
 		},
 		Metadata: func(ctx *route.RouteContext, page route.FilePage, data any) (server.Metadata, error) {
-			return server.Metadata{Title: server.Title{Default: "Call for speakers — Rostrum"}, Description: "Submit a proposal to M31 Systems Forum 2026."}, nil
+			eventName := "the event"
+			if fields, ok := data.(map[string]any); ok {
+				if event, ok := fields["event"].(map[string]any); ok {
+					if name, ok := event["name"].(string); ok && name != "" {
+						eventName = name
+					}
+				}
+			}
+			return server.Metadata{Title: server.Title{Default: "Call for speakers — Rostrum"}, Description: "Submit a proposal to " + eventName + "."}, nil
 		},
 		Actions: route.FileActions{"submitProposal": submitProposal},
 	})); err != nil {
@@ -258,10 +273,13 @@ func loadThanks(ctx *route.RouteContext, page route.FilePage) (any, error) {
 	snapshot := appstate.MustGet().Snapshot()
 	form, found := snapshot.Form(ctx.Param("slug"))
 	if !found {
-		return nil, fmt.Errorf("submission form not found")
+		// Matches the [slug] loader: an unknown or retired form slug is a
+		// routing miss, so this renders the branded 404, not a 500.
+		return nil, route.NotFound("submission form not found")
 	}
 	speakerID := strings.TrimSpace(ctx.Query("speaker"))
 	return map[string]any{
+		"workspace": present.WorkspaceIdentity(snapshot),
 		"form": map[string]any{
 			"heading": form.SuccessPageHeading(),
 			"body":    form.SuccessPageBody(),

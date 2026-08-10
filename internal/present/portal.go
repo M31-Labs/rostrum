@@ -117,8 +117,9 @@ func PortalOperations(state domain.State) map[string]any {
 	}
 
 	return map[string]any{
-		"section":  "portal",
-		"demoMode": DemoMode(),
+		"section":   "portal",
+		"demoMode":  DemoMode(),
+		"workspace": WorkspaceIdentity(state),
 		"metrics": []map[string]any{
 			{"label": "Complete or submitted", "value": totalComplete, "detail": Percent(totalComplete, totalAssigned)},
 			{"label": "Awaiting approval", "value": totalSubmitted, "detail": Percent(totalSubmitted, totalAssigned)},

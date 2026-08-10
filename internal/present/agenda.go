@@ -109,9 +109,10 @@ func Agenda(state domain.State, view string, dayParam string) (map[string]any, e
 	bank := agendaBank(state)
 
 	return map[string]any{
-		"section":  "agenda",
-		"demoMode": DemoMode(),
-		"view":     view,
+		"section":   "agenda",
+		"demoMode":  DemoMode(),
+		"workspace": WorkspaceIdentity(state),
+		"view":      view,
 		"views": []map[string]string{
 			agendaView("list", "List", view),
 			agendaView("day", "Day", view),
@@ -135,6 +136,9 @@ func Agenda(state domain.State, view string, dayParam string) (map[string]any, e
 		"hardCount":    hard,
 		"warnCount":    len(conflicts) - hard,
 		"sessionCount": len(state.Sessions),
+		"sessionLabel": Pluralize(len(state.Sessions), "session", "sessions"),
+		"hardLabel":    Pluralize(hard, "hard conflict", "hard conflicts"),
+		"warnLabel":    Pluralize(len(conflicts)-hard, "program warning", "program warnings"),
 		"publishable":  hard == 0,
 	}, nil
 }

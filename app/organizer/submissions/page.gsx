@@ -36,7 +36,12 @@ func Page() Node {
 			</div>
 			<div class="workspace-header-actions">
 				<a class="button" href="/organizer/export/submissions.csv">Export CSV</a>
-				<a class="button button-primary" href="/submit/systems-forum-cfp" data-gosx-link>New submission</a>
+				<a
+					class="button button-primary"
+					href={data.workspace.cfpHref}
+					data-gosx-link
+					hidden={!data.workspace.hasCFP}
+				>New submission</a>
 			</div>
 		</header>
 		<p class="flash-message">{flash.notice}</p>

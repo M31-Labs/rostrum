@@ -37,6 +37,7 @@ func SubmissionForm(state domain.State, slug string) (map[string]any, error) {
 		levels = append(levels, map[string]string{"value": item, "label": item})
 	}
 	return map[string]any{
+		"workspace": WorkspaceIdentity(state),
 		"event": map[string]any{
 			"name":     state.Event.Name,
 			"theme":    state.Event.Theme,
@@ -275,6 +276,7 @@ func SpeakerPortal(state domain.State, speakerID string, submitted bool) (map[st
 
 	return map[string]any{
 		"submitted": submitted,
+		"workspace": WorkspaceIdentity(state),
 		"event": map[string]any{
 			"name":     state.Event.Name,
 			"dates":    state.Event.StartsAt.Format("January 02") + "–" + state.Event.EndsAt.Format("02, 2006"),

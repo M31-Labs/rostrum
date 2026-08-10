@@ -108,7 +108,12 @@
   --min-panel: 20rem;
   --min-metric: 12rem;
   --min-card: 17rem;
-  --table-wide: 66rem;
+  /* M4: table-wide and agenda-width used to carry several rem of buffer
+     above their grid's own column minimums, which forced the horizontal
+     scroll (and clipped the last column at the panel's right edge) on
+     viewports that had room for the real content. Both now sit close to
+     the sum of their grid's minmax() floors. */
+  --table-wide: 60rem;
   --table-review: 55rem;
   --table-routing: 58rem;
   --avatar-sm: 2.25rem;
@@ -117,7 +122,7 @@
   --dialog-width: 36rem;
   --command-width: 42rem;
   --command-list-height: 27rem;
-  --agenda-width: 74rem;
+  --agenda-width: 68rem;
   --agenda-time-column: 5rem;
   --agenda-cell-height: 8.5rem;
   --flow-aside: 24rem;
@@ -842,11 +847,19 @@ h3 {
 
 .workspace-event {
   position: relative;
+  /* Reserves room for .sidebar-collapse, which is absolutely positioned
+     over this row's top-right corner: without it, a long event name ran
+     under the button instead of stopping short of it. */
+  padding-right: calc(var(--control-height) + var(--space-sm));
   padding-bottom: var(--space-lg);
   border-bottom: var(--border-thin) solid rgb(154 162 148 / 0.3);
   display: flex;
   align-items: center;
   gap: var(--space-sm);
+}
+
+.workspace-event > div {
+  min-width: 0;
 }
 
 .event-monogram {
@@ -867,10 +880,13 @@ h3 {
 }
 
 .workspace-event strong {
+  overflow: hidden;
   font-family: var(--font-display);
   font-size: var(--type-sm);
   font-weight: var(--weight-medium);
   line-height: var(--leading-control);
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .workspace-event small,
@@ -1786,11 +1802,14 @@ code {
 }
 
 /* Wide tables scroll inside their panel; a fading edge signals
-   the overflow without any script. */
+   the overflow without any script. The agenda board (M4) shares the same
+   wide-grid-in-a-panel shape as the tables above, so it gets the identical
+   treatment instead of a bare overflow-x with no scroll affordance. */
 .data-table,
 .submission-table,
 .review-table,
-.task-table {
+.task-table,
+.agenda-board {
   overflow-x: auto;
   background:
     linear-gradient(to right, var(--color-surface) 30%, rgb(252 251 246 / 0)),
@@ -3007,10 +3026,8 @@ code {
 
 .agenda-board {
   margin-bottom: var(--space-lg);
-  overflow-x: auto;
   border: var(--border-thin) solid var(--color-line);
   border-radius: var(--radius-md);
-  background: var(--color-surface);
   box-shadow: var(--shadow-lift);
 }
 
@@ -5524,13 +5541,21 @@ code {
     justify-items: start;
   }
 
+  /* M3: the primary nav used to overflow-scroll with every plain-text
+     link (Submit, Public agenda) hidden below 42rem, so a mobile visitor
+     had no way to reach either route. It now wraps to a second row
+     instead, and every link keeps a 44px (--control-height) touch
+     target -- pure CSS, no disclosure script required. */
   .global-nav {
     width: 100%;
-    overflow-x: auto;
+    flex-wrap: wrap;
+    row-gap: var(--space-3xs);
   }
 
   .global-nav > a:not(.button) {
-    display: none;
+    min-height: var(--control-height);
+    display: inline-flex;
+    align-items: center;
   }
 
   .landing-hero {
@@ -5637,9 +5662,27 @@ code {
     border-bottom: var(--border-thin) solid var(--color-line);
   }
 
-  .public-flow-header > span,
-  .portal-header nav {
+  .public-flow-header > span {
     display: none;
+  }
+
+  /* M3: the portal's Tasks/Schedule/Resources jump nav used to disappear
+     below 42rem with no replacement. It wraps to its own row instead, each
+     link keeping the 44px (--control-height) touch target. */
+  .portal-header {
+    flex-wrap: wrap;
+    row-gap: var(--space-2xs);
+  }
+
+  .portal-header nav {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .portal-header nav a {
+    min-height: var(--control-height);
+    display: inline-flex;
+    align-items: center;
   }
 
   .public-form > footer,
@@ -5767,5 +5810,74 @@ code {
     animation-iteration-count: 1 !important;
     transition-duration: var(--duration-instant) !important;
     scroll-behavior: auto !important;
+  }
+}
+
+/* M2: The Printed Programme. Scoped to the public agenda and speaker
+   pages (.public-event-shell) -- an organizer or speaker portal print job
+   is out of scope here. A visitor who prints the public schedule gets a
+   paper-white page: no nav chrome, no interactive controls, serif
+   headings intact, and every session's time, room, and track name surviving
+   as plain text once color and the ink surfaces are gone. */
+@media print {
+  .site-shell:has(.public-event-shell) > .global-header,
+  .public-event-hero nav,
+  .itinerary-button,
+  .itinerary-dock,
+  .track-legend,
+  .public-session footer .avatar,
+  .skip-link {
+    display: none !important;
+  }
+
+  .site-shell:has(.public-event-shell),
+  .public-event-shell,
+  .public-event-main,
+  body {
+    background: #fff !important;
+  }
+
+  .public-event-hero,
+  .public-event-hero::before,
+  .public-session,
+  .public-agenda-list,
+  .public-speaker-card {
+    border-color: #000 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+  }
+
+  * {
+    color: #000 !important;
+    text-shadow: none !important;
+  }
+
+  h1,
+  h2,
+  h3,
+  .public-event-hero h1,
+  .public-agenda-intro h2,
+  .public-session h2,
+  .public-speaker-copy h2 {
+    font-family: var(--font-display);
+    color: #000 !important;
+  }
+
+  /* Track color coded the left border and the legend dot; print keeps only
+     the track's name, already rendered as text in .public-session-copy > div
+     and .public-speaker-card, so a black-and-white page loses no
+     information. */
+  .public-session {
+    border-left-color: #000 !important;
+  }
+
+  .track-dot,
+  .track-legend i {
+    display: none;
+  }
+
+  .public-session,
+  .public-speaker-card {
+    break-inside: avoid;
   }
 }
