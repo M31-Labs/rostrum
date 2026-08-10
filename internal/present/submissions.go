@@ -4,7 +4,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/odvcencio/programma/internal/domain"
+	"github.com/m31-labs/rostrum/internal/domain"
 )
 
 func Submissions(state domain.State, query, status, category string) map[string]any {

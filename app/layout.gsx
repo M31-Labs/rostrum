@@ -4,9 +4,9 @@ func Layout() Node {
 	return <div class="site-shell">
 		<a class="skip-link" href="#main-content">Skip to content</a>
 		<header class="global-header">
-			<a class="wordmark" href="/" data-gosx-link aria-label="Programma home">
+			<a class="wordmark" href="/" data-gosx-link aria-label="Rostrum home">
 				<span class="wordmark-mark" aria-hidden="true">P/</span>
-				<span>Programma</span>
+				<span>Rostrum</span>
 			</a>
 			<nav class="global-nav" aria-label="Primary">
 				<a href="/submit/systems-forum-cfp" data-gosx-link>Submit</a>

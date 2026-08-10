@@ -102,7 +102,9 @@ func Page() Node {
 									{item.updated}
 								</small>
 								<If cond={item.hasFile}>
-									<small class="mono">{item.fileName}</small>
+									<small class="mono">
+										<a href={item.fileURL} class="file-download">{item.fileName}</a>
+									</small>
 								</If>
 							</div>
 							<ActionForm class="approval-action" actionName="approveTask">

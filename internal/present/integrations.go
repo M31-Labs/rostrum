@@ -5,8 +5,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/odvcencio/programma/internal/accelevents"
-	"github.com/odvcencio/programma/internal/domain"
+	"github.com/m31-labs/rostrum/internal/accelevents"
+	"github.com/m31-labs/rostrum/internal/domain"
 )
 
 func Integrations(state domain.State) map[string]any {
@@ -53,7 +53,7 @@ func Integrations(state domain.State) map[string]any {
 			"lastSync":        DateTime(integration.LastSyncAt),
 			"speakerCount":    len(payloads.Speakers),
 			"sessionCount":    len(payloads.Sessions),
-			"direction":       "Programma → Accelevents",
+			"direction":       "Rostrum → Accelevents",
 			"speakerEndpoint": "/rest/host/event/{eventUrl}/speaker",
 			"sessionEndpoint": "/rest/host/event/{eventUrl}/session",
 		},

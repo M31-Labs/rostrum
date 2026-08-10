@@ -5,7 +5,7 @@ func Layout() Node {
 		<header class="public-flow-header">
 			<a class="wordmark" href="/" data-gosx-link>
 				<span class="wordmark-mark" aria-hidden="true">P/</span>
-				<span>Programma</span>
+				<span>Rostrum</span>
 			</a>
 			<span>Speaker application</span>
 		</header>

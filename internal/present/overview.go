@@ -3,7 +3,7 @@ package present
 import (
 	"fmt"
 
-	"github.com/odvcencio/programma/internal/domain"
+	"github.com/m31-labs/rostrum/internal/domain"
 )
 
 func Overview(state domain.State) map[string]any {

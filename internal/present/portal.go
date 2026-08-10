@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/odvcencio/programma/internal/domain"
+	"github.com/m31-labs/rostrum/internal/domain"
 )
 
 func PortalOperations(state domain.State) map[string]any {
@@ -72,6 +72,7 @@ func PortalOperations(state domain.State) map[string]any {
 			"updatedUnix": item.UpdatedAt.Unix(),
 			"fileName":    item.FileName,
 			"hasFile":     item.FileName != "",
+			"fileURL":     "/portal-file/" + item.ID,
 			"portalURL":   "/portal/" + speaker.ID,
 		})
 	}

@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/odvcencio/programma/internal/domain"
+	"github.com/m31-labs/rostrum/internal/domain"
 )
 
 // JSONStore is a small durable store for the hackathon and self-hosted path.
@@ -148,7 +148,7 @@ func (store *JSONStore) persistLocked() error {
 	}
 	data = append(data, '\n')
 
-	temporary, err := os.CreateTemp(filepath.Dir(store.path), ".programma-*.tmp")
+	temporary, err := os.CreateTemp(filepath.Dir(store.path), ".rostrum-*.tmp")
 	if err != nil {
 		return fmt.Errorf("create temporary data file: %w", err)
 	}

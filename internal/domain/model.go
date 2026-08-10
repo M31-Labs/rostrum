@@ -81,6 +81,8 @@ type SubmissionForm struct {
 	Status               string         `json:"status"`
 	WelcomeHeading       string         `json:"welcomeHeading"`
 	WelcomeBody          string         `json:"welcomeBody"`
+	SuccessHeading       string         `json:"successHeading"`
+	SuccessBody          string         `json:"successBody"`
 	CloseAt              time.Time      `json:"closeAt"`
 	RedirectToPortal     bool           `json:"redirectToPortal"`
 	SendConfirmation     bool           `json:"sendConfirmation"`
@@ -111,6 +113,33 @@ type QuestionRule struct {
 	TargetFieldID string `json:"targetFieldId"`
 	Effect        string `json:"effect"`
 	Description   string `json:"description"`
+}
+
+// DefaultSuccessHeading and DefaultSuccessBody are the success-page copy a
+// form falls back to when its builder has not set SuccessHeading or
+// SuccessBody (FB-5). A freshly seeded form leaves both blank, so a new
+// workspace shows this copy until an organizer customizes it.
+const (
+	DefaultSuccessHeading = "Thanks — we have your proposal"
+	DefaultSuccessBody    = "Your proposal is safely in our review queue and a confirmation is on its way. You can finish your speaker profile in the portal while review begins."
+)
+
+// SuccessPageHeading returns the form's customized success-page heading, or
+// DefaultSuccessHeading when the builder has not set SuccessHeading.
+func (form SubmissionForm) SuccessPageHeading() string {
+	if strings.TrimSpace(form.SuccessHeading) != "" {
+		return form.SuccessHeading
+	}
+	return DefaultSuccessHeading
+}
+
+// SuccessPageBody returns the form's customized success-page body, or
+// DefaultSuccessBody when the builder has not set SuccessBody.
+func (form SubmissionForm) SuccessPageBody() string {
+	if strings.TrimSpace(form.SuccessBody) != "" {
+		return form.SuccessBody
+	}
+	return DefaultSuccessBody
 }
 
 type Speaker struct {

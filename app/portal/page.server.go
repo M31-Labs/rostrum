@@ -8,12 +8,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/odvcencio/programma/internal/actionflow"
-	"github.com/odvcencio/programma/internal/appstate"
-	"github.com/odvcencio/programma/internal/domain"
-	"github.com/odvcencio/programma/internal/live"
-	"github.com/odvcencio/programma/internal/present"
-	"github.com/odvcencio/programma/internal/token"
+	"github.com/m31-labs/rostrum/internal/actionflow"
+	"github.com/m31-labs/rostrum/internal/appstate"
+	"github.com/m31-labs/rostrum/internal/domain"
+	"github.com/m31-labs/rostrum/internal/live"
+	"github.com/m31-labs/rostrum/internal/present"
+	"github.com/m31-labs/rostrum/internal/token"
 	"m31labs.dev/gosx/action"
 	"m31labs.dev/gosx/route"
 	"m31labs.dev/gosx/server"
@@ -32,7 +32,7 @@ func init() {
 			return loadPortal(ctx)
 		},
 		Metadata: func(ctx *route.RouteContext, page route.FilePage, data any) (server.Metadata, error) {
-			return server.Metadata{Title: server.Title{Default: "Speaker portal — Programma"}, Description: "Update your profile, complete event tasks, and review your schedule."}, nil
+			return server.Metadata{Title: server.Title{Default: "Speaker portal — Rostrum"}, Description: "Update your profile, complete event tasks, and review your schedule."}, nil
 		},
 		Actions: route.FileActions{
 			"updateProfile": updateProfile,

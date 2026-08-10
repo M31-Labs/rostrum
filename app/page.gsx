@@ -31,7 +31,7 @@ func Page() Node {
 					The calm way to run a complicated program.
 				</h1>
 				<p class="lede">
-					Programma connects proposals, review, speakers, schedules, and public publishing without hiding decisions in a maze of automation.
+					Rostrum connects proposals, review, speakers, schedules, and public publishing without hiding decisions in a maze of automation.
 				</p>
 				<div class="hero-actions">
 					<a class="button button-primary" href="/organizer" data-gosx-link>Enter the demo workspace</a>

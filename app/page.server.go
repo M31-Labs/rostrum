@@ -4,8 +4,8 @@ import (
 	"log"
 	"time"
 
-	"github.com/odvcencio/programma/internal/appstate"
-	"github.com/odvcencio/programma/internal/domain"
+	"github.com/m31-labs/rostrum/internal/appstate"
+	"github.com/m31-labs/rostrum/internal/domain"
 	"m31labs.dev/gosx/route"
 	"m31labs.dev/gosx/server"
 )
@@ -18,7 +18,7 @@ func init() {
 		},
 		Metadata: func(ctx *route.RouteContext, page route.FilePage, data any) (server.Metadata, error) {
 			return server.Metadata{
-				Title:       server.Title{Default: "Programma — governed program operations"},
+				Title:       server.Title{Default: "Rostrum — governed program operations"},
 				Description: "Open program operations for calls for proposals, review, speaker onboarding, scheduling, and public event experiences.",
 			}, nil
 		},

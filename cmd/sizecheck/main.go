@@ -86,7 +86,7 @@ var gosxAssetPattern = regexp.MustCompile(`/gosx/assets/(?:runtime|islands)/[A-Z
 var gosxManifestPattern = regexp.MustCompile(`(?s)<script[^>]+id="gosx-manifest"[^>]*>(.*?)</script>`)
 
 func main() {
-	root := flag.String("root", ".", "Programma project root")
+	root := flag.String("root", ".", "Rostrum project root")
 	flag.Parse()
 
 	absRoot, err := filepath.Abs(*root)

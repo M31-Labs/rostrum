@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/odvcencio/programma/internal/domain"
+	"github.com/m31-labs/rostrum/internal/domain"
 )
 
 func TestEvaluateUsesOfflinePreviewWithoutAPIKey(t *testing.T) {
@@ -15,7 +15,7 @@ func TestEvaluateUsesOfflinePreviewWithoutAPIKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if assessment.Provider != "local-preview" || assessment.Model != "programma-rubric-preview-v1" {
+	if assessment.Provider != "local-preview" || assessment.Model != "rostrum-rubric-preview-v1" {
 		t.Fatalf("unexpected provenance: %#v", assessment)
 	}
 	if len(assessment.Scores) != 2 {

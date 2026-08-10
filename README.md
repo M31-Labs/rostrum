@@ -1,8 +1,8 @@
-# Programma
+# Rostrum
 
 **A calm operating system for complicated event programs.**
 
-Programma is a GoSX-native, open-source SaaS foundation for calls for speakers,
+Rostrum is a GoSX-native, open-source SaaS foundation for calls for speakers,
 multi-round review, speaker onboarding, conflict-aware scheduling, and public
 program publishing. It implements the complete workflow in the supplied
 [Sessionboard-style product brief](https://docs.google.com/document/d/1rBHJtiNKHv4i43tdf2Rm0sDEYuIcajhmAPoBKR_Az-A/edit)
@@ -37,7 +37,7 @@ rubrics, external publishing, and an optional AI second opinion.
 
 ## Capability coverage
 
-| Brief requirement | Programma evidence |
+| Brief requirement | Rostrum evidence |
 |---|---|
 | Conditional CFP and category routing | `/organizer/forms`, `/submit/systems-forum-cfp`, `rules/cfp-routing.arb`, `rules/form-visibility.arb` |
 | Speaker profiles, headshots, slides, and documents | `/portal/{speaker}`, guarded uploads, organizer readiness matrix |
@@ -59,7 +59,7 @@ go run .
 ```
 
 Open [http://localhost:8080](http://localhost:8080). The default JSON workspace
-is created at `data/programma.json`. To run a disposable, always-clean demo:
+is created at `data/rostrum.json`. To run a disposable, always-clean demo:
 
 ```bash
 DEMO_MODE=memory go run .
@@ -141,7 +141,7 @@ after a durable mutation succeeds.
 ### OpenAI review assistance
 
 Set `OPENAI_API_KEY` to replace the deterministic offline rubric preview with a
-live Responses API call. Programma sends proposal content and the
+live Responses API call. Rostrum sends proposal content and the
 organizer-authored rubric—not speaker email, profile, onboarding, or private
 review data. Requests use strict structured output, `store: false`, a stable
 hashed safety identifier, bounded output, and explicit refusal/error handling.
@@ -161,7 +161,7 @@ ACCELEVENTS_EVENT_URL=m31-systems-forum-2026 \
 go run .
 ```
 
-The adapter uses stable Programma IDs as external IDs, stops on the first
+The adapter uses stable Rostrum IDs as external IDs, stops on the first
 remote error, and records completed or failed runs in the visible ledger.
 
 ## Public interfaces
@@ -188,7 +188,7 @@ from that worktree and install Arbiter if it is not already on the path:
 ```bash
 cd ../gosx-programma-islands
 go build -o ./bin/gosx ./cmd/gosx
-cd ../programma
+cd ../rostrum
 go install m31labs.dev/arbiter/cmd/arbiter@v1.9.0
 ```
 

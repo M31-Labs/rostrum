@@ -4756,3 +4756,65 @@ code {
     scroll-behavior: auto !important;
   }
 }
+
+/* Agenda day switcher, unscheduled bank, unschedule popover, download links. */
+.day-switcher {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2xs);
+  margin-bottom: var(--space-sm);
+}
+
+.agenda-bank {
+  margin-bottom: var(--space-lg);
+  padding: var(--space-md);
+  border: var(--border-thin) solid var(--color-line);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-muted);
+}
+
+.agenda-bank-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-sm);
+}
+
+.agenda-bank-empty {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--type-xs);
+}
+
+.agenda-bank-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+}
+
+.agenda-bank-list .agenda-card {
+  width: min(20rem, 100%);
+  cursor: grab;
+}
+
+.agenda-card-detail {
+  position: relative;
+}
+
+.agenda-card-popover {
+  position: absolute;
+  right: 0;
+  z-index: 5;
+  margin-top: var(--space-2xs);
+  padding: var(--space-sm);
+  border: var(--border-thin) solid var(--color-line-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  box-shadow: 0 0.5rem 1.5rem var(--color-shadow);
+}
+
+.file-download {
+  color: var(--color-accent-strong);
+  text-decoration: underline;
+}

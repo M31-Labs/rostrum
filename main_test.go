@@ -15,7 +15,7 @@ func TestSecurityHeadersAuthorizeOnlyTheGoSXInlineRuntime(t *testing.T) {
 	if !strings.HasPrefix(hash, "'sha256-") {
 		t.Fatalf("navigation CSP hash = %q", hash)
 	}
-	handler := securityHeaders("https://programma.example", hash)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := securityHeaders("https://rostrum.example", hash)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	recorder := httptest.NewRecorder()

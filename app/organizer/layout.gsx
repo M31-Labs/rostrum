@@ -4,7 +4,7 @@ import "m31labs.dev/gosx/browser"
 
 //gosx:island
 func WorkspaceChrome() Node {
-	collapsed := signal.NewShared("$programmaWorkspaceRail", false)
+	collapsed := signal.NewShared("$rostrumWorkspaceRail", false)
 	query := signal.New("")
 	needle := signal.Derive(func() string { return query.Get().trim().toLower() })
 	routeChord := signal.New(false)

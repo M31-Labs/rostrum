@@ -78,7 +78,9 @@ func Page() Node {
 						<div class="submission-title" role="cell">
 							<span class="avatar avatar-small">{row.initials}</span>
 							<div>
-								<strong>{row.title}</strong>
+								<a href={"/organizer/submissions/" + row.id} data-gosx-link>
+									<strong>{row.title}</strong>
+								</a>
 								<small>{row.speaker}</small>
 							</div>
 						</div>

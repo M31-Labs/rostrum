@@ -80,6 +80,39 @@ func AgendaBoard(props any) Node {
 		browser.Submit(draggedID.Get() != "", "#agenda-drag-form")
 	}
 	return <div class="agenda-board-island">
+		<aside class="agenda-bank" aria-label="Unscheduled sessions">
+			<header class="agenda-bank-head">
+				<h2>Unscheduled</h2>
+				<p>
+					Accepted sessions waiting for a room and time. Drag a card onto the board to place it.
+				</p>
+			</header>
+			<div class="agenda-bank-list">
+				<Each of={props.bank} as="session">
+					<article
+						class={"agenda-card agenda-bank-card track-" + session.trackTone}
+						draggable="true"
+						aria-grabbed={draggedID.Get() == session.id}
+						data-gosx-event-value={session.id}
+						data-session-id={session.id}
+						data-session-title={session.title}
+						data-track-id={session.trackID}
+						onDragStart={startDrag}
+						onDragEnd={endDrag}
+					>
+						<div class="agenda-card-top">
+							<span class="mono">{session.time}</span>
+							<span class={"status-pill status-" + session.tone}>{session.status}</span>
+						</div>
+						<h3>{session.title}</h3>
+						<p>{session.speakers}</p>
+					</article>
+				</Each>
+				<p class="agenda-bank-empty" hidden={!props.bankEmpty}>
+					Nothing waiting. Accepted talks land here until you place them.
+				</p>
+			</div>
+		</aside>
 		<section class="agenda-board" aria-label={props.date}>
 			<header class="agenda-board-head">
 				<span>{props.date}</span>
@@ -121,6 +154,37 @@ func AgendaBoard(props any) Node {
 									</div>
 									<h3>{session.title}</h3>
 									<p>{session.speakers}</p>
+									<details class="agenda-card-detail">
+										<summary aria-label={"More about " + session.title}>⋯</summary>
+										<div class="agenda-card-popover">
+											<dl>
+												<div>
+													<dt>Room</dt>
+													<dd>{session.room}</dd>
+												</div>
+												<div>
+													<dt>Track</dt>
+													<dd>{session.track}</dd>
+												</div>
+											</dl>
+											<form
+												class="agenda-unschedule-form"
+												method="post"
+												action={props.unscheduleAction}
+												data-gosx-form
+												data-gosx-form-mode="post"
+												data-gosx-form-state="idle"
+												data-gosx-enhance="form"
+												data-gosx-enhance-layer="bootstrap"
+												data-gosx-fallback="native-form"
+											>
+												<input type="hidden" name="csrf_token" value={props.csrf}></input>
+												<input type="hidden" name="session_id" value={session.id}></input>
+												<input type="hidden" name="day" value={props.day}></input>
+												<button class="button button-compact" type="submit">Return to bank</button>
+											</form>
+										</div>
+									</details>
 								</article>
 							</Each>
 							<span class="drop-hint">Drop here</span>
@@ -210,6 +274,11 @@ func Page() Node {
 					<a class={view.class} href={view.href} data-gosx-link>{view.label}</a>
 				</Each>
 			</nav>
+			<nav class="day-switcher" aria-label="Agenda day">
+				<Each of={data.days} as="day">
+					<a class={day.class} href={day.href} data-gosx-link>{day.label}</a>
+				</Each>
+			</nav>
 			<p>
 				<span aria-hidden="true">↕</span>
 				Drag a card or open its keyboard-accessible move controls.
@@ -218,9 +287,13 @@ func Page() Node {
 		<If cond={data.boardView}>
 			<AgendaBoard
 				date={data.date}
+				day={data.dayKey}
 				rooms={data.rooms}
 				slots={data.slots}
+				bank={data.bank}
+				bankEmpty={data.bankEmpty}
 				action={actionPath("moveSession")}
+				unscheduleAction={actionPath("unscheduleSession")}
 				csrf={csrf.token}
 				actionMessage={action.message}
 			></AgendaBoard>

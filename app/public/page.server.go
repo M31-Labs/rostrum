@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"runtime"
 
-	"github.com/odvcencio/programma/internal/appstate"
-	"github.com/odvcencio/programma/internal/present"
+	"github.com/m31-labs/rostrum/internal/appstate"
+	"github.com/m31-labs/rostrum/internal/present"
 	"m31labs.dev/gosx/route"
 	"m31labs.dev/gosx/server"
 )
@@ -28,10 +28,10 @@ func register(source, kind string) {
 			return present.PublicSpeakers(state, ctx.Param("slug"), ctx.Query("embed") == "1")
 		},
 		Metadata: func(ctx *route.RouteContext, page route.FilePage, data any) (server.Metadata, error) {
-			title := "Event agenda — Programma"
+			title := "Event agenda — Rostrum"
 			description := "Browse the event schedule and build a personal itinerary."
 			if kind == "speakers" {
-				title = "Speakers — Programma"
+				title = "Speakers — Rostrum"
 				description = "Meet the event speakers and explore their sessions."
 			}
 			return server.Metadata{Title: server.Title{Default: title}, Description: description}, nil

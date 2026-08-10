@@ -1,6 +1,6 @@
 package present
 
-import "github.com/odvcencio/programma/internal/domain"
+import "github.com/m31-labs/rostrum/internal/domain"
 
 func Settings(state domain.State) map[string]any {
 	return map[string]any{

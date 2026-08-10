@@ -5,7 +5,7 @@ func Layout() Node {
 		<header class="portal-header">
 			<a class="wordmark" href="/" data-gosx-link>
 				<span class="wordmark-mark" aria-hidden="true">P/</span>
-				<span>Programma</span>
+				<span>Rostrum</span>
 			</a>
 			<nav>
 				<a href="#tasks">Tasks</a>

@@ -7,12 +7,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/odvcencio/programma/internal/actionflow"
-	"github.com/odvcencio/programma/internal/appstate"
-	"github.com/odvcencio/programma/internal/domain"
-	"github.com/odvcencio/programma/internal/live"
-	"github.com/odvcencio/programma/internal/present"
-	decisionrules "github.com/odvcencio/programma/rules"
+	"github.com/m31-labs/rostrum/internal/actionflow"
+	"github.com/m31-labs/rostrum/internal/appstate"
+	"github.com/m31-labs/rostrum/internal/domain"
+	"github.com/m31-labs/rostrum/internal/live"
+	"github.com/m31-labs/rostrum/internal/present"
+	decisionrules "github.com/m31-labs/rostrum/rules"
 	"m31labs.dev/gosx/action"
 	"m31labs.dev/gosx/route"
 	"m31labs.dev/gosx/server"
@@ -22,14 +22,15 @@ import (
 func init() {
 	if err := route.RegisterFileModuleHere(route.FileModuleOptions{
 		Load: func(ctx *route.RouteContext, page route.FilePage) (any, error) {
-			return present.Agenda(appstate.MustGet().Snapshot(), ctx.Query("view"))
+			return present.Agenda(appstate.MustGet().Snapshot(), ctx.Query("view"), ctx.Query("day"))
 		},
 		Metadata: func(ctx *route.RouteContext, page route.FilePage, data any) (server.Metadata, error) {
-			return server.Metadata{Title: server.Title{Default: "Agenda — Programma"}, Description: "A conflict-aware, drag-and-drop program scheduler."}, nil
+			return server.Metadata{Title: server.Title{Default: "Agenda — Rostrum"}, Description: "A conflict-aware, drag-and-drop program scheduler."}, nil
 		},
 		Actions: route.FileActions{
-			"moveSession":   moveSession,
-			"publishAgenda": publishAgenda,
+			"moveSession":       moveSession,
+			"unscheduleSession": unscheduleSession,
+			"publishAgenda":     publishAgenda,
 		},
 	}); err != nil {
 		log.Fatal(err)
@@ -102,8 +103,47 @@ func moveSession(ctx *action.Context) error {
 	session.AddFlash(ctx.Request, "notice", message)
 	live.Broadcast("agenda:moved", map[string]string{"session": sessionID, "room": roomID, "startsAt": startsAtValue})
 	// Give managed navigation a distinct URL so the freshly rendered board is
-	// installed even when the user drops onto the currently visible day view.
-	actionflow.Redirect(ctx, "/organizer/agenda?view=day&moved="+url.QueryEscape(sessionID))
+	// installed even when the user drops onto the currently visible day view,
+	// and keep the organizer on the day they just dropped onto.
+	redirect := "/organizer/agenda?view=day&moved=" + url.QueryEscape(sessionID)
+	if len(startsAtValue) >= len("2006-01-02") {
+		redirect += "&day=" + url.QueryEscape(startsAtValue[:len("2006-01-02")])
+	}
+	actionflow.Redirect(ctx, redirect)
+	return nil
+}
+
+// unscheduleSession returns a placed session to the unscheduled bank: it
+// zeroes the times and marks the session unscheduled again, undoing a
+// mis-drop without touching its room or track assignment.
+func unscheduleSession(ctx *action.Context) error {
+	sessionID := strings.TrimSpace(ctx.FormData["session_id"])
+	if sessionID == "" {
+		return action.Validation("Choose a session to return to the bank.", map[string]string{"session_id": "A session is required."}, ctx.FormData)
+	}
+
+	title := ""
+	if err := appstate.MustGet().Update(func(state *domain.State) error {
+		item, found := state.Session(sessionID)
+		if !found {
+			return fmt.Errorf("session %s not found", sessionID)
+		}
+		item.StartsAt = time.Time{}
+		item.EndsAt = time.Time{}
+		item.Status = "unscheduled"
+		title = item.Title
+		return nil
+	}); err != nil {
+		return err
+	}
+	session.AddFlash(ctx.Request, "notice", "Returned “"+title+"” to the unscheduled bank.")
+	live.Broadcast("agenda:moved", map[string]string{"session": sessionID, "room": "", "startsAt": ""})
+	day := strings.TrimSpace(ctx.FormData["day"])
+	redirect := "/organizer/agenda?view=day"
+	if day != "" {
+		redirect += "&day=" + url.QueryEscape(day)
+	}
+	actionflow.Redirect(ctx, redirect)
 	return nil
 }
 

@@ -7,12 +7,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/odvcencio/programma/internal/actionflow"
-	"github.com/odvcencio/programma/internal/appstate"
-	"github.com/odvcencio/programma/internal/domain"
-	"github.com/odvcencio/programma/internal/live"
-	"github.com/odvcencio/programma/internal/present"
-	"github.com/odvcencio/programma/internal/reviewassist"
+	"github.com/m31-labs/rostrum/internal/actionflow"
+	"github.com/m31-labs/rostrum/internal/appstate"
+	"github.com/m31-labs/rostrum/internal/domain"
+	"github.com/m31-labs/rostrum/internal/live"
+	"github.com/m31-labs/rostrum/internal/present"
+	"github.com/m31-labs/rostrum/internal/reviewassist"
 	"m31labs.dev/gosx/action"
 	"m31labs.dev/gosx/route"
 	"m31labs.dev/gosx/server"
@@ -25,7 +25,7 @@ func init() {
 			return present.Review(appstate.MustGet().Snapshot()), nil
 		},
 		Metadata: func(ctx *route.RouteContext, page route.FilePage, data any) (server.Metadata, error) {
-			return server.Metadata{Title: server.Title{Default: "Review — Programma"}, Description: "Multi-round rubric review with attributable AI assistance."}, nil
+			return server.Metadata{Title: server.Title{Default: "Review — Rostrum"}, Description: "Multi-round rubric review with attributable AI assistance."}, nil
 		},
 		Actions: route.FileActions{"aiAssist": addAIAssist, "saveReview": saveReview},
 	}); err != nil {

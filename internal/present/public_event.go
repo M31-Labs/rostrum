@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/odvcencio/programma/internal/domain"
+	"github.com/m31-labs/rostrum/internal/domain"
 )
 
 func PublicAgenda(state domain.State, slug string, embedded bool) (map[string]any, error) {

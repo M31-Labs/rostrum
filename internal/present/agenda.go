@@ -6,11 +6,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/odvcencio/programma/internal/domain"
-	decisionrules "github.com/odvcencio/programma/rules"
+	"github.com/m31-labs/rostrum/internal/domain"
+	decisionrules "github.com/m31-labs/rostrum/rules"
 )
 
-func Agenda(state domain.State, view string) (map[string]any, error) {
+// Agenda builds the organizer agenda board. dayParam is the raw "day" query
+// value (format 2006-01-02); an empty or unrecognized value falls back to the
+// first event day that has a scheduled session, else the event's first day.
+func Agenda(state domain.State, view string, dayParam string) (map[string]any, error) {
 	switch view {
 	case "list", "day", "week", "track", "room":
 	default:
@@ -56,10 +59,14 @@ func Agenda(state domain.State, view string) (map[string]any, error) {
 	if err != nil {
 		location = time.UTC
 	}
-	day := state.Event.StartsAt.In(location).AddDate(0, 0, 1)
-	slotClock := [][2]int{{9, 0}, {10, 0}, {10, 30}, {11, 30}, {12, 30}, {13, 30}, {14, 30}, {16, 0}}
-	slots := make([]map[string]any, 0, len(slotClock))
-	for _, clock := range slotClock {
+
+	eventDays := agendaEventDays(state, location)
+	day := agendaSelectedDay(state, eventDays, location, dayParam)
+	dayKey := day.Format("2006-01-02")
+
+	clocks := agendaSlotClocks(state, day, location)
+	slots := make([]map[string]any, 0, len(clocks))
+	for _, clock := range clocks {
 		start := time.Date(day.Year(), day.Month(), day.Day(), clock[0], clock[1], 0, 0, location)
 		cells := make([]map[string]any, 0, len(state.Event.Rooms))
 		for _, room := range state.Event.Rooms {
@@ -91,7 +98,7 @@ func Agenda(state domain.State, view string) (map[string]any, error) {
 	for _, track := range state.Event.Tracks {
 		tracks = append(tracks, map[string]string{"id": track.ID, "name": track.Name, "tone": track.Color})
 	}
-	times := make([]map[string]string, 0, len(slotClock))
+	times := make([]map[string]string, 0, len(slots))
 	for _, slot := range slots {
 		times = append(times, map[string]string{"value": slot["start"].(string), "label": slot["label"].(string)})
 	}
@@ -99,6 +106,7 @@ func Agenda(state domain.State, view string) (map[string]any, error) {
 	for _, item := range SessionsForList(state) {
 		moveSessions = append(moveSessions, sessionCard(state, item))
 	}
+	bank := agendaBank(state)
 
 	return map[string]any{
 		"section": "agenda",
@@ -113,17 +121,141 @@ func Agenda(state domain.State, view string) (map[string]any, error) {
 		"boardView":    view == "day",
 		"groups":       agendaGroups(state, view, location),
 		"date":         day.Format("Monday · January 02, 2006"),
+		"dayKey":       dayKey,
+		"days":         agendaDayTabs(eventDays, day),
 		"rooms":        rooms,
 		"tracks":       tracks,
 		"times":        times,
 		"slots":        slots,
 		"moveSessions": moveSessions,
+		"bank":         bank,
+		"bankEmpty":    len(bank) == 0,
 		"conflicts":    conflictRows,
 		"hardCount":    hard,
 		"warnCount":    len(conflicts) - hard,
 		"sessionCount": len(state.Sessions),
 		"publishable":  hard == 0,
 	}, nil
+}
+
+// agendaEventDays returns every calendar day from Event.StartsAt through
+// Event.EndsAt, inclusive, in the given location. It always returns at least
+// one day so the board never has nothing to render.
+func agendaEventDays(state domain.State, location *time.Location) []time.Time {
+	start := state.Event.StartsAt.In(location)
+	end := state.Event.EndsAt.In(location)
+	if end.Before(start) {
+		end = start
+	}
+	days := make([]time.Time, 0, 4)
+	for cursor := start; !cursor.After(end); cursor = cursor.AddDate(0, 0, 1) {
+		days = append(days, cursor)
+	}
+	if len(days) == 0 {
+		days = append(days, start)
+	}
+	return days
+}
+
+// agendaSelectedDay picks the board day: dayParam if it names one of
+// eventDays, else the first event day carrying a scheduled session, else the
+// first event day.
+func agendaSelectedDay(state domain.State, eventDays []time.Time, location *time.Location, dayParam string) time.Time {
+	if dayParam != "" {
+		for _, candidate := range eventDays {
+			if candidate.Format("2006-01-02") == dayParam {
+				return candidate
+			}
+		}
+	}
+	for _, candidate := range eventDays {
+		for _, item := range state.Sessions {
+			if !item.Scheduled() {
+				continue
+			}
+			when := item.StartsAt.In(location)
+			if when.Year() == candidate.Year() && when.YearDay() == candidate.YearDay() {
+				return candidate
+			}
+		}
+	}
+	return eventDays[0]
+}
+
+// agendaDayTabs renders one tab per event day, linking to the day board.
+func agendaDayTabs(eventDays []time.Time, selected time.Time) []map[string]string {
+	selectedKey := selected.Format("2006-01-02")
+	tabs := make([]map[string]string, 0, len(eventDays))
+	for _, candidate := range eventDays {
+		key := candidate.Format("2006-01-02")
+		className := "view-tab"
+		if key == selectedKey {
+			className += " active"
+		}
+		tabs = append(tabs, map[string]string{
+			"id":    key,
+			"label": candidate.Format("Mon, Jan 02"),
+			"href":  "/organizer/agenda?view=day&day=" + key,
+			"class": className,
+		})
+	}
+	return tabs
+}
+
+// agendaSlotClocks returns the half-hour board grid from 08:00 through 18:00,
+// plus one extra clock for every scheduled session that day whose start does
+// not land on a grid line, so no session ever disappears off the board.
+func agendaSlotClocks(state domain.State, day time.Time, location *time.Location) [][2]int {
+	clocks := make([][2]int, 0, 24)
+	seen := make(map[[2]int]bool, 24)
+	addClock := func(clock [2]int) {
+		if !seen[clock] {
+			seen[clock] = true
+			clocks = append(clocks, clock)
+		}
+	}
+	for hour := 8; hour <= 18; hour++ {
+		addClock([2]int{hour, 0})
+		if hour != 18 {
+			addClock([2]int{hour, 30})
+		}
+	}
+	gridLength := len(clocks)
+	for _, item := range state.Sessions {
+		if !item.Scheduled() {
+			continue
+		}
+		when := item.StartsAt.In(location)
+		if when.Year() != day.Year() || when.YearDay() != day.YearDay() {
+			continue
+		}
+		addClock([2]int{when.Hour(), when.Minute()})
+	}
+	sort.Slice(clocks[gridLength:], func(i, j int) bool {
+		left, right := clocks[gridLength+i], clocks[gridLength+j]
+		if left[0] != right[0] {
+			return left[0] < right[0]
+		}
+		return left[1] < right[1]
+	})
+	return clocks
+}
+
+// agendaBank lists every unscheduled (accepted-but-unplaced) session, ordered
+// by title, for the drag-from-bank region of the board.
+func agendaBank(state domain.State) []map[string]any {
+	unscheduled := make([]domain.Session, 0)
+	for _, item := range state.Sessions {
+		if !item.Scheduled() {
+			unscheduled = append(unscheduled, item)
+		}
+	}
+	sort.SliceStable(unscheduled, func(i, j int) bool { return unscheduled[i].Title < unscheduled[j].Title })
+	cards := make([]map[string]any, 0, len(unscheduled))
+	for _, item := range unscheduled {
+		cards = append(cards, sessionCard(state, item))
+	}
+	return cards
 }
 
 func agendaView(id, label, active string) map[string]string {
@@ -198,12 +330,16 @@ func filterSessions(sessions []domain.Session, keep func(domain.Session) bool) [
 }
 
 func sessionCard(state domain.State, session domain.Session) map[string]any {
+	date := session.StartsAt.Format("Mon, Jan 02")
+	if !session.Scheduled() {
+		date = "Unscheduled"
+	}
 	return map[string]any{
 		"id":          session.ID,
 		"title":       session.Title,
 		"time":        TimeRange(session.StartsAt, session.EndsAt),
 		"start":       session.StartsAt.Format("2006-01-02T15:04"),
-		"date":        session.StartsAt.Format("Mon, Jan 02"),
+		"date":        date,
 		"roomID":      session.RoomID,
 		"room":        RoomName(state, session.RoomID),
 		"trackID":     session.TrackID,

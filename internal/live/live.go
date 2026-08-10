@@ -2,7 +2,7 @@ package live
 
 import "m31labs.dev/gosx/hub"
 
-var Dashboard = hub.New("programma-dashboard")
+var Dashboard = hub.New("rostrum-dashboard")
 
 func init() {
 	Dashboard.SetState("status", "ready")

@@ -2,7 +2,7 @@ package public
 
 //gosx:island
 func PublicItinerary(props any) Node {
-	saved := signal.NewShared("$programmaItinerary", []string{})
+	saved := signal.NewShared("$rostrumItinerary", []string{})
 	status := signal.New("")
 	toggle := func() {
 		status.Set(saved.Get().contains(data["id"]) ? data["title"] + " removed from your itinerary." : data["title"] + " added to your itinerary.")

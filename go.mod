@@ -1,4 +1,4 @@
-module github.com/odvcencio/programma
+module github.com/m31-labs/rostrum
 
 go 1.26
 
@@ -7,7 +7,7 @@ require (
 	m31labs.dev/gosx v0.36.0
 )
 
-// Programma exercises the next GoSX island VM surface while it is developed
+// Rostrum exercises the next GoSX island VM surface while it is developed
 // alongside this repository. Remove this replace after that GoSX revision is
 // released and update the requirement above to the published version.
 replace m31labs.dev/gosx => ../gosx-programma-islands

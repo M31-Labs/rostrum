@@ -3,7 +3,7 @@ package publicapi
 import (
 	"sort"
 
-	"github.com/odvcencio/programma/internal/domain"
+	"github.com/m31-labs/rostrum/internal/domain"
 )
 
 // Index is deliberately a directory, not a serialization of internal state.
@@ -11,7 +11,7 @@ import (
 // reviewer records, speaker email, upload paths, or integration configuration.
 func Index(state domain.State) map[string]any {
 	return map[string]any{
-		"name":    "Programma public API",
+		"name":    "Rostrum public API",
 		"version": "v1",
 		"event": map[string]any{
 			"id": state.Event.ID, "name": state.Event.Name, "slug": state.Event.Slug,

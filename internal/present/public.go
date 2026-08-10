@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/odvcencio/programma/internal/domain"
-	decisionrules "github.com/odvcencio/programma/rules"
+	"github.com/m31-labs/rostrum/internal/domain"
+	decisionrules "github.com/m31-labs/rostrum/rules"
 )
 
 func SubmissionForm(state domain.State, slug string) (map[string]any, error) {
@@ -149,9 +149,13 @@ func SpeakerPortal(state domain.State, speakerID string, submitted bool) (map[st
 		completion, found := completion(state, task.ID, speaker.ID)
 		status := domain.TaskOutstanding
 		fileName := ""
+		fileURL := ""
 		if found {
 			status = completion.Status
 			fileName = completion.FileName
+			if fileName != "" {
+				fileURL = "/portal-file/" + completion.ID
+			}
 		}
 		if status == domain.TaskApproved || status == domain.TaskSubmitted {
 			complete++
@@ -167,6 +171,8 @@ func SpeakerPortal(state domain.State, speakerID string, submitted bool) (map[st
 			"statusValue": status,
 			"tone":        StatusTone(status),
 			"fileName":    fileName,
+			"hasFile":     fileName != "",
+			"fileURL":     fileURL,
 			"complete":    status == domain.TaskApproved || status == domain.TaskSubmitted,
 		})
 	}

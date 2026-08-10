@@ -1,8 +1,8 @@
 package present
 
 import (
-	"github.com/odvcencio/programma/internal/domain"
-	decisionrules "github.com/odvcencio/programma/rules"
+	"github.com/m31-labs/rostrum/internal/domain"
+	decisionrules "github.com/m31-labs/rostrum/rules"
 )
 
 func Forms(state domain.State) (map[string]any, error) {

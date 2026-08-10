@@ -7,7 +7,7 @@ func Page() Node {
 				<p class="eyebrow">One-way publishing</p>
 				<h1>Integrations</h1>
 				<p>
-					Programma stays canonical. External event platforms receive deliberate, observable exports.
+					Rostrum stays canonical. External event platforms receive deliberate, observable exports.
 				</p>
 			</div>
 			<div class="workspace-header-actions">
@@ -40,7 +40,7 @@ func Page() Node {
 				<p class="panel-kicker">Native connector</p>
 				<h2>{data.integration.name}</h2>
 				<p>
-					Publishes speaker profiles first, then scheduled sessions. Updates never pull data back into Programma.
+					Publishes speaker profiles first, then scheduled sessions. Updates never pull data back into Rostrum.
 				</p>
 				<div class="integration-facts">
 					<span>

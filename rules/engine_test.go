@@ -3,7 +3,7 @@ package rules
 import (
 	"testing"
 
-	"github.com/odvcencio/programma/internal/domain"
+	"github.com/m31-labs/rostrum/internal/domain"
 )
 
 func TestEngineRoutesGovernanceSubmissions(t *testing.T) {

@@ -20,7 +20,7 @@ import (
 // bare local run still issues working portal links. main.go already refuses
 // to start in production without a unique SESSION_SECRET, so this fallback
 // never weakens a production deployment.
-const developmentSecret = "programma-development-secret-change-me"
+const developmentSecret = "rostrum-development-secret-change-me"
 
 // TTL is how long a signed token stays valid after Sign issues it. A
 // speaker invitation is emailed once and may sit unopened for weeks, so the
@@ -29,7 +29,7 @@ const TTL = 90 * 24 * time.Hour
 
 // keyPurpose separates the derived signing key from any other key HMAC-SHA256
 // might derive from the same SESSION_SECRET elsewhere in the process.
-const keyPurpose = "programma.portal.token.v1:"
+const keyPurpose = "rostrum.portal.token.v1:"
 
 // Token signs and verifies portal identity tokens for one process.
 type Token struct {

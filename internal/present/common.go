@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/odvcencio/programma/internal/domain"
+	"github.com/m31-labs/rostrum/internal/domain"
 )
 
 func SpeakerName(state domain.State, id string) string {

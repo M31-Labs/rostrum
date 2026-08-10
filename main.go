@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/csv"
 	"encoding/json"
@@ -16,14 +17,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/odvcencio/programma/internal/appstate"
-	programcalendar "github.com/odvcencio/programma/internal/calendar"
-	"github.com/odvcencio/programma/internal/domain"
-	"github.com/odvcencio/programma/internal/live"
-	"github.com/odvcencio/programma/internal/present"
-	"github.com/odvcencio/programma/internal/publicapi"
-	"github.com/odvcencio/programma/internal/store"
-	_ "github.com/odvcencio/programma/modules"
+	"github.com/m31-labs/rostrum/internal/appstate"
+	programcalendar "github.com/m31-labs/rostrum/internal/calendar"
+	"github.com/m31-labs/rostrum/internal/domain"
+	"github.com/m31-labs/rostrum/internal/live"
+	"github.com/m31-labs/rostrum/internal/present"
+	"github.com/m31-labs/rostrum/internal/publicapi"
+	"github.com/m31-labs/rostrum/internal/store"
+	_ "github.com/m31-labs/rostrum/modules"
 	"m31labs.dev/gosx"
 	"m31labs.dev/gosx/controller"
 	"m31labs.dev/gosx/env"
@@ -33,7 +34,19 @@ import (
 	"m31labs.dev/gosx/session"
 )
 
-const developmentSessionSecret = "programma-development-secret-change-me"
+const developmentSessionSecret = "rostrum-development-secret-change-me"
+
+// Session keys shared with the portal route module
+// (app/portal/page.server.go). portalSpeakerSessionKey mirrors that
+// package's private portalSessionKey constant; keep the literal in sync if
+// either side changes it. portalAdminSessionKey is new here: organizerContext
+// sets it for any session that has visited the (documented, proxy-gated)
+// `/organizer` surface, and portalFile accepts it as an alternative to the
+// owning speaker's own binding.
+const (
+	portalSpeakerSessionKey = "portal_speaker"
+	portalAdminSessionKey   = "portal_admin"
+)
 
 func main() {
 	_, thisFile, _, _ := runtime.Caller(0)
@@ -43,7 +56,7 @@ func main() {
 	}
 
 	now := time.Now().UTC()
-	dataPath := getenv("DATA_PATH", filepath.Join(root, "data", "programma.json"))
+	dataPath := getenv("DATA_PATH", filepath.Join(root, "data", "rostrum.json"))
 	if strings.EqualFold(getenv("DEMO_MODE", "true"), "memory") {
 		dataPath = ":memory:"
 	}
@@ -100,7 +113,7 @@ func main() {
 		// the GoSX navigation runtime explicitly at the document boundary.
 		ctx.AddHead(server.NavigationScript())
 		configureRouteRuntime(ctx)
-		return server.HTMLDocument(ctx.Title("Programma"), ctx.Head(), body)
+		return server.HTMLDocument(ctx.Title("Rostrum"), ctx.Head(), body)
 	})
 	if err := router.AddDir(filepath.Join(root, "app"), route.FileRoutesOptions{}); err != nil {
 		log.Fatal(err)
@@ -110,6 +123,7 @@ func main() {
 	app.EnableGzip()
 	app.Use(securityHeaders(publicBase, navigationScriptCSPHash()))
 	app.Use(sessions.Middleware)
+	app.Use(organizerContext())
 	app.Use(bodyLimit())
 	app.Use(sessions.Protect)
 	app.SetPublicDir(filepath.Join(root, "public"))
@@ -117,7 +131,7 @@ func main() {
 		ctx.CachePublic(30 * time.Second)
 		return map[string]any{
 			"ok":      true,
-			"app":     "Programma",
+			"app":     "Rostrum",
 			"version": gosx.Version,
 			"time":    time.Now().UTC().Format(time.RFC3339),
 		}, nil
@@ -137,6 +151,7 @@ func main() {
 	app.Mount("/live", live.Dashboard)
 	app.Mount("/calendar/", http.HandlerFunc(calendarDownload))
 	app.Mount("/portal-upload/", http.HandlerFunc(portalUpload(root)))
+	app.Mount("/portal-file/", http.HandlerFunc(portalFile(root)))
 	app.Mount("/organizer/export/submissions.csv", http.HandlerFunc(submissionsCSV))
 	app.Mount("/favicon.ico", http.RedirectHandler("/favicon.svg", http.StatusTemporaryRedirect))
 	app.Mount("/demo/reset", http.HandlerFunc(resetDemo))
@@ -147,7 +162,7 @@ func main() {
 	}
 	app.Mount("/", rootHandler)
 
-	log.Printf("Programma listening on %s (data: %s)", publicBase, workspace.Path())
+	log.Printf("Rostrum listening on %s (data: %s)", publicBase, workspace.Path())
 	log.Fatal(app.ListenAndServe(":" + port))
 }
 
@@ -162,18 +177,18 @@ func configureRouteRuntime(ctx *route.RouteContext) {
 
 	if path == "/organizer" || strings.HasPrefix(path, "/organizer/") {
 		ctx.Runtime().Controller(controller.Config{
-			Name: "programma-workspace-preferences",
+			Name: "rostrum-workspace-preferences",
 			Root: "#workspace-sidebar",
 			Storage: &controller.Storage{
 				Area:      "local",
-				Namespace: "programma-workspace",
+				Namespace: "rostrum-workspace",
 				Load: []controller.StorageSlot{{
 					Key:    "rail-collapsed",
-					Signal: "$programmaWorkspaceRail",
+					Signal: "$rostrumWorkspaceRail",
 				}},
 				Save: []controller.StorageSlot{{
 					Key:    "rail-collapsed",
-					Signal: "$programmaWorkspaceRail",
+					Signal: "$rostrumWorkspaceRail",
 				}},
 			},
 		})
@@ -185,18 +200,18 @@ func configureRouteRuntime(ctx *route.RouteContext) {
 			slug = "event"
 		}
 		ctx.Runtime().Controller(controller.Config{
-			Name: "programma-public-itinerary",
+			Name: "rostrum-public-itinerary",
 			Root: ".public-itinerary",
 			Storage: &controller.Storage{
 				Area:      "local",
-				Namespace: "programma-itinerary-" + slug,
+				Namespace: "rostrum-itinerary-" + slug,
 				Load: []controller.StorageSlot{{
 					Key:    "sessions",
-					Signal: "$programmaItinerary",
+					Signal: "$rostrumItinerary",
 				}},
 				Save: []controller.StorageSlot{{
 					Key:    "sessions",
-					Signal: "$programmaItinerary",
+					Signal: "$rostrumItinerary",
 				}},
 			},
 		})
@@ -204,7 +219,7 @@ func configureRouteRuntime(ctx *route.RouteContext) {
 
 	switch path {
 	case "/organizer":
-		ctx.Runtime().BindHub("programma-overview", "/live", refreshBindings(
+		ctx.Runtime().BindHub("rostrum-overview", "/live", refreshBindings(
 			"agenda:moved",
 			"agenda:published",
 			"communication:queued",
@@ -222,7 +237,7 @@ func configureRouteRuntime(ctx *route.RouteContext) {
 			"workspace:reset",
 		))
 	case "/organizer/portal":
-		ctx.Runtime().BindHub("programma-portal-matrix", "/live", refreshBindings(
+		ctx.Runtime().BindHub("rostrum-portal-matrix", "/live", refreshBindings(
 			"speaker:updated",
 			"task:approved",
 			"task:uploaded",
@@ -298,6 +313,25 @@ func bodyLimit() server.Middleware {
 	}
 }
 
+// organizerContext binds a visiting session to the organizer surface. The
+// `/organizer` prefix carries no application-level identity of its own —
+// docs/deployment.md documents that a production deployment must gate it at
+// the reverse proxy — so this middleware is the honest reflection of that
+// boundary: whoever the proxy already let reach `/organizer` is trusted as
+// an organizer for the rest of that session, including file downloads
+// through portalFile.
+func organizerContext() server.Middleware {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			path := strings.TrimSuffix(r.URL.Path, "/")
+			if path == "/organizer" || strings.HasPrefix(path, "/organizer/") {
+				session.Current(r).Set(portalAdminSessionKey, "1")
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 func navigationScriptCSPHash() string {
 	rendered := gosx.RenderHTML(server.NavigationScript())
 	start := strings.Index(rendered, ">")
@@ -316,7 +350,7 @@ func submissionsCSV(w http.ResponseWriter, r *http.Request) {
 	}
 	state := appstate.MustGet().Snapshot()
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
-	w.Header().Set("Content-Disposition", `attachment; filename="programma-submissions.csv"`)
+	w.Header().Set("Content-Disposition", `attachment; filename="rostrum-submissions.csv"`)
 	w.Header().Set("Cache-Control", "private, no-store")
 	writer := csv.NewWriter(w)
 	_ = writer.Write([]string{"id", "title", "status", "category", "format", "level", "speakers", "routed_owner", "submitted_at"})
@@ -463,9 +497,155 @@ func allowedUpload(name string) bool {
 	}
 }
 
+// downloadContentTypes lists the MIME types portalFile trusts to send as
+// Content-Type on a download. A completion's stored ContentType came from a
+// client-supplied multipart header at upload time (main.go's portalUpload),
+// so it is untrusted; any value outside this allowlist degrades to
+// application/octet-stream. X-Content-Type-Options: nosniff is already set
+// globally by securityHeaders, so a browser never sniffs past either value.
+var downloadContentTypes = map[string]bool{
+	"application/pdf":               true,
+	"application/vnd.ms-powerpoint": true,
+	"application/vnd.openxmlformats-officedocument.presentationml.presentation": true,
+	"application/vnd.apple.keynote":                                             true,
+	"application/x-iwork-keynote-sffkey":                                        true,
+	"image/png":                                                                 true,
+	"image/jpeg":                                                                true,
+	"image/webp":                                                                true,
+}
+
+func downloadContentType(stored string) string {
+	stored = strings.TrimSpace(stored)
+	if downloadContentTypes[strings.ToLower(stored)] {
+		return stored
+	}
+	return "application/octet-stream"
+}
+
+// sanitizeDownloadFilename returns a Content-Disposition-safe filename.
+// portalUpload already ran the original name through filepath.Base and an
+// extension allowlist before storing it, so this is defense in depth rather
+// than the primary control: it strips any path separator, quote, or control
+// character so a corrupted or hand-edited store record can never inject a
+// header value, and falls back to a generic name when nothing safe remains.
+func sanitizeDownloadFilename(name string) string {
+	name = filepath.Base(strings.TrimSpace(name))
+	if name == "" || name == "." || name == string(filepath.Separator) {
+		return "download"
+	}
+	var clean strings.Builder
+	for _, r := range name {
+		if r == '"' || r == '\\' || r < 0x20 || r == 0x7f {
+			continue
+		}
+		clean.WriteRune(r)
+	}
+	if sanitized := strings.TrimSpace(clean.String()); sanitized != "" {
+		return sanitized
+	}
+	return "download"
+}
+
+// portalFile serves GET /portal-file/{completionID}, the download route for
+// files speakers upload through portalUpload (PT-1).
+//
+// Path traversal defense: the request path segment is never used to build a
+// filesystem path. It is only compared for equality against the ID field of
+// each stored TaskCompletion; the byte that reaches the filesystem is always
+// completion.StoredPath, a value this process itself wrote in portalUpload,
+// and even that is re-validated with filepath.Rel to stay inside
+// data/uploads before opening.
+//
+// Authorization: the requester must either be the speaker who owns the
+// completion (the portalSpeakerSessionKey session binding PT-2 sets in
+// app/portal/page.server.go) or an organizer (portalAdminSessionKey, set by
+// organizerContext above for any session that has reached `/organizer`).
+// A missing completion and an unauthorized one both render the same 404 —
+// no different status distinguishes "no such file" from "not yours" — so a
+// stranger cannot use the response to enumerate valid completion IDs
+// (mirrors loadPortal's identical treatment of unknown-speaker vs.
+// missing-key in app/portal/page.server.go).
+func portalFile(root string) http.HandlerFunc {
+	uploadDir := filepath.Join(root, "data", "uploads")
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		completionID := strings.TrimPrefix(r.URL.Path, "/portal-file/")
+		if completionID == "" || strings.ContainsAny(completionID, "/\\") {
+			http.NotFound(w, r)
+			return
+		}
+
+		state := appstate.MustGet().Snapshot()
+		var completion *domain.TaskCompletion
+		for index := range state.TaskCompletions {
+			if state.TaskCompletions[index].ID == completionID {
+				completion = &state.TaskCompletions[index]
+				break
+			}
+		}
+		if completion == nil || completion.StoredPath == "" {
+			http.NotFound(w, r)
+			return
+		}
+
+		visitor := session.Current(r)
+		isOwner := completion.SpeakerID != "" && visitor.String(portalSpeakerSessionKey) == completion.SpeakerID
+		isOrganizer := visitor.String(portalAdminSessionKey) == "1"
+		if !isOwner && !isOrganizer {
+			http.NotFound(w, r)
+			return
+		}
+
+		storedPath := filepath.FromSlash(completion.StoredPath)
+		rel, err := filepath.Rel(uploadDir, storedPath)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+			log.Printf("portal-file: completion %s stored path resolves outside data/uploads; refusing to serve", completionID)
+			http.NotFound(w, r)
+			return
+		}
+
+		file, err := os.Open(storedPath)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		defer file.Close()
+		info, err := file.Stat()
+		if err != nil {
+			http.Error(w, "could not read upload", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", downloadContentType(completion.ContentType))
+		w.Header().Set("Content-Disposition", `attachment; filename="`+sanitizeDownloadFilename(completion.FileName)+`"`)
+		w.Header().Set("Cache-Control", "private, no-store")
+		http.ServeContent(w, r, "", info.ModTime(), file)
+	}
+}
+
 func resetDemo(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	// Reset wipes the workspace, so it must not be reachable by any visitor
+	// who merely holds a session CSRF token (SE-8/M2). Require a shared secret
+	// when RESET_SECRET is configured; refuse entirely in production when none
+	// is set, so a deployed demo cannot be wiped out from under a judge.
+	if secret := strings.TrimSpace(getenv("RESET_SECRET", "")); secret != "" {
+		provided := r.URL.Query().Get("secret")
+		if provided == "" {
+			provided = r.FormValue("secret")
+		}
+		if subtle.ConstantTimeCompare([]byte(provided), []byte(secret)) != 1 {
+			http.NotFound(w, r)
+			return
+		}
+	} else if strings.EqualFold(getenv("APP_ENV", "development"), "production") {
+		http.NotFound(w, r)
 		return
 	}
 	if err := appstate.MustGet().Reset(); err != nil {

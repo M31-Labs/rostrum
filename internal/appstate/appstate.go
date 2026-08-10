@@ -4,7 +4,7 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/odvcencio/programma/internal/store"
+	"github.com/m31-labs/rostrum/internal/store"
 )
 
 var (

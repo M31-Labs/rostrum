@@ -7,11 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/odvcencio/programma/internal/domain"
+	"github.com/m31-labs/rostrum/internal/domain"
 )
 
 func TestJSONStorePersistsValidatedMutation(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "programma.json")
+	path := filepath.Join(t.TempDir(), "rostrum.json")
 	seed := domain.Seed(time.Date(2026, time.August, 9, 12, 0, 0, 0, time.UTC))
 	first, err := Open(path, seed)
 	if err != nil {

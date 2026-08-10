@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/odvcencio/programma/internal/domain"
+	"github.com/m31-labs/rostrum/internal/domain"
 	"m31labs.dev/arbiter"
 	"m31labs.dev/arbiter/vm"
 )

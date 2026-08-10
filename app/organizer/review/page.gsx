@@ -165,7 +165,9 @@ func Page() Node {
 				<Each of={data.candidates} as="candidate">
 					<article class="review-row" role="row">
 						<div role="cell">
-							<strong>{candidate.title}</strong>
+							<a href={"/organizer/submissions/" + candidate.id} data-gosx-link>
+								<strong>{candidate.title}</strong>
+							</a>
 							<small>{candidate.speaker}</small>
 						</div>
 						<span role="cell">{candidate.category}</span>

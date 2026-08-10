@@ -1,6 +1,6 @@
 # Deployment guide
 
-Programma ships as one Go process plus the `app/` templates and `public/`
+Rostrum ships as one Go process plus the `app/` templates and `public/`
 assets. The default JSON store is appropriate for a single replica,
 self-hosted demonstration, or evaluation environment.
 
@@ -23,20 +23,20 @@ Mount a writable directory for `DATA_PATH` and uploaded files.
 
 ```bash
 make build GOSX=../gosx-programma-islands/bin/gosx
-docker build -t programma:local .
+docker build -t rostrum:local .
 docker run --rm -p 8080:8080 \
   -e APP_ENV=production \
   -e PUBLIC_URL=https://program.example.com \
   -e SESSION_SECRET='replace-with-a-random-secret-of-at-least-32-characters' \
-  -e DATA_PATH=/app/data/programma.json \
-  -v programma-data:/app/data \
-  programma:local
+  -e DATA_PATH=/app/data/rostrum.json \
+  -v rostrum-data:/app/data \
+  rostrum:local
 ```
 
 The Dockerfile consumes that verified `dist/` bundle rather than rebuilding
 against a different framework revision. It copies the stripped server, `.gsx`
 templates, hashed GoSX runtime/island assets, public files, and seeded data; it
-contains no Go source and runs as the non-root `programma` user. The process
+contains no Go source and runs as the non-root `rostrum` user. The process
 refuses to start in production with the development session secret, a
 non-HTTPS public URL, or the in-memory store.
 
@@ -54,7 +54,7 @@ public deployment, protect `/organizer/*`, `/organizer/export/*`, `/portal/*`,
 proxy or application authentication. Keep `/`, `/submit/*`, `/public/*`,
 `/api/health`, and the intentionally public `/api/v1/*` projections open as
 needed. Cloudflare Tunnel plus Access is one suitable topology for a demo;
-Programma itself does not depend on Cloudflare.
+Rostrum itself does not depend on Cloudflare.
 
 ## Storage and replicas
 
@@ -72,5 +72,5 @@ with antivirus scanning and signed download URLs.
 - Poll `GET /api/health`; it returns runtime name, version, and timestamp.
 - Preserve the Accelevents sync ledger and AI evaluation provenance as audit
   data.
-- Put a body-size limit at the proxy no smaller than Programma's 12 MiB upload
+- Put a body-size limit at the proxy no smaller than Rostrum's 12 MiB upload
   envelope; accepted files are limited to 10 MiB.

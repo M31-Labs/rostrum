@@ -177,7 +177,7 @@ func Page() Node {
 										<If cond={task.fileName != ""}>
 											<p class="uploaded-file">
 												Current file ·
-												{task.fileName}
+												<a href={task.fileURL} class="file-download">{task.fileName}</a>
 											</p>
 										</If>
 									</div>

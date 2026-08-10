@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/odvcencio/programma/internal/domain"
+	"github.com/m31-labs/rostrum/internal/domain"
 )
 
 const (
@@ -25,7 +25,7 @@ const (
 
 // Assessment is a rubric-shaped second opinion. Provider and Model are kept
 // with the evaluation so an organizer can always distinguish a live model
-// result from Programma's deterministic offline preview.
+// result from Rostrum's deterministic offline preview.
 type Assessment struct {
 	Scores         map[string]float64 `json:"scores"`
 	Comments       string             `json:"comments"`
@@ -229,7 +229,7 @@ func buildRequest(model string, plan domain.ReviewPlan, submission domain.Submis
 		Reasoning:        reasoning{Effort: "low"},
 		MaxOutputTokens:  700,
 		Store:            false,
-		SafetyIdentifier: "programma-" + hex.EncodeToString(digest[:8]),
+		SafetyIdentifier: "rostrum-" + hex.EncodeToString(digest[:8]),
 	}, nil
 }
 
@@ -323,7 +323,7 @@ func offlinePreview(plan domain.ReviewPlan, submission domain.Submission) Assess
 		Comments:       "Offline rubric preview: the proposal has a clear program angle. Ask for one concrete operating example, the evidence observed, and the change it produced before relying on this score.",
 		Recommendation: recommendation,
 		Provider:       "local-preview",
-		Model:          "programma-rubric-preview-v1",
+		Model:          "rostrum-rubric-preview-v1",
 	}
 }
 

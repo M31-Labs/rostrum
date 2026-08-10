@@ -3,8 +3,8 @@ package embeds
 import (
 	"log"
 
-	"github.com/odvcencio/programma/internal/appstate"
-	"github.com/odvcencio/programma/internal/present"
+	"github.com/m31-labs/rostrum/internal/appstate"
+	"github.com/m31-labs/rostrum/internal/present"
 	"m31labs.dev/gosx/route"
 	"m31labs.dev/gosx/server"
 )
@@ -15,7 +15,7 @@ func init() {
 			return present.EmbedAdmin(appstate.MustGet().Snapshot()), nil
 		},
 		Metadata: func(ctx *route.RouteContext, page route.FilePage, data any) (server.Metadata, error) {
-			return server.Metadata{Title: server.Title{Default: "Embeds — Programma"}, Description: "Preview mobile agenda and speaker gallery embeds."}, nil
+			return server.Metadata{Title: server.Title{Default: "Embeds — Rostrum"}, Description: "Preview mobile agenda and speaker gallery embeds."}, nil
 		},
 	}); err != nil {
 		log.Fatal(err)

@@ -3,8 +3,8 @@ package organizer
 import (
 	"log"
 
-	"github.com/odvcencio/programma/internal/appstate"
-	"github.com/odvcencio/programma/internal/present"
+	"github.com/m31-labs/rostrum/internal/appstate"
+	"github.com/m31-labs/rostrum/internal/present"
 	"m31labs.dev/gosx/route"
 	"m31labs.dev/gosx/server"
 )
@@ -16,7 +16,7 @@ func init() {
 		},
 		Metadata: func(ctx *route.RouteContext, page route.FilePage, data any) (server.Metadata, error) {
 			return server.Metadata{
-				Title:       server.Title{Default: "Overview — Programma"},
+				Title:       server.Title{Default: "Overview — Rostrum"},
 				Description: "A real-time command surface for program operations.",
 			}, nil
 		},

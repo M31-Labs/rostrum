@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/odvcencio/programma/internal/domain"
+	"github.com/m31-labs/rostrum/internal/domain"
 )
 
 func SpeakerCalendar(state domain.State, speakerID string) ([]byte, string, error) {
@@ -16,7 +16,7 @@ func SpeakerCalendar(state domain.State, speakerID string) ([]byte, string, erro
 	var builder strings.Builder
 	writeLine(&builder, "BEGIN:VCALENDAR")
 	writeLine(&builder, "VERSION:2.0")
-	writeLine(&builder, "PRODID:-//M31 Labs//Programma//EN")
+	writeLine(&builder, "PRODID:-//M31 Labs//Rostrum//EN")
 	writeLine(&builder, "CALSCALE:GREGORIAN")
 	writeLine(&builder, "METHOD:PUBLISH")
 	writeLine(&builder, "X-WR-CALNAME:"+escape(state.Event.Name+" — "+speaker.Name()))
@@ -26,7 +26,7 @@ func SpeakerCalendar(state domain.State, speakerID string) ([]byte, string, erro
 		}
 		room, _ := state.Room(item.RoomID)
 		writeLine(&builder, "BEGIN:VEVENT")
-		writeLine(&builder, "UID:"+escape(item.ID+"@programma.local"))
+		writeLine(&builder, "UID:"+escape(item.ID+"@rostrum.local"))
 		writeLine(&builder, "DTSTAMP:"+time.Now().UTC().Format("20060102T150405Z"))
 		writeLine(&builder, "DTSTART:"+item.StartsAt.UTC().Format("20060102T150405Z"))
 		writeLine(&builder, "DTEND:"+item.EndsAt.UTC().Format("20060102T150405Z"))

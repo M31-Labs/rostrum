@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/odvcencio/programma/internal/domain"
+	"github.com/m31-labs/rostrum/internal/domain"
 )
 
 func Speakers(state domain.State, query string) map[string]any {

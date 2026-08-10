@@ -3,18 +3,24 @@ package submit
 import (
 	"fmt"
 	"log"
+	"net/url"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
-	"github.com/odvcencio/programma/internal/actionflow"
-	"github.com/odvcencio/programma/internal/appstate"
-	"github.com/odvcencio/programma/internal/domain"
-	"github.com/odvcencio/programma/internal/live"
-	"github.com/odvcencio/programma/internal/present"
-	"github.com/odvcencio/programma/internal/ratelimit"
-	decisionrules "github.com/odvcencio/programma/rules"
+	"github.com/m31-labs/rostrum/internal/actionflow"
+	"github.com/m31-labs/rostrum/internal/appstate"
+	"github.com/m31-labs/rostrum/internal/domain"
+	"github.com/m31-labs/rostrum/internal/live"
+	"github.com/m31-labs/rostrum/internal/mail"
+	"github.com/m31-labs/rostrum/internal/present"
+	"github.com/m31-labs/rostrum/internal/ratelimit"
+	"github.com/m31-labs/rostrum/internal/token"
+	decisionrules "github.com/m31-labs/rostrum/rules"
+	"m31labs.dev/gosx"
 	"m31labs.dev/gosx/action"
 	"m31labs.dev/gosx/route"
 	"m31labs.dev/gosx/server"
@@ -32,17 +38,52 @@ var submissionLimiter = ratelimit.NewCounter(5)
 // submissionLimiter by dropping cookies between requests (SE-3b).
 var submissionIPLimiter = ratelimit.NewTokenBucket(10, time.Hour)
 
+// confirmationSender is the process-wide mail transport, resolved once on
+// first use. It is deferred (not a plain package var) because mail.FromEnv
+// reads SMTP_* from the environment, which main() loads from .env only after
+// package-level initialization has already run.
+var confirmationSender = sync.OnceValue(mail.FromEnv)
+
+// publicBaseURL is the absolute base a confirmation email's portal link must
+// use, because that link is followed from an inbox, outside the browser
+// session. It mirrors main()'s PUBLIC_URL default.
+func publicBaseURL() string {
+	if base := strings.TrimSpace(os.Getenv("PUBLIC_URL")); base != "" {
+		return base
+	}
+	port := strings.TrimSpace(os.Getenv("PORT"))
+	if port == "" {
+		port = "8080"
+	}
+	return "http://localhost:" + port
+}
+
 func init() {
 	_, thisFile, _, _ := runtime.Caller(0)
-	source := filepath.Join(filepath.Dir(thisFile), "[slug]", "page.gsx")
+	slugDir := filepath.Join(filepath.Dir(thisFile), "[slug]")
+	source := filepath.Join(slugDir, "page.gsx")
 	if err := route.RegisterFileModule(route.FileModuleFor(source, route.FileModuleOptions{
 		Load: func(ctx *route.RouteContext, page route.FilePage) (any, error) {
 			return present.SubmissionForm(appstate.MustGet().Snapshot(), ctx.Param("slug"))
 		},
 		Metadata: func(ctx *route.RouteContext, page route.FilePage, data any) (server.Metadata, error) {
-			return server.Metadata{Title: server.Title{Default: "Call for speakers — Programma"}, Description: "Submit a proposal to M31 Systems Forum 2026."}, nil
+			return server.Metadata{Title: server.Title{Default: "Call for speakers — Rostrum"}, Description: "Submit a proposal to M31 Systems Forum 2026."}, nil
 		},
 		Actions: route.FileActions{"submitProposal": submitProposal},
+	})); err != nil {
+		log.Fatal(err)
+	}
+
+	// FB-5: the success page submitProposal redirects to. It has no actions
+	// of its own — this route is read-only, decorated only with the
+	// <meta http-equiv="refresh"> head tag thanksMetadata attaches — so, like
+	// app/public/page.server.go's nested routes, its module is registered
+	// here from the parent package rather than from a page.server.go inside
+	// the bracketed [slug] directory.
+	thanksSource := filepath.Join(slugDir, "thanks", "page.gsx")
+	if err := route.RegisterFileModule(route.FileModuleFor(thanksSource, route.FileModuleOptions{
+		Load:     loadThanks,
+		Metadata: thanksMetadata,
 	})); err != nil {
 		log.Fatal(err)
 	}
@@ -98,6 +139,9 @@ func submitProposal(ctx *action.Context) error {
 	}
 	speakerID := ""
 	submissionID := ""
+	speakerEmail := ""
+	speakerName := ""
+	title := strings.TrimSpace(ctx.FormData["title"])
 	if err := appstate.MustGet().Update(func(state *domain.State) error {
 		form, found := state.Form(ctx.FormData["form_id"])
 		if !found {
@@ -113,6 +157,8 @@ func submitProposal(ctx *action.Context) error {
 		for _, speaker := range state.Speakers {
 			if strings.EqualFold(speaker.Email, email) {
 				speakerID = speaker.ID
+				speakerEmail = speaker.Email
+				speakerName = strings.TrimSpace(speaker.FirstName + " " + speaker.LastName)
 				break
 			}
 		}
@@ -124,6 +170,8 @@ func submitProposal(ctx *action.Context) error {
 				Email: email, Role: strings.TrimSpace(ctx.FormData["role"]), Company: strings.TrimSpace(ctx.FormData["company"]), Biography: strings.TrimSpace(ctx.FormData["biography"]),
 				CreatedAt: now, UpdatedAt: now,
 			})
+			speakerEmail = email
+			speakerName = strings.TrimSpace(ctx.FormData["first_name"] + " " + ctx.FormData["last_name"])
 		}
 		submissionID = domain.NewID("sub")
 		state.Submissions = append(state.Submissions, domain.Submission{
@@ -137,17 +185,146 @@ func submitProposal(ctx *action.Context) error {
 				state.Tasks[index].AssignedSpeakerIDs = append(state.Tasks[index].AssignedSpeakerIDs, speakerID)
 			}
 		}
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	// Send the confirmation email outside the store lock — external I/O must
+	// never run under Update. The keyed portal link (PT-2 token) lets the
+	// speaker open their portal straight from the inbox. Record the true
+	// outcome as a Communication row in a second, small mutation; never store
+	// the raw provider error on the row (M8), only a sent/failed status.
+	sender := confirmationSender()
+	sendErr := mail.SendConfirmation(sender, publicBaseURL(), mail.Recipient{
+		SpeakerID: speakerID, Name: speakerName, Email: speakerEmail,
+	}, mail.Submission{Title: title}, token.New().Sign(speakerID))
+	sendStatus := "sent"
+	if sendErr != nil {
+		sendStatus = "failed"
+		log.Printf("submit: confirmation email to speaker %s failed: %v", speakerID, sendErr)
+	}
+	provider := "demo-outbox"
+	if named, ok := sender.(mail.Named); ok {
+		provider = named.Name()
+	}
+	if err := appstate.MustGet().Update(func(state *domain.State) error {
 		state.Communications = append(state.Communications, domain.Communication{
-			ID: domain.NewID("comm"), TemplateID: form.ConfirmationTemplate, SpeakerID: speakerID, Subject: "We received " + strings.TrimSpace(ctx.FormData["title"]), Status: "sent", Provider: "demo-outbox", SentAt: now,
+			ID: domain.NewID("comm"), TemplateID: form.ConfirmationTemplate, SpeakerID: speakerID,
+			Subject: "We received " + title, Status: sendStatus, Provider: provider, SentAt: time.Now().UTC(),
 		})
 		return nil
 	}); err != nil {
 		return err
 	}
+
 	session.AddFlash(ctx.Request, "notice", "Proposal received. We sent a confirmation and opened your portal.")
 	live.Broadcast("submission:created", map[string]string{"submission": submissionID, "speaker": speakerID, "queue": decision.Queue})
-	actionflow.Redirect(ctx, "/portal/"+speakerID+"?submitted=1")
+	live.Broadcast("communication:queued", map[string]string{"speaker": speakerID})
+	if form.RedirectToPortal {
+		// FB-5: land on the customizable success page first. Its meta
+		// refresh (thanksMetadata) carries the visitor on to the portal
+		// after ~10s; the signed PT-2 token travels in the URL so that
+		// later hop authenticates the portal session on arrival.
+		actionflow.Redirect(ctx, thanksRedirectURL(form.Slug, speakerID))
+	} else {
+		actionflow.Redirect(ctx, "/portal/"+speakerID+"?submitted=1")
+	}
 	return nil
+}
+
+// thanksRedirectURL builds the /submit/{slug}/thanks target submitProposal
+// redirects to on success. The key is a fresh PT-2 portal token
+// (token.New().Sign) bound to speakerID, so the thanks page's meta refresh
+// and its visible portal link both carry an authenticated session forward —
+// with no separate sign-in step and no reliance on a cookie the redirect
+// response itself does not set.
+func thanksRedirectURL(formSlug, speakerID string) string {
+	target := url.URL{Path: "/submit/" + formSlug + "/thanks"}
+	values := url.Values{}
+	values.Set("speaker", speakerID)
+	values.Set("key", token.New().Sign(speakerID))
+	target.RawQuery = values.Encode()
+	return target.String()
+}
+
+// loadThanks renders the FB-5 success page. It resolves the form's
+// customizable success copy (domain.SubmissionForm.SuccessPageHeading and
+// SuccessPageBody), the most recently submitted title for the speaker named
+// by ?speaker=, and the keyed portal URL the visible link points to. A
+// direct visit with no ?speaker= still renders the page; it just omits the
+// portal link and countdown copy, since there is no session to carry there.
+func loadThanks(ctx *route.RouteContext, page route.FilePage) (any, error) {
+	snapshot := appstate.MustGet().Snapshot()
+	form, found := snapshot.Form(ctx.Param("slug"))
+	if !found {
+		return nil, fmt.Errorf("submission form not found")
+	}
+	speakerID := strings.TrimSpace(ctx.Query("speaker"))
+	return map[string]any{
+		"form": map[string]any{
+			"heading": form.SuccessPageHeading(),
+			"body":    form.SuccessPageBody(),
+		},
+		"submission": map[string]any{"title": latestSubmissionTitle(snapshot, form.ID, speakerID)},
+		"formSlug":   form.Slug,
+		"portalURL":  thanksPortalURL(speakerID, ctx.Query("key")),
+		"hasPortal":  speakerID != "",
+	}, nil
+}
+
+// thanksMetadata attaches the FB-5 redirect: a declarative
+// <meta http-equiv="refresh"> head tag that carries the browser on to the
+// speaker's keyed portal URL about ten seconds after the success page
+// renders. This is document metadata, not a <script>, so it holds the
+// zero-bespoke-JavaScript invariant and needs no CSP change.
+func thanksMetadata(ctx *route.RouteContext, page route.FilePage, data any) (server.Metadata, error) {
+	speakerID := strings.TrimSpace(ctx.Query("speaker"))
+	if speakerID != "" {
+		ctx.AddHead(gosx.El("meta", gosx.Attrs(
+			gosx.Attr("http-equiv", "refresh"),
+			gosx.Attr("content", "10;url="+thanksPortalURL(speakerID, ctx.Query("key"))),
+		)))
+	}
+	return server.Metadata{Title: server.Title{Default: "Proposal received — Rostrum"}, Description: "Your proposal is in, and your speaker portal is one click away."}, nil
+}
+
+// thanksPortalURL builds the keyed portal URL the success page's meta
+// refresh and its visible "Go to your portal now" link both target. key is
+// the PT-2 token (token.New().Sign) thanksRedirectURL already signed for
+// this speaker, so following either target authenticates the portal session
+// on arrival with no separate sign-in step.
+func thanksPortalURL(speakerID, key string) string {
+	target := url.URL{Path: "/portal/" + speakerID}
+	if key != "" {
+		values := url.Values{}
+		values.Set("key", key)
+		target.RawQuery = values.Encode()
+	}
+	return target.String()
+}
+
+// latestSubmissionTitle returns the title of the most recently submitted
+// proposal speakerID has on formID, or "" when speakerID is empty or has no
+// matching submission. The thanks page uses this only to name the proposal
+// in its confirmation copy; it never uses the returned submission's other
+// fields, so no other Answers or routing data leaves this function.
+func latestSubmissionTitle(state domain.State, formID, speakerID string) string {
+	if speakerID == "" {
+		return ""
+	}
+	var latest domain.Submission
+	found := false
+	for _, submission := range state.Submissions {
+		if submission.FormID != formID || !contains(submission.SpeakerIDs, speakerID) {
+			continue
+		}
+		if !found || submission.SubmittedAt.After(latest.SubmittedAt) {
+			latest = submission
+			found = true
+		}
+	}
+	return latest.Title
 }
 
 // coreSubmissionFields lists the schema field IDs that already have a typed
