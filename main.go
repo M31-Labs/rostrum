@@ -11,6 +11,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -72,6 +73,15 @@ func main() {
 	publicBase := getenv("PUBLIC_URL", "http://localhost:"+port)
 	appEnv := strings.ToLower(getenv("APP_ENV", "development"))
 	sessionSecret := getenv("SESSION_SECRET", developmentSessionSecret)
+	// Organizer roles now live in the signed, encrypted session cookie, so the
+	// session secret is the sole trust anchor for organizer access. Refuse the
+	// default or a weak secret for any non-local PUBLIC_URL, independent of
+	// APP_ENV: a public instance started without APP_ENV=production must never
+	// boot with a forgeable cookie key that an attacker could use to mint an
+	// organizer session.
+	if !isLocalPublicURL(publicBase) && (sessionSecret == developmentSessionSecret || len(sessionSecret) < 32) {
+		log.Fatal("a non-local PUBLIC_URL requires a unique SESSION_SECRET of at least 32 characters")
+	}
 	if appEnv == "production" {
 		if sessionSecret == developmentSessionSecret || len(sessionSecret) < 32 {
 			log.Fatal("production requires a unique SESSION_SECRET of at least 32 characters")
@@ -190,7 +200,10 @@ func main() {
 		ctx.CachePublic(60 * time.Second)
 		return publicapi.Speakers(appstate.MustGet().Snapshot()), nil
 	})
-	app.Mount("/live", live.Dashboard)
+	// /live streams workspace activity events (new submissions, task uploads),
+	// so gate it to organizer-facing roles; an anonymous subscriber must not
+	// observe organizer activity metadata (review, out-of-scope /live note).
+	app.Mount("/live", identity.RequireAnyRole(identity.RoleOrganizer, identity.RoleChair, identity.RoleObserver)(live.Dashboard))
 	app.Mount("/calendar/", http.HandlerFunc(calendarDownload))
 	app.Mount("/portal-upload/", http.HandlerFunc(portalUpload(root)))
 	app.Mount("/portal-file/", http.HandlerFunc(portalFile(root)))
@@ -420,7 +433,11 @@ func bodyLimit() server.Middleware {
 // dashboard's, and cmd/sizecheck would flag every organizer route as
 // missing its islands and controllers.
 func organizerGate() server.Middleware {
-	if strings.TrimSpace(os.Getenv("GOSX_STATIC_EXPORT")) == "1" {
+	// The static-export bypass is build-time only. Honor it only outside a
+	// production runtime, so a leaked GOSX_STATIC_EXPORT in a deployed
+	// environment can never open /organizer to the world (review m2).
+	if strings.TrimSpace(os.Getenv("GOSX_STATIC_EXPORT")) == "1" &&
+		!strings.EqualFold(getenv("APP_ENV", "development"), "production") {
 		return func(next http.Handler) http.Handler { return next }
 	}
 	gate := identity.RequireAnyRole(identity.RoleOrganizer, identity.RoleChair, identity.RoleObserver)
@@ -460,6 +477,23 @@ func isOrganizerSession(r *http.Request) bool {
 		}
 	}
 	return false
+}
+
+// isLocalPublicURL reports whether base points at a loopback host. It gates
+// safeguards that must hold for every internet-facing deployment but that
+// would block local development, where the default PUBLIC_URL and the default
+// session secret are expected.
+func isLocalPublicURL(base string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(base))
+	if err != nil {
+		return false
+	}
+	switch parsed.Hostname() {
+	case "localhost", "127.0.0.1", "::1", "":
+		return true
+	default:
+		return false
+	}
 }
 
 // magicLinkIPLimiter and magicLinkSessionLimiter throttle POST

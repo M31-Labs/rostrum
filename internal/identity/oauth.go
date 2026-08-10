@@ -106,13 +106,20 @@ func googleUserInfoResolver() auth.OAuthUserResolver {
 			return auth.User{}, fmt.Errorf("google userinfo failed: %s", strings.TrimSpace(string(body)))
 		}
 		var payload struct {
-			Sub     string `json:"sub"`
-			Email   string `json:"email"`
-			Name    string `json:"name"`
-			Picture string `json:"picture"`
+			Sub           string `json:"sub"`
+			Email         string `json:"email"`
+			EmailVerified bool   `json:"email_verified"`
+			Name          string `json:"name"`
+			Picture       string `json:"picture"`
 		}
 		if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
 			return auth.User{}, err
+		}
+		// Defense in depth (review m1): never trust an unverified Google email
+		// for an allowlist match. A resolver error aborts the OAuth callback
+		// before any sign-in, so an unverified identity never gets a session.
+		if !payload.EmailVerified {
+			return auth.User{}, fmt.Errorf("google account email is not verified")
 		}
 		meta := map[string]any{"provider": "google"}
 		if payload.Picture != "" {
