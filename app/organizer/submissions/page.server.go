@@ -64,6 +64,13 @@ func updateStatus(ctx *action.Context) error {
 	}
 	session.AddFlash(ctx.Request, "notice", "“"+title+"” moved to "+present.StatusLabel(status)+".")
 	live.Broadcast("submission:updated", map[string]string{"id": id, "status": status})
-	actionflow.Redirect(ctx, "/organizer/submissions")
+	// The list page and the detail page share this action. Send the
+	// user back to the page that posted the form: the action URL is
+	// "<page>/__actions/updateStatus", so the page path is its prefix.
+	target := "/organizer/submissions"
+	if origin := strings.TrimSuffix(ctx.Request.URL.Path, "/__actions/updateStatus"); strings.HasPrefix(origin, "/organizer/submissions/") {
+		target = origin
+	}
+	actionflow.Redirect(ctx, target)
 	return nil
 }

@@ -264,7 +264,7 @@ func Page() Node {
 					</li>
 				</ul>
 				<p class="policy-file">
-					Policy
+					Routing policy
 					<code>{data.form.ruleFile}</code>
 				</p>
 			</article>

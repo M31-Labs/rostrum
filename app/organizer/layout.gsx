@@ -337,6 +337,7 @@ func Layout() Node {
 				<Form method="post" action="/demo/reset">
 					<input type="hidden" name="csrf_token" value={csrf.token}></input>
 					<button type="submit">Reset workspace</button>
+					<p class="form-status" role="status" aria-live="polite"></p>
 				</Form>
 			</div>
 			<Slot />

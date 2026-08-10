@@ -9,7 +9,7 @@ func SubmissionStatusForm(props any) Node {
 				Status for
 				{props.title}
 			</span>
-			<select name="status" data-gosx-submit-on="change">
+			<select name="status">
 				<Each of={data.statusOptions} as="option">
 					<option value={option.value} selected={option.value == props.status}>{option.label}</option>
 				</Each>

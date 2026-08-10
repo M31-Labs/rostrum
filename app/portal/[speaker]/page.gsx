@@ -118,6 +118,7 @@ func FileAction(props any) Node {
 			<input type="file" name="file" required></input>
 		</label>
 		<button class="button button-compact" type="submit">Upload file</button>
+		<p class="form-status" role="status" aria-live="polite"></p>
 	</Form>
 }
 
@@ -155,11 +156,23 @@ func ProfileFields(props any) Node {
 		<div class="form-grid-two">
 			<label>
 				<span>LinkedIn URL</span>
-				<input type="url" name="linkedin" value={props.linkedin}></input>
+				<input type="url" name="linkedin" aria-describedby="profile-linkedin-error" value={props.linkedin}></input>
+				<p
+					class="form-error"
+					id="profile-linkedin-error"
+					data-gosx-field-error="linkedin"
+					aria-live="polite"
+				></p>
 			</label>
 			<label>
 				<span>Website URL</span>
-				<input type="url" name="website" value={props.website}></input>
+				<input type="url" name="website" aria-describedby="profile-website-error" value={props.website}></input>
+				<p
+					class="form-error"
+					id="profile-website-error"
+					data-gosx-field-error="website"
+					aria-live="polite"
+				></p>
 			</label>
 		</div>
 	</fragment>
@@ -208,9 +221,7 @@ func Page() Node {
 					<div>
 						<p class="eyebrow">Speaker portal</p>
 						<h1>
-							Welcome,
-							{data.speaker.firstName}
-							.
+							{"Welcome, " + data.speaker.firstName + "."}
 						</h1>
 						<p>
 							{data.event.name}

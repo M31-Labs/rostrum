@@ -98,13 +98,13 @@ func main() {
 				{Rel: "preconnect", Href: "https://fonts.googleapis.com"},
 				{Rel: "preconnect", Href: "https://fonts.gstatic.com", CrossOrigin: "anonymous"},
 				{Rel: "stylesheet", Href: "/styles.css"},
-				{Rel: "stylesheet", Href: "https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500&family=Space+Grotesk:wght@500;600&family=Work+Sans:wght@400;500;600&display=swap"},
+				{Rel: "stylesheet", Href: "https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Instrument+Sans:wght@400;500;600&family=Spline+Sans+Mono:wght@400;500&display=swap"},
 				{Rel: "icon", Href: "/favicon.svg", Type: "image/svg+xml"},
 			},
 		})
 		ctx.AddHead(gosx.El("meta", gosx.Attrs(
 			gosx.Attr("name", "theme-color"),
-			gosx.Attr("content", "#f4f1e8"),
+			gosx.Attr("content", "#1e2a24"),
 		)))
 		ctx.AddHead(gosx.El("meta", gosx.Attrs(
 			gosx.Attr("name", "csrf-token"),

@@ -110,9 +110,7 @@ func Page() Node {
 					<div>
 						<p class="eyebrow">Reviewer link</p>
 						<h1>
-							Welcome,
-							{data.reviewer.name}
-							.
+							{"Welcome, " + data.reviewer.name + "."}
 						</h1>
 						<If cond={data.hasActiveRound}>
 							<p>

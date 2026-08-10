@@ -26,7 +26,7 @@ func Page() Node {
 		<section class="landing-hero">
 			<div class="hero-rule" aria-hidden="true"></div>
 			<div class="hero-copy">
-				<p class="eyebrow">Open program operations / GoSX</p>
+				<p class="eyebrow">Program operations for real events</p>
 				<h1>
 					The calm way to run a complicated program.
 				</h1>
@@ -84,17 +84,18 @@ func Page() Node {
 		</section>
 		<section class="mission-band">
 			<p class="eyebrow">Built in the open</p>
-			<h2>
-				GoSX renders the workflow. Arbiter explains the decisions.
-			</h2>
+			<h2>Every program decision, on the record.</h2>
 			<p>
-				This submission is also a working proof of M31 Labs’ mission: compact tools, governed behavior, understandable systems, and an open path to self-hosting.
+				Routing, review, and scheduling each leave a visible trace. When someone asks why a talk landed where it did, the answer is one click away — not in someone’s inbox.
 			</p>
 			<div class="mission-links">
-				<a href="/organizer/agenda" data-gosx-link>Inspect conflict policy</a>
-				<a href="/organizer/forms" data-gosx-link>Inspect CFP routing</a>
-				<a href="/api/v1/workspace">Open JSON API</a>
+				<a href="/organizer/agenda" data-gosx-link>See the scheduling rules</a>
+				<a href="/organizer/forms" data-gosx-link>See the routing rules</a>
+				<a href="/api/v1/workspace">Open the JSON API</a>
 			</div>
+			<p class="colophon">
+				Open-source, self-hostable, one binary. Built with GoSX.
+			</p>
 		</section>
 	</main>
 }

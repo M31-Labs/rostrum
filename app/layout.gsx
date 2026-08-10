@@ -5,7 +5,7 @@ func Layout() Node {
 		<a class="skip-link" href="#main-content">Skip to content</a>
 		<header class="global-header">
 			<a class="wordmark" href="/" data-gosx-link aria-label="Rostrum home">
-				<span class="wordmark-mark" aria-hidden="true">P/</span>
+				<span class="wordmark-mark" aria-hidden="true">R</span>
 				<span>Rostrum</span>
 			</a>
 			<nav class="global-nav" aria-label="Primary">

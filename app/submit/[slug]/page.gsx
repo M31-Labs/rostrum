@@ -159,10 +159,10 @@ func Page() Node {
 							<If cond={field.id == "format"}>
 								<ConditionalFormatFields
 									formats={data.formats}
-									formatValue={actions.submitProposal.values.format}
-									formatError={actions.submitProposal.fieldErrors.format}
-									workshopNeeds={actions.submitProposal.values.workshop_needs}
-									workshopError={actions.submitProposal.fieldErrors.workshop_needs}
+									formatValue={"" + actions.submitProposal.values.format}
+									formatError={"" + actions.submitProposal.fieldErrors.format}
+									workshopNeeds={"" + actions.submitProposal.values.workshop_needs}
+									workshopError={"" + actions.submitProposal.fieldErrors.workshop_needs}
 									conditionalWhy={data.form.conditionalWhy}
 								></ConditionalFormatFields>
 							</If>

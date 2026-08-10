@@ -295,7 +295,7 @@ func Page() Node {
 				action={actionPath("moveSession")}
 				unscheduleAction={actionPath("unscheduleSession")}
 				csrf={csrf.token}
-				actionMessage={action.message}
+				actionMessage={"" + action.message}
 			></AgendaBoard>
 			<details class="agenda-keyboard-moves">
 				<summary>Move a session without drag and drop</summary>
@@ -337,7 +337,7 @@ func Page() Node {
 		<section class="panel conflict-panel">
 			<header class="panel-header">
 				<div>
-					<p class="panel-kicker">Arbiter schedule policy</p>
+					<p class="panel-kicker">Scheduling rules</p>
 					<h2>Conflict inspector</h2>
 				</div>
 				<span>
