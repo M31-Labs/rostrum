@@ -6,6 +6,7 @@ import (
 
 	"github.com/m31-labs/rostrum/internal/appstate"
 	"github.com/m31-labs/rostrum/internal/domain"
+	"github.com/m31-labs/rostrum/internal/present"
 	"m31labs.dev/gosx/route"
 	"m31labs.dev/gosx/server"
 )
@@ -42,6 +43,7 @@ func landingData(state domain.State) map[string]any {
 		}
 	}
 	return map[string]any{
+		"demoMode": present.DemoMode(),
 		"event": map[string]any{
 			"name":     state.Event.Name,
 			"location": state.Event.Location,

@@ -34,14 +34,16 @@ func Page() Node {
 					Rostrum connects proposals, review, speakers, schedules, and public publishing without hiding decisions in a maze of automation.
 				</p>
 				<div class="hero-actions">
-					<a class="button button-primary" href="/organizer" data-gosx-link>Enter the demo workspace</a>
+					<a class="button button-primary" href="/organizer" data-gosx-link>
+						{data.demoMode ? "Enter the demo workspace" : "Enter the workspace"}
+					</a>
 					<a class="text-link" href="/submit/systems-forum-cfp" data-gosx-link>
 						Walk the speaker path
 						<span aria-hidden="true">→</span>
 					</a>
 				</div>
 			</div>
-			<aside class="event-ticket" aria-label="Demo event">
+			<aside class="event-ticket" aria-label={data.demoMode ? "Demo event" : "Event"}>
 				<div class="ticket-topline">
 					<span>Live workspace</span>
 					<span>2026</span>

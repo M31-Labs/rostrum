@@ -173,6 +173,8 @@ func main() {
 	// dynamic HTML is compressed at the CDN edge. Restore this call once the
 	// framework Write path honors the skip.
 	app.Use(securityHeaders(publicBase, navigationScriptCSPHash(), webAuthnScriptCSPHash()))
+	app.Use(clearStaleBrowserCache(publicBase))
+	app.Use(noCacheStaticCSS())
 	app.Use(sessions.Middleware)
 	app.Use(authManager.Middleware)
 	app.Use(organizerGate())
@@ -380,6 +382,111 @@ func frameAncestorsDirective(path string) string {
 		return "frame-ancestors *"
 	}
 	return "frame-ancestors 'none'"
+}
+
+// cacheClearGuardCookie names the cookie clearStaleBrowserCache sets after it
+// asks a browser to clear its HTTP cache once, so it never repeats the
+// instruction to that browser again.
+const cacheClearGuardCookie = "rostrum_cache_v2"
+
+// clearStaleBrowserCache answers B1: content-hash-named runtime assets under
+// /gosx/assets/runtime/ are served immutable, max-age=1y, which is normally
+// safe because a new build gets a new hash. It is not safe against the
+// specific incident this guards: an earlier deploy briefly served those
+// files with the wrong Content-Encoding header, and a browser that cached
+// the corrupt bytes during that window keeps them forever -- a later
+// deploy under a new hash never evicts an entry filed under the old one.
+//
+// On the first HTML document GET from a browser that has not seen this
+// guard, the middleware sends Clear-Site-Data: "cache" (dropping the whole
+// HTTP cache, corrupt entries included) and sets cacheClearGuardCookie for
+// a year so the instruction never repeats on that browser. It only ever
+// fires on a document navigation -- never on an asset, API, download, or
+// calendar request -- so it cannot interrupt a fetch already in flight for
+// one of those.
+func clearStaleBrowserCache(publicBase string) server.Middleware {
+	secure := strings.HasPrefix(publicBase, "https://")
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if shouldClearBrowserCache(r) {
+				http.SetCookie(w, &http.Cookie{
+					Name:     cacheClearGuardCookie,
+					Value:    "1",
+					Path:     "/",
+					MaxAge:   int((365 * 24 * time.Hour).Seconds()),
+					HttpOnly: true,
+					Secure:   secure,
+					SameSite: http.SameSiteLaxMode,
+				})
+				w.Header().Set("Clear-Site-Data", `"cache"`)
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// shouldClearBrowserCache reports whether r is an HTML document navigation
+// from a browser that has not already received the cache-clear guard.
+func shouldClearBrowserCache(r *http.Request) bool {
+	if r.Method != http.MethodGet {
+		return false
+	}
+	if !strings.Contains(r.Header.Get("Accept"), "text/html") {
+		return false
+	}
+	path := r.URL.Path
+	if strings.HasPrefix(path, "/gosx/") || strings.HasPrefix(path, "/api/") ||
+		strings.HasPrefix(path, "/portal-file/") || strings.HasPrefix(path, "/calendar/") {
+		return false
+	}
+	if _, err := r.Cookie(cacheClearGuardCookie); err == nil {
+		return false
+	}
+	return true
+}
+
+// noCacheStaticCSS answers the CSS staleness fix: the public directory's
+// styles.css carries no content-hash fingerprint, so a browser or CDN that
+// still honors the framework's public-dir default (SetPublicDir's
+// long-lived, revalidate-only policy) can keep serving an old stylesheet
+// for hours after a redeploy. Forcing Cache-Control: no-cache on every .css
+// response makes the browser revalidate on every load -- a redeploy takes
+// effect immediately -- while a normal, unchanged load still gets a 304 and
+// no re-download.
+//
+// This wraps the ResponseWriter rather than setting the header up front,
+// because server.App.servePublic (the framework handler that actually
+// serves styles.css) sets its own Cache-Control value after every
+// app.Use middleware ahead of it has already run, so this middleware would
+// otherwise be overwritten before the response is written.
+func noCacheStaticCSS() server.Middleware {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if (r.Method == http.MethodGet || r.Method == http.MethodHead) && strings.HasSuffix(r.URL.Path, ".css") {
+				w = noCacheResponseWriter{ResponseWriter: w}
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// noCacheResponseWriter forces Cache-Control: no-cache immediately before
+// any response byte is written, overriding whatever the wrapped handler set.
+type noCacheResponseWriter struct {
+	http.ResponseWriter
+}
+
+func (w noCacheResponseWriter) WriteHeader(status int) {
+	w.Header().Set("Cache-Control", "no-cache")
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w noCacheResponseWriter) Write(b []byte) (int, error) {
+	// http.ServeFile/http.ServeContent (server.App.servePublic's transport)
+	// send status 200 implicitly on the first Write call rather than calling
+	// WriteHeader explicitly, so the header must be forced here too.
+	w.Header().Set("Cache-Control", "no-cache")
+	return w.ResponseWriter.Write(b)
 }
 
 // Upload body sizing. uploadBodyEnvelope bounds the whole multipart request

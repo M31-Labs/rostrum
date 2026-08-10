@@ -55,7 +55,7 @@ func loadSubmissionDetail(ctx *route.RouteContext) (any, error) {
 	id := strings.TrimSpace(ctx.Param("id"))
 	data, err := present.SubmissionDetail(appstate.MustGet().Snapshot(), id)
 	if err != nil {
-		return map[string]any{"section": "submissions", "found": false}, nil
+		return map[string]any{"section": "submissions", "demoMode": present.DemoMode(), "found": false}, nil
 	}
 	return data, nil
 }

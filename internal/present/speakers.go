@@ -73,6 +73,7 @@ func Speakers(state domain.State, query string) map[string]any {
 
 	return map[string]any{
 		"section":     "speakers",
+		"demoMode":    DemoMode(),
 		"rows":        rows,
 		"resultCount": len(rows),
 		"totalCount":  len(state.Speakers),

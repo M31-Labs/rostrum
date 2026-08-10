@@ -112,8 +112,9 @@ func EmbedAdmin(state domain.State) map[string]any {
 	agendaSource := base + "/agenda?embed=1"
 	speakerSource := base + "/speakers?embed=1"
 	return map[string]any{
-		"section": "embeds",
-		"event":   publicEvent(state),
+		"section":  "embeds",
+		"demoMode": DemoMode(),
+		"event":    publicEvent(state),
 		"agenda": map[string]any{
 			"src":  agendaSource,
 			"code": `<iframe src="` + agendaSource + `" title="` + state.Event.Name + ` agenda" loading="lazy" style="width:100%;min-height:720px;border:0"></iframe>`,

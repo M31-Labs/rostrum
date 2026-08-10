@@ -194,6 +194,16 @@ func Page() Node {
 			<PortalUnavailable></PortalUnavailable>
 		</If>
 		<If cond={data.available}>
+			<If cond={data.viewingAsOrganizer}>
+				<div class="closed-notice" role="status">
+					<strong>Viewing as organizer.</strong>
+					<p>
+						This is a read-only preview of
+						{data.speaker.firstName}
+						’s portal. Nothing you view here changes their session.
+					</p>
+				</div>
+			</If>
 			<If cond={data.submitted}>
 				<div class="portal-confirmation">
 					<span aria-hidden="true">✓</span>

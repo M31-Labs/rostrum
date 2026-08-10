@@ -63,6 +63,7 @@ func SubmissionDetail(state domain.State, id string) (map[string]any, error) {
 
 	return map[string]any{
 		"section":         "submissions",
+		"demoMode":        DemoMode(),
 		"found":           true,
 		"id":              submission.ID,
 		"title":           submission.Title,

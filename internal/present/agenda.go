@@ -109,8 +109,9 @@ func Agenda(state domain.State, view string, dayParam string) (map[string]any, e
 	bank := agendaBank(state)
 
 	return map[string]any{
-		"section": "agenda",
-		"view":    view,
+		"section":  "agenda",
+		"demoMode": DemoMode(),
+		"view":     view,
 		"views": []map[string]string{
 			agendaView("list", "List", view),
 			agendaView("day", "Day", view),

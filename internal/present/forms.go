@@ -89,7 +89,8 @@ func Forms(state domain.State) (map[string]any, error) {
 	}
 
 	return map[string]any{
-		"section": "forms",
+		"section":  "forms",
+		"demoMode": DemoMode(),
 		"form": map[string]any{
 			"id":               form.ID,
 			"name":             form.Name,

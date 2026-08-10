@@ -42,7 +42,12 @@ func Review(state domain.State) map[string]any {
 		})
 	}
 
-	active := state.ReviewPlans[len(state.ReviewPlans)-1]
+	// A fresh workspace has no review plan yet; fall back to a zero plan so the
+	// page renders its empty state instead of panicking on an empty slice.
+	var active domain.ReviewPlan
+	if len(state.ReviewPlans) > 0 {
+		active = state.ReviewPlans[len(state.ReviewPlans)-1]
+	}
 	candidates := make([]map[string]any, 0, len(active.SubmissionIDs))
 	for _, submissionID := range active.SubmissionIDs {
 		submission, found := state.Submission(submissionID)
@@ -103,6 +108,7 @@ func Review(state domain.State) map[string]any {
 
 	return map[string]any{
 		"section":        "review",
+		"demoMode":       DemoMode(),
 		"plans":          plans,
 		"activePlan":     map[string]any{"id": active.ID, "name": active.Name, "criteria": activeCriteria},
 		"candidates":     candidates,

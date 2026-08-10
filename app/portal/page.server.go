@@ -3,6 +3,7 @@ package portal
 import (
 	"fmt"
 	"log"
+	"net/http"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -11,10 +12,12 @@ import (
 	"github.com/m31-labs/rostrum/internal/actionflow"
 	"github.com/m31-labs/rostrum/internal/appstate"
 	"github.com/m31-labs/rostrum/internal/domain"
+	"github.com/m31-labs/rostrum/internal/identity"
 	"github.com/m31-labs/rostrum/internal/live"
 	"github.com/m31-labs/rostrum/internal/present"
 	"github.com/m31-labs/rostrum/internal/token"
 	"m31labs.dev/gosx/action"
+	"m31labs.dev/gosx/auth"
 	"m31labs.dev/gosx/route"
 	"m31labs.dev/gosx/server"
 	"m31labs.dev/gosx/session"
@@ -51,9 +54,22 @@ func init() {
 // requests need no query key. The page only renders when the bound speaker
 // matches the path speaker and that speaker exists in the store.
 //
+// An organizer-facing visitor (organizer, chair, or observer) previews any
+// speaker's portal with neither a key nor a bound session: organizer
+// surfaces (present.PortalOperations, present.Speakers,
+// present.SubmissionDetail) link straight to /portal/{speakerID} with no
+// token attached, and that used to dead-end at "check your email" for
+// staff who were already signed in. Preview mode sets the local `bound`
+// value to the requested speaker for this render only -- it never calls
+// store.Set -- so a staff member's own session state, and a genuine
+// speaker's bound portal, are both unaffected. viewingAsOrganizer flags the
+// rendered data so the page can show a "Viewing as organizer" banner
+// instead of silently impersonating the speaker.
+//
 // An unknown speaker in the path and a missing or invalid key both render
-// the identical friendly page (L8): neither response tells a visitor
-// whether a given speaker ID exists.
+// the identical friendly page (L8) for every visitor but an organizer:
+// neither response tells an ordinary visitor whether a given speaker ID
+// exists.
 func loadPortal(ctx *route.RouteContext) (any, error) {
 	requested := strings.TrimSpace(ctx.Param("speaker"))
 	store := session.Current(ctx.Request)
@@ -66,14 +82,40 @@ func loadPortal(ctx *route.RouteContext) (any, error) {
 		}
 	}
 
+	viewingAsOrganizer := false
+	if bound != requested && requested != "" && isOrganizerVisitor(ctx.Request) {
+		bound = requested
+		viewingAsOrganizer = true
+	}
+
 	if bound != "" && bound == requested {
 		snapshot := appstate.MustGet().Snapshot()
 		if data, err := present.SpeakerPortal(snapshot, bound, ctx.Query("submitted") == "1"); err == nil {
 			data["available"] = true
+			data["viewingAsOrganizer"] = viewingAsOrganizer
 			return data, nil
 		}
 	}
 	return portalUnavailable(), nil
+}
+
+// isOrganizerVisitor reports whether the request carries a session with any
+// organizer-facing role (organizer, chair, or observer). It mirrors
+// main.go's isOrganizerSession -- main is not an importable package, so
+// this is a local copy of the same auth.Current role check, kept for the
+// organizer portal preview above.
+func isOrganizerVisitor(r *http.Request) bool {
+	user, ok := auth.Current(r)
+	if !ok {
+		return false
+	}
+	for _, role := range user.Roles {
+		switch role {
+		case identity.RoleOrganizer, identity.RoleChair, identity.RoleObserver:
+			return true
+		}
+	}
+	return false
 }
 
 // portalUnavailable is the identical friendly response for an unbound

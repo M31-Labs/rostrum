@@ -327,19 +327,23 @@ func Layout() Node {
 					data-gosx-link
 					aria-current={data.section == "settings" ? "page" : ""}
 				>Event settings</a>
-				<span>Demo mode · local data</span>
+				<If cond={data.demoMode}>
+					<span>Demo mode · local data</span>
+				</If>
 			</div>
 		</aside>
 		<div class="workspace-main">
-			<div class="demo-banner" role="status">
-				<span>Interactive demo</span>
-				Changes persist locally.
-				<Form method="post" action="/demo/reset">
-					<input type="hidden" name="csrf_token" value={csrf.token}></input>
-					<button type="submit">Reset workspace</button>
-					<p class="form-status" role="status" aria-live="polite"></p>
-				</Form>
-			</div>
+			<If cond={data.demoMode}>
+				<div class="demo-banner" role="status">
+					<span>Interactive demo</span>
+					Changes persist locally.
+					<Form method="post" action="/demo/reset">
+						<input type="hidden" name="csrf_token" value={csrf.token}></input>
+						<button type="submit">Reset workspace</button>
+						<p class="form-status" role="status" aria-live="polite"></p>
+					</Form>
+				</div>
+			</If>
 			<Slot />
 		</div>
 	</div>

@@ -10,7 +10,12 @@ import (
 )
 
 func Integrations(state domain.State) map[string]any {
-	integration := state.Integrations[0]
+	// A fresh workspace configures no integration yet; fall back to a zero
+	// value so the page renders its empty state instead of panicking.
+	var integration domain.Integration
+	if len(state.Integrations) > 0 {
+		integration = state.Integrations[0]
+	}
 	payloads := accelevents.BuildPayloads(state)
 	sample := map[string]any{}
 	if len(payloads.Sessions) > 0 && len(payloads.Speakers) > 0 {
@@ -39,7 +44,8 @@ func Integrations(state domain.State) map[string]any {
 		credentialTone = "status-positive"
 	}
 	return map[string]any{
-		"section": "integrations",
+		"section":  "integrations",
+		"demoMode": DemoMode(),
 		"integration": map[string]any{
 			"id":              integration.ID,
 			"name":            integration.Name,

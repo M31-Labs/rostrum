@@ -1,6 +1,33 @@
 package review
 
-import "github.com/m31-labs/rostrum/app/organizer/embeds"
+import "m31labs.dev/gosx/browser"
+
+// ReviewLinkClipboard renders one reviewer's signed /review/{token} URL as
+// visible, selectable text plus a "Copy" button bound by the framework
+// clipboard runtime. It is defined here, inside the review package, rather
+// than imported from app/organizer/embeds: an island reference across a
+// file-route package boundary does not resolve at render time (the file
+// router discovers islands only from the single .gsx program that declares
+// them), so a cross-package <embeds.EmbedClipboard> tag rendered as an
+// unresolved data-gosx-component placeholder instead of the reviewer link.
+// This component copies EmbedClipboard's structure (app/organizer/embeds)
+// so the two stay visually identical.
+//gosx:island
+func ReviewLinkClipboard(props any) Node {
+	label := signal.New("Copy link")
+	status := signal.New("")
+	copy := func() {
+		label.Set(browser.ClipboardWrite(code) ? "Copied" : "Copy failed")
+		status.Set(label.Get() == "Copied" ? "Review link copied to the clipboard." : "Could not copy the review link. Select the link and copy it manually.")
+	}
+	return <div class="embed-code-block">
+		<pre tabindex="0">
+			<code>{code}</code>
+		</pre>
+		<button class="button button-compact" type="button" onClick={copy}>{label.Get()}</button>
+		<span class="sr-only" role="status" aria-live="polite">{status.Get()}</span>
+	</div>
+}
 
 func ReviewPlanCard(props any) Node {
 	return <article class="review-plan-card">
@@ -307,7 +334,7 @@ func Page() Node {
 						<If cond={reviewer.canReview}>
 							<details class="embed-code-disclosure">
 								<summary>Copy review link</summary>
-								<embeds.EmbedClipboard code={reviewer.link}></embeds.EmbedClipboard>
+								<ReviewLinkClipboard code={reviewer.link}></ReviewLinkClipboard>
 							</details>
 						</If>
 						<If cond={!reviewer.canReview}>

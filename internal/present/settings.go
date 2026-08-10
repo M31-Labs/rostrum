@@ -4,7 +4,8 @@ import "github.com/m31-labs/rostrum/internal/domain"
 
 func Settings(state domain.State) map[string]any {
 	return map[string]any{
-		"section": "settings",
+		"section":  "settings",
+		"demoMode": DemoMode(),
 		"event": map[string]any{
 			"id":          state.Event.ID,
 			"name":        state.Event.Name,
