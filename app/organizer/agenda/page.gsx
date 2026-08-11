@@ -38,6 +38,66 @@ func SessionMoveForm(props any) Node {
 	</ActionForm>
 }
 
+func SessionCreateForm(props any) Node {
+	return <ActionForm class="agenda-create-form" actionName="createSession">
+		<input type="hidden" name="csrf_token" value={csrf.token}></input>
+		<input type="hidden" name="day" value={props.day}></input>
+		<p class="form-status" role="status" aria-live="polite">{actions.createSession.message}</p>
+		<div class="form-grid-two">
+			<label>
+				<span>Session title</span>
+				<input name="title" required maxlength="160"></input>
+				<p class="form-error" data-gosx-field-error="title" aria-live="polite"></p>
+			</label>
+			<label>
+				<span>Format</span>
+				<select name="format" required>
+					<option value="">Choose a format</option>
+					<Each of={data.formats} as="format">
+						<option value={format.value}>{format.label}</option>
+					</Each>
+				</select>
+				<p class="form-error" data-gosx-field-error="format" aria-live="polite"></p>
+			</label>
+		</div>
+		<div class="form-grid-two">
+			<label>
+				<span>Program track</span>
+				<select name="track_id" required>
+					<option value="">Choose a track</option>
+					<Each of={data.tracks} as="track">
+						<option value={track.id}>{track.name}</option>
+					</Each>
+				</select>
+				<p class="form-error" data-gosx-field-error="track_id" aria-live="polite"></p>
+			</label>
+			<label>
+				<span>Duration (minutes)</span>
+				<input type="number" name="duration_minutes" min="5" max="480" value="45" required></input>
+				<p class="form-error" data-gosx-field-error="duration_minutes" aria-live="polite"></p>
+			</label>
+		</div>
+		<label>
+			<span>Description</span>
+			<textarea name="description" maxlength="8000"></textarea>
+			<p class="form-error" data-gosx-field-error="description" aria-live="polite"></p>
+		</label>
+		<fieldset class="agenda-speaker-picker">
+			<legend>Speakers (optional)</legend>
+			<div>
+				<Each of={data.speakers} as="speaker">
+					<label>
+						<input type="checkbox" name={"speaker_" + speaker.id}></input>
+						<span>{speaker.name}</span>
+					</label>
+				</Each>
+			</div>
+			<p class="form-error" data-gosx-field-error="speakers" aria-live="polite"></p>
+		</fieldset>
+		<button class="button button-primary" type="submit">Add to unscheduled bank</button>
+	</ActionForm>
+}
+
 //gosx:island
 func AgendaBoard(props any) Node {
 	draggedID := signal.New("")
@@ -283,6 +343,13 @@ func Page() Node {
 				Drag a card or open its keyboard-accessible move controls.
 			</p>
 		</div>
+		<details class="panel agenda-create-session">
+			<summary>Add a manual session</summary>
+			<p>
+				Create a session directly in the unscheduled bank, then place it through the same conflict-aware move control as every accepted proposal.
+			</p>
+			<SessionCreateForm day={data.dayKey}></SessionCreateForm>
+		</details>
 		<If cond={data.boardView}>
 			<AgendaBoard
 				date={data.date}

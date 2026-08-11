@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"log"
 	"net/url"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -14,6 +16,7 @@ import (
 	"github.com/m31-labs/rostrum/internal/present"
 	decisionrules "github.com/m31-labs/rostrum/rules"
 	"m31labs.dev/gosx/action"
+	"m31labs.dev/gosx/auth"
 	"m31labs.dev/gosx/route"
 	"m31labs.dev/gosx/server"
 	"m31labs.dev/gosx/session"
@@ -28,6 +31,7 @@ func init() {
 			return server.Metadata{Title: server.Title{Default: "Agenda — Rostrum"}, Description: "A conflict-aware, drag-and-drop program scheduler."}, nil
 		},
 		Actions: route.FileActions{
+			"createSession":     createSession,
 			"moveSession":       moveSession,
 			"unscheduleSession": unscheduleSession,
 			"publishAgenda":     publishAgenda,
@@ -52,7 +56,14 @@ func moveSession(ctx *action.Context) error {
 	}
 	warnings := 0
 	title := ""
-	if err := appstate.MustGet().Update(func(state *domain.State) error {
+	if err := appstate.MustGet().UpdateAudit(domain.AuditMeta{
+		Actor:      agendaActor(ctx),
+		Action:     "agenda.session_moved",
+		EntityType: "session",
+		EntityID:   sessionID,
+		Summary:    "Placed a session on the organizer agenda.",
+		Origin:     "organizer-agenda",
+	}, func(state *domain.State) error {
 		item, found := state.Session(sessionID)
 		if !found {
 			return fmt.Errorf("session %s not found", sessionID)
@@ -71,14 +82,12 @@ func moveSession(ctx *action.Context) error {
 		if parseErr != nil {
 			return action.Validation("Choose a valid agenda time.", map[string]string{"starts_at": "Invalid date or time."}, ctx.FormData)
 		}
-		duration := item.EndsAt.Sub(item.StartsAt)
-		if duration <= 0 {
-			duration = 45 * time.Minute
-		}
+		duration := item.Duration()
 		item.RoomID = roomID
 		item.TrackID = trackID
 		item.StartsAt = startsAt
 		item.EndsAt = startsAt.Add(duration)
+		item.DurationMinutes = int(duration / time.Minute)
 		item.Status = "draft"
 		title = item.Title
 
@@ -123,11 +132,19 @@ func unscheduleSession(ctx *action.Context) error {
 	}
 
 	title := ""
-	if err := appstate.MustGet().Update(func(state *domain.State) error {
+	if err := appstate.MustGet().UpdateAudit(domain.AuditMeta{
+		Actor:      agendaActor(ctx),
+		Action:     "agenda.session_unscheduled",
+		EntityType: "session",
+		EntityID:   sessionID,
+		Summary:    "Returned a session to the unscheduled agenda bank.",
+		Origin:     "organizer-agenda",
+	}, func(state *domain.State) error {
 		item, found := state.Session(sessionID)
 		if !found {
 			return fmt.Errorf("session %s not found", sessionID)
 		}
+		item.DurationMinutes = int(item.Duration() / time.Minute)
 		item.StartsAt = time.Time{}
 		item.EndsAt = time.Time{}
 		item.Status = "unscheduled"
@@ -148,7 +165,15 @@ func unscheduleSession(ctx *action.Context) error {
 }
 
 func publishAgenda(ctx *action.Context) error {
-	if err := appstate.MustGet().Update(func(state *domain.State) error {
+	eventID := appstate.MustGet().Snapshot().Event.ID
+	if err := appstate.MustGet().UpdateAudit(domain.AuditMeta{
+		Actor:      agendaActor(ctx),
+		Action:     "agenda.published",
+		EntityType: "event",
+		EntityID:   eventID,
+		Summary:    "Published every scheduled session after conflict checks.",
+		Origin:     "organizer-agenda",
+	}, func(state *domain.State) error {
 		for _, conflict := range domain.DetectConflicts(state.Sessions) {
 			if conflict.Severity == domain.SeverityHard {
 				return action.Validation("Resolve hard conflicts before publishing.", map[string]string{"agenda": "Speaker and room collisions remain."}, ctx.FormData)
@@ -173,4 +198,107 @@ func publishAgenda(ctx *action.Context) error {
 	live.Broadcast("agenda:published", map[string]any{"at": time.Now().UTC()})
 	actionflow.Redirect(ctx, "/organizer/agenda")
 	return nil
+}
+
+// createSession adds an organizer-authored session to the unscheduled bank.
+// Placement remains a separate moveSession action, ensuring every placement
+// still crosses the same conflict-policy boundary as accepted submissions.
+func createSession(ctx *action.Context) error {
+	title := strings.TrimSpace(ctx.FormData["title"])
+	description := strings.TrimSpace(ctx.FormData["description"])
+	format := strings.TrimSpace(ctx.FormData["format"])
+	trackID := strings.TrimSpace(ctx.FormData["track_id"])
+	durationMinutes, durationErr := strconv.Atoi(strings.TrimSpace(ctx.FormData["duration_minutes"]))
+	fieldErrors := map[string]string{}
+	if title == "" {
+		fieldErrors["title"] = "Enter a session title."
+	} else if len([]rune(title)) > 160 {
+		fieldErrors["title"] = "Keep the title to 160 characters or fewer."
+	}
+	if len([]rune(description)) > 8_000 {
+		fieldErrors["description"] = "Keep the description to 8,000 characters or fewer."
+	}
+	if durationErr != nil || durationMinutes < 5 || durationMinutes > 8*60 {
+		fieldErrors["duration_minutes"] = "Choose a duration between 5 and 480 minutes."
+	}
+	if len(fieldErrors) > 0 {
+		return action.Validation("Correct the session details.", fieldErrors, ctx.FormData)
+	}
+
+	speakerIDs := selectedSpeakerIDs(ctx.FormData)
+	sessionID := domain.NewID("ses")
+	if err := appstate.MustGet().UpdateAudit(domain.AuditMeta{
+		Actor:      agendaActor(ctx),
+		Action:     "agenda.session_created",
+		EntityType: "session",
+		EntityID:   sessionID,
+		Summary:    "Created an organizer-authored session in the unscheduled agenda bank.",
+		Origin:     "organizer-agenda",
+	}, func(state *domain.State) error {
+		if !containsString(state.Event.Formats, format) {
+			return action.Validation("Choose a configured session format.", map[string]string{"format": "Choose a format from this event."}, ctx.FormData)
+		}
+		if _, found := state.Track(trackID); !found {
+			return action.Validation("Choose a configured program track.", map[string]string{"track_id": "Choose a track from this event."}, ctx.FormData)
+		}
+		for _, speakerID := range speakerIDs {
+			if _, found := state.Speaker(speakerID); !found {
+				return action.Validation("Choose only speakers in this workspace.", map[string]string{"speakers": "One selected speaker no longer exists."}, ctx.FormData)
+			}
+		}
+		state.Sessions = append(state.Sessions, domain.Session{
+			ID:              sessionID,
+			EventID:         state.Event.ID,
+			Title:           title,
+			Description:     description,
+			Format:          format,
+			TrackID:         trackID,
+			SpeakerIDs:      speakerIDs,
+			DurationMinutes: durationMinutes,
+			Status:          "unscheduled",
+		})
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	session.AddFlash(ctx.Request, "notice", "Added “"+title+"” to the unscheduled bank.")
+	live.Broadcast("session:created", map[string]string{"session": sessionID})
+	redirect := "/organizer/agenda?view=day"
+	if day := strings.TrimSpace(ctx.FormData["day"]); day != "" {
+		redirect += "&day=" + url.QueryEscape(day)
+	}
+	actionflow.Redirect(ctx, redirect)
+	return nil
+}
+
+func selectedSpeakerIDs(formData map[string]string) []string {
+	const prefix = "speaker_"
+	ids := make([]string, 0)
+	for name, value := range formData {
+		if !strings.HasPrefix(name, prefix) || strings.TrimSpace(value) == "" {
+			continue
+		}
+		ids = append(ids, strings.TrimPrefix(name, prefix))
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
+func agendaActor(ctx *action.Context) string {
+	if ctx != nil && ctx.Request != nil {
+		if user, ok := auth.Current(ctx.Request); ok && strings.TrimSpace(user.ID) != "" {
+			return "organizer:" + user.ID
+		}
+	}
+	return "organizer"
 }

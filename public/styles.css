@@ -2942,6 +2942,48 @@ code {
   font-size: var(--type-xs);
 }
 
+.agenda-create-session {
+  margin: 0 0 var(--space-lg);
+}
+
+.agenda-create-session > summary {
+  color: var(--color-accent);
+  font-weight: var(--weight-semibold);
+  cursor: pointer;
+}
+
+.agenda-create-session > p {
+  max-width: 48rem;
+  margin: var(--space-sm) 0;
+  color: var(--color-text-secondary);
+  font-size: var(--type-sm);
+}
+
+.agenda-create-form {
+  display: grid;
+  gap: var(--space-sm);
+}
+
+.agenda-speaker-picker {
+  margin: 0;
+  padding: var(--space-sm);
+  border: var(--border-thin) solid var(--color-line);
+  border-radius: var(--radius-sm);
+}
+
+.agenda-speaker-picker > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs) var(--space-sm);
+}
+
+.agenda-speaker-picker label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2xs);
+  font-size: var(--type-sm);
+}
+
 /* Segmented switchers for view and day. */
 .view-switcher,
 .day-switcher {
@@ -5313,6 +5355,18 @@ code {
 }
 
 .settings-form .button {
+  justify-self: start;
+}
+
+.settings-add-form {
+  margin-top: var(--space-md);
+  padding-top: var(--space-md);
+  border-top: var(--border-thin) solid var(--color-line);
+  display: grid;
+  gap: var(--space-sm);
+}
+
+.settings-add-form .button {
   justify-self: start;
 }
 

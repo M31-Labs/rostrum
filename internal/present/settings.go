@@ -1,8 +1,25 @@
 package present
 
-import "github.com/m31-labs/rostrum/internal/domain"
+import (
+	"github.com/m31-labs/rostrum/internal/domain"
+	decisionrules "github.com/m31-labs/rostrum/rules"
+)
 
 func Settings(state domain.State) map[string]any {
+	fallback := map[string]string{
+		"queue": "program-triage",
+		"track": "the fallback track",
+		"rule":  "RouteFallback",
+	}
+	if engine, err := decisionrules.Shared(); err == nil {
+		if decision, err := engine.Route("__new_category__", "Talk", "Intermediate"); err == nil {
+			fallback = map[string]string{
+				"queue": decision.Queue,
+				"track": TrackName(state, decision.Track),
+				"rule":  decision.Rule,
+			}
+		}
+	}
 	return map[string]any{
 		"section":   "settings",
 		"demoMode":  DemoMode(),
@@ -20,9 +37,12 @@ func Settings(state domain.State) map[string]any {
 			"theme":       state.Event.Theme,
 			"description": state.Event.Description,
 		},
-		"tracks":     state.Event.Tracks,
-		"rooms":      state.Event.Rooms,
-		"trackCount": len(state.Event.Tracks),
-		"roomCount":  len(state.Event.Rooms),
+		"tracks":           state.Event.Tracks,
+		"rooms":            state.Event.Rooms,
+		"categories":       state.Event.Categories,
+		"trackCount":       len(state.Event.Tracks),
+		"roomCount":        len(state.Event.Rooms),
+		"categoryCount":    len(state.Event.Categories),
+		"categoryFallback": fallback,
 	}
 }

@@ -98,6 +98,15 @@ func Agenda(state domain.State, view string, dayParam string) (map[string]any, e
 	for _, track := range state.Event.Tracks {
 		tracks = append(tracks, map[string]string{"id": track.ID, "name": track.Name, "tone": track.Color})
 	}
+	formats := make([]map[string]string, 0, len(state.Event.Formats))
+	for _, format := range state.Event.Formats {
+		formats = append(formats, map[string]string{"value": format, "label": format})
+	}
+	speakers := make([]map[string]string, 0, len(state.Speakers))
+	for _, speaker := range state.Speakers {
+		speakers = append(speakers, map[string]string{"id": speaker.ID, "name": speaker.Name()})
+	}
+	sort.Slice(speakers, func(left, right int) bool { return speakers[left]["name"] < speakers[right]["name"] })
 	times := make([]map[string]string, 0, len(slots))
 	for _, slot := range slots {
 		times = append(times, map[string]string{"value": slot["start"].(string), "label": slot["label"].(string)})
@@ -127,6 +136,8 @@ func Agenda(state domain.State, view string, dayParam string) (map[string]any, e
 		"days":         agendaDayTabs(eventDays, day),
 		"rooms":        rooms,
 		"tracks":       tracks,
+		"formats":      formats,
+		"speakers":     speakers,
 		"times":        times,
 		"slots":        slots,
 		"moveSessions": moveSessions,

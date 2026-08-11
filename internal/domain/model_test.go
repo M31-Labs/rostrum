@@ -48,6 +48,9 @@ func TestAddSessionForSubmissionIsIdempotent(t *testing.T) {
 	if session.EventID != "event_1" {
 		t.Fatalf("session.EventID = %q, want event_1", session.EventID)
 	}
+	if session.DurationMinutes != 45 || session.Duration() != 45*time.Minute {
+		t.Fatalf("session duration = %d / %s, want 45 minutes", session.DurationMinutes, session.Duration())
+	}
 
 	created = state.AddSessionForSubmission("sub_1")
 	if created {

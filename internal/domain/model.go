@@ -276,6 +276,7 @@ type Session struct {
 	SpeakerIDs      []string  `json:"speakerIds"`
 	StartsAt        time.Time `json:"startsAt"`
 	EndsAt          time.Time `json:"endsAt"`
+	DurationMinutes int       `json:"durationMinutes"`
 	Status          string    `json:"status"`
 	ExternalID      string    `json:"externalId"`
 	LastPublishedAt time.Time `json:"lastPublishedAt"`
@@ -283,6 +284,34 @@ type Session struct {
 
 func (session Session) Scheduled() bool {
 	return !session.StartsAt.IsZero() && !session.EndsAt.IsZero()
+}
+
+// Duration returns the persisted placement duration when one exists, then a
+// manual-session duration, and finally the format-aware program default. A
+// zero DurationMinutes remains valid for workspaces created before manual
+// session creation was introduced.
+func (session Session) Duration() time.Duration {
+	if session.Scheduled() && session.EndsAt.After(session.StartsAt) {
+		return session.EndsAt.Sub(session.StartsAt)
+	}
+	if session.DurationMinutes > 0 {
+		return time.Duration(session.DurationMinutes) * time.Minute
+	}
+	return DefaultSessionDuration(session.Format)
+}
+
+// DefaultSessionDuration gives unscheduled proposal-derived sessions a
+// predictable placement length. Organizers can override it when adding a
+// manual session; the chosen length is then preserved in DurationMinutes.
+func DefaultSessionDuration(format string) time.Duration {
+	switch strings.ToLower(strings.TrimSpace(format)) {
+	case "workshop":
+		return 90 * time.Minute
+	case "lightning talk", "lightning":
+		return 15 * time.Minute
+	default:
+		return 45 * time.Minute
+	}
 }
 
 // AddSessionForSubmission appends an unscheduled Session for the submission
@@ -301,15 +330,16 @@ func (state *State) AddSessionForSubmission(submissionID string) (created bool) 
 		return false
 	}
 	state.Sessions = append(state.Sessions, Session{
-		ID:           NewID("ses"),
-		EventID:      submission.EventID,
-		SubmissionID: submission.ID,
-		Title:        submission.Title,
-		Description:  submission.Abstract,
-		Format:       submission.Format,
-		TrackID:      submission.TrackID,
-		SpeakerIDs:   append([]string(nil), submission.SpeakerIDs...),
-		Status:       "unscheduled",
+		ID:              NewID("ses"),
+		EventID:         submission.EventID,
+		SubmissionID:    submission.ID,
+		Title:           submission.Title,
+		Description:     submission.Abstract,
+		Format:          submission.Format,
+		TrackID:         submission.TrackID,
+		SpeakerIDs:      append([]string(nil), submission.SpeakerIDs...),
+		DurationMinutes: int(DefaultSessionDuration(submission.Format) / time.Minute),
+		Status:          "unscheduled",
 	})
 	return true
 }
@@ -819,6 +849,9 @@ func (state State) Validate() error {
 	for _, session := range state.Sessions {
 		if session.Scheduled() && !session.EndsAt.After(session.StartsAt) {
 			return fmt.Errorf("session %s ends before it starts", session.ID)
+		}
+		if session.DurationMinutes < 0 || session.DurationMinutes > 12*60 {
+			return fmt.Errorf("session %s has an invalid duration", session.ID)
 		}
 	}
 	for _, plan := range state.ReviewPlans {

@@ -136,6 +136,9 @@ func Page() Node {
 						endsError=""
 					></SettingsFields>
 				</If>
+				<p class="form-note">
+					Moving the event start date shifts every scheduled agenda item by the same calendar amount. Changing timezone preserves each session’s local wall-clock time.
+				</p>
 				<button class="button button-primary" type="submit">Save settings</button>
 			</ActionForm>
 			<aside class="settings-side">
@@ -158,6 +161,33 @@ func Page() Node {
 							</article>
 						</Each>
 					</div>
+					<ActionForm class="settings-add-form" actionName="addTrack">
+						<input type="hidden" name="csrf_token" value={csrf.token}></input>
+						<p class="form-status" role="status" aria-live="polite">{actions.addTrack.message}</p>
+						<label>
+							<span>New track name</span>
+							<input name="name" required></input>
+							<p class="form-error" data-gosx-field-error="name" aria-live="polite"></p>
+						</label>
+						<div class="form-grid-two">
+							<label>
+								<span>Color</span>
+								<select name="color" required>
+									<option value="blue">Blue</option>
+									<option value="teal">Teal</option>
+									<option value="violet">Violet</option>
+									<option value="ochre">Ochre</option>
+								</select>
+								<p class="form-error" data-gosx-field-error="color" aria-live="polite"></p>
+							</label>
+							<label>
+								<span>Description</span>
+								<input name="description" maxlength="500"></input>
+								<p class="form-error" data-gosx-field-error="description" aria-live="polite"></p>
+							</label>
+						</div>
+						<button class="button" type="submit">Add track</button>
+					</ActionForm>
 				</section>
 				<section class="panel">
 					<header class="panel-header">
@@ -178,6 +208,88 @@ func Page() Node {
 							</article>
 						</Each>
 					</div>
+					<ActionForm class="settings-add-form" actionName="addRoom">
+						<input type="hidden" name="csrf_token" value={csrf.token}></input>
+						<p class="form-status" role="status" aria-live="polite">{actions.addRoom.message}</p>
+						<div class="form-grid-two">
+							<label>
+								<span>New room name</span>
+								<input name="name" required></input>
+								<p class="form-error" data-gosx-field-error="name" aria-live="polite"></p>
+							</label>
+							<label>
+								<span>Seated capacity</span>
+								<input type="number" name="capacity" min="1" max="100000" required></input>
+								<p class="form-error" data-gosx-field-error="capacity" aria-live="polite"></p>
+							</label>
+						</div>
+						<button class="button" type="submit">Add room</button>
+					</ActionForm>
+				</section>
+				<section class="panel">
+					<header class="panel-header">
+						<div>
+							<p class="panel-kicker">CFP routing</p>
+							<h2>Categories</h2>
+						</div>
+						<span>{data.categoryCount}</span>
+					</header>
+					<div class="settings-list">
+						<Each of={data.categories} as="category">
+							<article>
+								<span class="mono">{category.ID}</span>
+								<div>
+									<strong>{category.Name}</strong>
+									<small>
+										{category.OwnerName}
+										·
+										{category.OwnerEmail}
+									</small>
+								</div>
+							</article>
+						</Each>
+					</div>
+					<ActionForm class="settings-add-form" actionName="addCategory">
+						<input type="hidden" name="csrf_token" value={csrf.token}></input>
+						<p class="form-status" role="status" aria-live="polite">{actions.addCategory.message}</p>
+						<label>
+							<span>New category name</span>
+							<input name="name" required></input>
+							<p class="form-error" data-gosx-field-error="name" aria-live="polite"></p>
+						</label>
+						<div class="form-grid-two">
+							<label>
+								<span>Category owner</span>
+								<input name="owner_name" required></input>
+								<p class="form-error" data-gosx-field-error="owner_name" aria-live="polite"></p>
+							</label>
+							<label>
+								<span>Owner email</span>
+								<input type="email" name="owner_email" required></input>
+								<p class="form-error" data-gosx-field-error="owner_email" aria-live="polite"></p>
+							</label>
+						</div>
+						<label>
+							<span>Program track</span>
+							<select name="track_id" required>
+								<option value="">Choose a track</option>
+								<Each of={data.tracks} as="track">
+									<option value={track.ID}>{track.Name}</option>
+								</Each>
+							</select>
+							<p class="form-error" data-gosx-field-error="track_id" aria-live="polite"></p>
+						</label>
+						<p class="form-note">
+							Until a policy names this category,
+							<code>{data.categoryFallback.rule}</code>
+							routes it to
+							{data.categoryFallback.queue}
+							on
+							{data.categoryFallback.track}
+							.
+						</p>
+						<button class="button" type="submit">Add category</button>
+					</ActionForm>
 				</section>
 				<section class="panel">
 					<header class="panel-header">
