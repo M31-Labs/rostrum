@@ -14,6 +14,7 @@ BASE="${1:-}"
 SRV_PID=""
 TMPBIN=""
 LOGFILE=""
+EXPECTED_VERSION=""
 COOKIEJAR="$(mktemp)"
 
 cleanup() {
@@ -35,7 +36,8 @@ if [ -z "$BASE" ]; then
 	# ORGANIZER_EMAILS is explicitly empty so the identity plane's break-glass
 	# bootstrap arms and logs a one-time /setup URL to $LOGFILE; the block
 	# below uses it to sign in as the first organizer.
-	PORT="$PORT" DEMO_MODE=memory PUBLIC_URL="$BASE" ORGANIZER_EMAILS="" "$TMPBIN" >"$LOGFILE" 2>&1 &
+	EXPECTED_VERSION="smoke"
+	PORT="$PORT" DEMO_MODE=memory PUBLIC_URL="$BASE" ROSTRUM_VERSION="$EXPECTED_VERSION" ORGANIZER_EMAILS="" "$TMPBIN" >"$LOGFILE" 2>&1 &
 	SRV_PID=$!
 	# Wait for readiness.
 	i=0
@@ -47,6 +49,19 @@ if [ -z "$BASE" ]; then
 fi
 
 fail=0
+
+# A release must be identifiable by its own immutable version, not merely the
+# GoSX framework it happened to compile with. Local mode pins an expected
+# value; a remote smoke target can be checked against its deployment record.
+if [ -n "$EXPECTED_VERSION" ]; then
+	health="$(curl -s --max-time 20 "$BASE/api/health")"
+	if printf '%s' "$health" | grep -q "\"version\":\"$EXPECTED_VERSION\""; then
+		echo "smoke: OK   /api/health (version=$EXPECTED_VERSION)"
+	else
+		echo "smoke: FAIL /api/health (expected version=$EXPECTED_VERSION)"
+		fail=1
+	fi
+fi
 
 # check <route> <min-inputs> <min-selects> <min-textareas> <required-name...>
 # Sends any cookies COOKIEJAR already holds, so an authenticated route (see

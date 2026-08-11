@@ -13,7 +13,9 @@ Requirements:
 - The Arbiter CLI (used by `make check`): `go install m31labs.dev/arbiter/cmd/arbiter@v1.9.0`
 
 ```bash
+make check
 make build
+make smoke
 ```
 
 `make build` writes the `dist/` bundle: the static server binary at
@@ -26,7 +28,7 @@ and for uploaded files under `data/uploads`.
 
 ```bash
 make build
-docker build -t rostrum:local .
+docker build --build-arg ROSTRUM_VERSION="$(git rev-parse --short HEAD)" -t rostrum:local .
 docker run --rm -p 8080:8080 \
   -e APP_ENV=production \
   -e PUBLIC_URL=https://program.example.com \
@@ -43,6 +45,19 @@ the process refuses to start with:
 - the development session secret, or any secret shorter than 32 characters;
 - a `PUBLIC_URL` that is not HTTPS;
 - the in-memory store (`DEMO_MODE=memory`).
+
+Set `ROSTRUM_VERSION` to the immutable release tag or commit SHA. The value is
+returned by `GET /api/health`, so a deployment record can prove which Rostrum
+build passed its release smoke test. After deployment, run the unauthenticated
+render check against its public address:
+
+```bash
+make smoke SMOKE_URL=https://program.example.com
+```
+
+That remote mode checks public and login surfaces. Perform the authenticated
+organizer workflow in the launch checklist separately; a smoke script must not
+need a production organizer credential.
 
 ## Reverse proxy
 

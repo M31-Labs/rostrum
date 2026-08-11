@@ -92,6 +92,11 @@ func main() {
 
 	port := getenv("PORT", "8080")
 	publicBase := getenv("PUBLIC_URL", "http://localhost:"+port)
+	// Release identity is deployment-owned rather than tied to the framework
+	// version. A container or process manager should set ROSTRUM_VERSION to an
+	// immutable tag or commit SHA, allowing /api/health to prove the exact app
+	// build that is serving traffic.
+	rostrumVersion := getenv("ROSTRUM_VERSION", "dev")
 	appEnv := strings.ToLower(getenv("APP_ENV", "development"))
 	sessionSecret := getenv("SESSION_SECRET", developmentSessionSecret)
 	// Organizer roles now live in the signed, encrypted session cookie, so the
@@ -230,7 +235,7 @@ func main() {
 		return map[string]any{
 			"ok":      true,
 			"app":     "Rostrum",
-			"version": gosx.Version,
+			"version": rostrumVersion,
 			"time":    time.Now().UTC().Format(time.RFC3339),
 		}, nil
 	})

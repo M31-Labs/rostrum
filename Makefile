@@ -1,8 +1,9 @@
-.PHONY: dev check test build size-budget perf-budget release-check check-gosx
+.PHONY: dev check test build smoke size-budget perf-budget release-check check-gosx
 
 GOSX ?= gosx
 GOSX_VERSION ?= 0.38.1
 PERF_URLS ?= http://localhost:8080/ http://localhost:8080/organizer http://localhost:8080/organizer/agenda http://localhost:8080/organizer/portal http://localhost:8080/public/m31-systems-forum-2026/agenda
+SMOKE_URL ?=
 
 dev:
 	DEMO_MODE=memory go run .
@@ -32,6 +33,9 @@ build: check-gosx
 	CGO_ENABLED=0 $(GOSX) build --prod .
 	find dist/assets/runtime -type f -name '*.map' -delete
 	find dist/app -type f -name '*.go' -delete
+
+smoke:
+	scripts/smoke.sh $(SMOKE_URL)
 
 size-budget: build
 	GOSX=$(GOSX) go run ./cmd/sizecheck -root .

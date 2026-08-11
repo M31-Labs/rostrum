@@ -37,8 +37,9 @@ so you can explore every surface.
   WebSocket as speakers complete work.
 - **Communications.** A template library with merge fields, a per-recipient
   preview, Gmail and Outlook compose links, a demo outbox, and a sent/queued
-  ledger. Each submission triggers a real confirmation email that carries the
-  speaker's portal link. Each speaker has a private iCalendar file.
+  ledger. Each submission creates a confirmation message carrying the
+  speaker's portal link; configured Resend or SMTP delivery sends it as email.
+  Each speaker has a private iCalendar file.
 - **Publishing.** A public agenda with a personal itinerary stored on the
   visitor's device, a speaker gallery, embeddable widgets, public JSON, and a
   CSV (comma-separated values) export for organizers.
@@ -125,14 +126,15 @@ press `G` plus a route key to jump to any surface.
 
 ## Identity model
 
-- Speakers hold signed portal links, sent by email, valid for 90 days. A
-  valid link binds the browser session to that one speaker.
-- Reviewers hold signed review links that an organizer copies from the
-  Review page. Each link authenticates one reviewer on every request.
-- The organizer workspace carries no login of its own in this release. Deploy
-  it behind an access-controlled reverse proxy; the application then trusts
-  any session the proxy admits to `/organizer`. The live demo leaves this
-  surface open on purpose. See [docs/deployment.md](docs/deployment.md).
+- Speakers hold signed, expiring portal links. A valid link binds the browser
+  session to that one speaker.
+- Reviewers hold signed review links that an organizer copies from the Review
+  page. Each link authenticates one reviewer on every request.
+- Rostrum enforces its own organizer roles: `organizer`, `chair`, and
+  `observer`. Configure `ORGANIZER_EMAILS` before first boot, or use the
+  one-time `/setup` break-glass link to establish the first organizer.
+  Organizers can sign in with a magic link, configured GitHub or Google OAuth,
+  or a registered passkey. See [docs/deployment.md](docs/deployment.md).
 
 ## Public interfaces
 
@@ -189,6 +191,7 @@ Then run:
 ```bash
 make check          # gofmt, template format, policy validation, vet, tests, race
 make build          # production bundle in dist/
+make smoke          # rendered HTML smoke test against a temporary local server
 make release-check  # check plus the committed size budgets
 ```
 
@@ -208,6 +211,9 @@ The included Dockerfile packages the verified `dist/` bundle and runs as a
 non-root user. See [docs/deployment.md](docs/deployment.md) for the container
 run command, the persistent volume, production secret requirements, and the
 reverse-proxy boundary.
+
+The current release gate, external-provider setup, and intentionally deferred
+follow-up work are recorded in [docs/launch-readiness.md](docs/launch-readiness.md).
 
 ## License
 
