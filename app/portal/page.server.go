@@ -209,6 +209,14 @@ func completeTask(ctx *action.Context) error {
 			values[key] = value
 		}
 	}
+	snapshot := appstate.MustGet().Snapshot()
+	task, found := snapshot.Task(taskID)
+	if !found || !snapshot.TaskAssignedToSpeaker(*task, speakerID) {
+		return action.Validation("That task is no longer available.", map[string]string{"task": "Reload your portal and try again."}, ctx.FormData)
+	}
+	if fieldErrors := validateTaskSubmission(*task, values); len(fieldErrors) > 0 {
+		return action.Validation("Complete the required task details.", fieldErrors, ctx.FormData)
+	}
 	if err := appstate.MustGet().UpdateAudit(domain.AuditMeta{
 		Actor: "speaker:" + speakerID, Action: "task.submitted", EntityType: "task_completion", EntityID: taskID + ":" + speakerID,
 		Summary: "Speaker submitted an onboarding task.", Origin: "speaker-portal",
@@ -216,7 +224,8 @@ func completeTask(ctx *action.Context) error {
 		if _, found := state.Speaker(speakerID); !found {
 			return fmt.Errorf("speaker %s not found", speakerID)
 		}
-		if _, found := state.Task(taskID); !found {
+		task, found := state.Task(taskID)
+		if !found || !state.TaskAssignedToSpeaker(*task, speakerID) {
 			return fmt.Errorf("task %s not found", taskID)
 		}
 		upsertCompletion(state, taskID, speakerID, domain.TaskSubmitted, values)
@@ -229,6 +238,45 @@ func completeTask(ctx *action.Context) error {
 	live.Broadcast("task:submitted", map[string]string{"speaker": speakerID, "task": taskID})
 	actionflow.Redirect(ctx, "/portal/"+speakerID+"#tasks")
 	return nil
+}
+
+func validateTaskSubmission(task domain.Task, values map[string]string) map[string]string {
+	fieldErrors := map[string]string{}
+	if len(task.FormFields) == 0 {
+		if !portalCheckbox(values["confirmed"]) {
+			fieldErrors["task"] = "Confirm the task before submitting it."
+		}
+		return fieldErrors
+	}
+	for _, field := range task.FormFields {
+		value := strings.TrimSpace(values[field.ID])
+		if field.Required && (value == "" || (field.Type == "checkbox" && !portalCheckbox(value))) {
+			fieldErrors[field.ID] = "Complete this required field."
+			continue
+		}
+		if field.Type == "select" && value != "" && !containsTaskOption(field.Options, value) {
+			fieldErrors[field.ID] = "Choose one of the listed options."
+		}
+	}
+	return fieldErrors
+}
+
+func containsTaskOption(options []string, value string) bool {
+	for _, option := range options {
+		if option == value {
+			return true
+		}
+	}
+	return false
+}
+
+func portalCheckbox(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "true", "on", "yes":
+		return true
+	default:
+		return false
+	}
 }
 
 // withdrawSubmission is speaker-authorized through the portal's bound

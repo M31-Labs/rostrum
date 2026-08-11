@@ -263,6 +263,7 @@ func main() {
 	app.Mount("/organizer/export/submissions.csv", http.HandlerFunc(submissionsCSV))
 	app.Mount("/organizer/export/workspace.json", http.HandlerFunc(workspaceExport))
 	app.Mount("/organizer/export/archive.tar.gz", http.HandlerFunc(workspaceArchive(root, auditPath)))
+	app.Mount("/organizer/export/approved-uploads.zip", http.HandlerFunc(approvedUploadBundle(root)))
 	app.Mount("/organizer/import/workspace", http.HandlerFunc(workspaceImport(root, backupDirectory)))
 	app.Mount("/favicon.ico", http.RedirectHandler("/favicon.svg", http.StatusTemporaryRedirect))
 	app.Mount("/demo/reset", resetDemo(root))
@@ -274,7 +275,7 @@ func main() {
 	// on the GET (Protect only guards POST/PUT/PATCH/DELETE) and via the
 	// hidden csrf_token field on the POST.
 	app.Mount("GET /auth/magic-link", magicLinks.CallbackHandler())
-	app.Mount("POST /auth/magic-link", magicLinkRequestGate(magicLinks.RequestHandler()))
+	app.Mount("POST /auth/magic-link", magicLinkRequestGate(managedMagicLinkRequest(magicLinks)))
 	for _, provider := range oauthProviders {
 		name := provider.Name
 		app.Mount("GET /auth/oauth/"+name, oauthManager.BeginHandler(name))
@@ -756,6 +757,76 @@ func magicLinkRequestGate(next http.Handler) http.Handler {
 	})
 }
 
+// managedMagicLinkRequest keeps the standard GoSX magic-link primitives but
+// accepts either JSON or a browser FormData post. Generic <Form> submits use
+// FormData plus Accept: application/json; the framework's stock
+// MagicLinks.RequestHandler treats that combination as JSON-only. Handling
+// both encodings here lets the sign-in page remain a managed, no-refresh form
+// while retaining the same durable token store, resolver, sender, and rate
+// gate as the native fallback.
+func managedMagicLinkRequest(magicLinks *auth.MagicLinks) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		email, next, err := readManagedMagicLinkRequest(r)
+		if err != nil {
+			writeManagedMagicLinkError(w, r, http.StatusBadRequest)
+			return
+		}
+		if _, err := magicLinks.Send(r, email, next); err != nil {
+			// Do not expose resolver, provider, or origin details to a public
+			// sign-in form. Operators receive the concrete error in logs.
+			log.Printf("magic link request: %v", err)
+			writeManagedMagicLinkError(w, r, http.StatusBadRequest)
+			return
+		}
+		session.AddFlash(r, identity.MagicLinkFlashKey, map[string]any{
+			"status": "sent",
+			"email":  strings.TrimSpace(strings.ToLower(email)),
+		})
+		if requestWantsJSON(r) {
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"ok":       true,
+				"message":  "Check your email for a sign-in link.",
+				"redirect": "/login",
+			})
+			return
+		}
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+	})
+}
+
+func readManagedMagicLinkRequest(r *http.Request) (email, next string, err error) {
+	if r == nil {
+		return "", "", errors.New("missing request")
+	}
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(r.Header.Get("Content-Type"))), "application/json") {
+		var payload struct {
+			Email string `json:"email"`
+			Next  string `json:"next"`
+		}
+		if decodeErr := json.NewDecoder(r.Body).Decode(&payload); decodeErr != nil {
+			return "", "", decodeErr
+		}
+		return payload.Email, payload.Next, nil
+	}
+	if parseErr := r.ParseForm(); parseErr != nil {
+		return "", "", parseErr
+	}
+	return r.Form.Get("email"), r.Form.Get("next"), nil
+}
+
+func writeManagedMagicLinkError(w http.ResponseWriter, r *http.Request, status int) {
+	message := "We could not request a sign-in link. Check your email address and try again."
+	if requestWantsJSON(r) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "message": message})
+		return
+	}
+	session.AddFlash(r, identity.MagicLinkFlashKey, map[string]any{"status": "error"})
+	http.Redirect(w, r, "/login", http.StatusSeeOther)
+}
+
 func navigationScriptCSPHash() string {
 	rendered := gosx.RenderHTML(server.NavigationScript())
 	start := strings.Index(rendered, ">")
@@ -922,6 +993,44 @@ func workspaceArchive(root, auditPath string) http.HandlerFunc {
 			// prefix and log the operational detail instead of attempting a second
 			// incompatible HTTP response.
 			log.Printf("write workspace archive: %v", err)
+		}
+	}
+}
+
+// approvedUploadBundle serves a deterministic ZIP of the subset of task
+// uploads that an organizer has explicitly approved. Like the other
+// privacy-sensitive exports, authorization is checked here rather than
+// delegated to organizerGate so a cookie-less request receives 403 and never
+// an authentication redirect that might expose route behavior.
+func approvedUploadBundle(root string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !canExportSubmissions(r) {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		state := appstate.MustGet().Snapshot()
+		bundle, err := workspacearchive.BuildApprovedUploadBundle(state, filepath.Join(root, "data", "uploads"))
+		if err != nil {
+			log.Printf("build approved upload bundle: %v", err)
+			http.Error(w, "could not build approved upload bundle", http.StatusConflict)
+			return
+		}
+		if err := recordWorkspaceExport(r, "export.approved_upload_bundle", "rostrum-approved-uploads.zip"); err != nil {
+			log.Printf("record approved upload bundle export: %v", err)
+			http.Error(w, "could not record export", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/zip")
+		w.Header().Set("Content-Disposition", `attachment; filename="rostrum-approved-uploads.zip"`)
+		w.Header().Set("Cache-Control", "private, no-store")
+		if err := bundle.Write(w); err != nil {
+			// Writing may already have started, so preserve the valid prefix and
+			// leave the detailed integrity diagnosis in the server log.
+			log.Printf("write approved upload bundle: %v", err)
 		}
 	}
 }
@@ -1101,7 +1210,7 @@ func portalUpload(root string) http.HandlerFunc {
 			return
 		}
 		task, found := state.Task(taskID)
-		if !found || !taskAssignedToSpeaker(*task, speakerID) {
+		if !found || !state.TaskAssignedToSpeaker(*task, speakerID) || !uploadTaskType(*task) {
 			http.NotFound(w, r)
 			return
 		}
@@ -1200,7 +1309,7 @@ func portalUpload(root string) http.HandlerFunc {
 				return fmt.Errorf("speaker %s not found", speakerID)
 			}
 			task, found := state.Task(taskID)
-			if !found || !taskAssignedToSpeaker(*task, speakerID) {
+			if !found || !state.TaskAssignedToSpeaker(*task, speakerID) || !uploadTaskType(*task) {
 				return fmt.Errorf("task %s not found", taskID)
 			}
 			now := time.Now().UTC()
@@ -1246,15 +1355,6 @@ func portalUpload(root string) http.HandlerFunc {
 	}
 }
 
-func taskAssignedToSpeaker(task domain.Task, speakerID string) bool {
-	for _, assigned := range task.AssignedSpeakerIDs {
-		if assigned == speakerID {
-			return true
-		}
-	}
-	return false
-}
-
 func uploadActor(r *http.Request, speakerID string) string {
 	if canMutateWorkspace(r) {
 		if user, ok := auth.Current(r); ok && user.ID != "" {
@@ -1263,6 +1363,10 @@ func uploadActor(r *http.Request, speakerID string) string {
 		return "organizer"
 	}
 	return "speaker:" + speakerID
+}
+
+func uploadTaskType(task domain.Task) bool {
+	return task.Type == "file" || task.Type == "headshot"
 }
 
 func allowedUpload(name string) bool {

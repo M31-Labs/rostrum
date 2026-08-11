@@ -35,6 +35,16 @@ func init() {
 		Actions: route.FileActions{
 			"assignPendingToActivePlan": assignPendingToActivePlan,
 			"saveReview":                saveReview,
+			"createReviewPlan":          createReviewPlan,
+			"updateReviewPlan":          updateReviewPlan,
+			"createReviewer":            createReviewer,
+			"updateReviewer":            updateReviewer,
+			"retireReviewer":            retireReviewer,
+			"addPlanReviewer":           addPlanReviewer,
+			"removePlanReviewer":        removePlanReviewer,
+			"autoAssignReviewers":       autoAssignReviewers,
+			"assignReview":              assignReview,
+			"unassignReview":            unassignReview,
 		},
 	}); err != nil {
 		log.Fatal(err)
@@ -50,6 +60,9 @@ func init() {
 func reviewerLinkRows(state domain.State) []map[string]any {
 	rows := make([]map[string]any, 0, len(state.Reviewers))
 	for _, reviewer := range state.Reviewers {
+		if !reviewer.Active() {
+			continue
+		}
 		canReview := reviewer.Kind == "human"
 		link := ""
 		if canReview {
@@ -120,8 +133,11 @@ func saveReview(ctx *action.Context) error {
 		return action.Validation("Choose a proposal assigned to this round.", map[string]string{"submission_id": "Proposal is not assigned."}, ctx.FormData)
 	}
 	reviewer, reviewerFound := reviewParticipant(snapshot, reviewerID)
-	if !reviewerFound || reviewer.Kind != "human" || !containsReviewID(plan.ReviewerIDs, reviewerID) {
+	if !reviewerFound || !reviewer.Active() || reviewer.Kind != "human" || !containsReviewID(plan.ReviewerIDs, reviewerID) {
 		return action.Validation("Choose a human reviewer assigned to this round.", map[string]string{"reviewer_id": "Reviewer is not assigned."}, ctx.FormData)
+	}
+	if plan.AssignmentsManaged && !snapshot.ReviewAssignmentActive(planID, submissionID, reviewerID) {
+		return action.Validation("Choose a reviewer assigned to this proposal.", map[string]string{"reviewer_id": "This reviewer is not assigned to that proposal."}, ctx.FormData)
 	}
 	engine, err := decisionrules.Shared()
 	if err != nil {

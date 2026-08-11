@@ -70,7 +70,7 @@ func loadReview(ctx *route.RouteContext, page route.FilePage) (any, error) {
 		return reviewUnavailable(snapshot), nil
 	}
 	reviewer, found := findReviewer(snapshot, reviewerID)
-	if !found || reviewer.Kind != "human" {
+	if !found || !reviewer.Active() || reviewer.Kind != "human" {
 		return reviewUnavailable(snapshot), nil
 	}
 
@@ -140,6 +140,9 @@ func reviewerSubmissionRows(state domain.State, plan domain.ReviewPlan, reviewer
 		// independently rechecks the same fact and policy, so a stale page or
 		// forged post cannot bypass recusal.
 		if state.ReviewerCompanyConflict(reviewer, *submission) {
+			continue
+		}
+		if plan.AssignmentsManaged && !state.ReviewAssignmentActive(plan.ID, submission.ID, reviewer.ID) {
 			continue
 		}
 		existing, hasExisting := reviewerEvaluation(state, plan.ID, submission.ID, reviewer.ID)
@@ -260,8 +263,11 @@ func scoreSubmission(ctx *action.Context) error {
 		return action.Validation("Choose a proposal assigned to this round.", map[string]string{"submission_id": "Proposal is not assigned."}, ctx.FormData)
 	}
 	reviewer, reviewerFound := findReviewer(snapshot, reviewerID)
-	if !reviewerFound || reviewer.Kind != "human" || !containsID(plan.ReviewerIDs, reviewerID) {
+	if !reviewerFound || !reviewer.Active() || reviewer.Kind != "human" || !containsID(plan.ReviewerIDs, reviewerID) {
 		return action.Validation("Your reviewer link is not assigned to this round.", nil, ctx.FormData)
+	}
+	if plan.AssignmentsManaged && !snapshot.ReviewAssignmentActive(planID, submissionID, reviewerID) {
+		return action.Validation("This proposal is not assigned to your reviewer link.", nil, ctx.FormData)
 	}
 	engine, err := decisionrules.Shared()
 	if err != nil {

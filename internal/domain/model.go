@@ -20,6 +20,7 @@ type State struct {
 	Submissions       []Submission            `json:"submissions"`
 	Reviewers         []Reviewer              `json:"reviewers"`
 	ReviewPlans       []ReviewPlan            `json:"reviewPlans"`
+	ReviewAssignments []ReviewAssignment      `json:"reviewAssignments"`
 	Evaluations       []Evaluation            `json:"evaluations"`
 	Sessions          []Session               `json:"sessions"`
 	Tasks             []Task                  `json:"tasks"`
@@ -248,15 +249,51 @@ type ReviewPlan struct {
 	SubmissionIDs      []string          `json:"submissionIds"`
 	Criteria           []RubricCriterion `json:"criteria"`
 	EvaluationsPerItem int               `json:"evaluationsPerItem"`
+	AssignmentsManaged bool              `json:"assignmentsManaged"`
+	CreatedAt          time.Time         `json:"createdAt"`
+	UpdatedAt          time.Time         `json:"updatedAt"`
 }
 
 type Reviewer struct {
-	ID        string   `json:"id"`
-	Name      string   `json:"name"`
-	Email     string   `json:"email"`
-	Company   string   `json:"company"`
-	Expertise []string `json:"expertise"`
-	Kind      string   `json:"kind"`
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	Email     string    `json:"email"`
+	Company   string    `json:"company"`
+	Expertise []string  `json:"expertise"`
+	Kind      string    `json:"kind"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+	RetiredAt time.Time `json:"retiredAt"`
+}
+
+// Active reports whether this reviewer can receive new review assignments.
+// Retirement retains the reviewer record and every historical score.
+func (reviewer Reviewer) Active() bool {
+	return reviewer.RetiredAt.IsZero()
+}
+
+// ReviewAssignment records the assignment lifecycle separately from an
+// evaluation. Reassigning or retiring a reviewer therefore never deletes a
+// scored evaluation, and the assignment's source, actor, policy rule, and
+// removal reason stay available as immutable provenance.
+type ReviewAssignment struct {
+	ID            string    `json:"id"`
+	PlanID        string    `json:"planId"`
+	SubmissionID  string    `json:"submissionId"`
+	ReviewerID    string    `json:"reviewerId"`
+	Source        string    `json:"source"`
+	Actor         string    `json:"actor"`
+	Rule          string    `json:"rule"`
+	Trace         []string  `json:"trace"`
+	AssignedAt    time.Time `json:"assignedAt"`
+	RemovedAt     time.Time `json:"removedAt"`
+	RemovalReason string    `json:"removalReason"`
+}
+
+// Active reports whether the assignment currently permits its reviewer to
+// score the proposal in a managed review plan.
+func (assignment ReviewAssignment) Active() bool {
+	return assignment.RemovedAt.IsZero()
 }
 
 type RubricCriterion struct {
@@ -370,10 +407,14 @@ func (state *State) AddSessionForSubmission(submissionID string) (created bool) 
 func (state *State) AssignAcceptedOnlyTasks(speakerIDs []string) (assigned int) {
 	for index := range state.Tasks {
 		task := &state.Tasks[index]
-		if !task.AcceptedOnly {
+		if !task.AcceptedOnly || !task.Active() {
 			continue
 		}
 		for _, speakerID := range speakerIDs {
+			// Callers transition the submission to an accepted state in the
+			// same transaction before invoking this helper. Keep the helper
+			// idempotent and reusable for import repair; Validate and the
+			// organizer assignment action enforce the durable eligibility rule.
 			if speakerID == "" || contains(task.AssignedSpeakerIDs, speakerID) {
 				continue
 			}
@@ -483,6 +524,16 @@ type Task struct {
 	AssignedSpeakerIDs []string    `json:"assignedSpeakerIds"`
 	FormFields         []FormField `json:"formFields"`
 	AcceptedOnly       bool        `json:"acceptedOnly"`
+	CreatedAt          time.Time   `json:"createdAt"`
+	UpdatedAt          time.Time   `json:"updatedAt"`
+	RetiredAt          time.Time   `json:"retiredAt"`
+}
+
+// Active reports whether a task remains actionable. Retiring a task is an
+// archive-preserving operation: task completions remain durable evidence, but
+// the task stops appearing in speaker portals and cannot accept new work.
+func (task Task) Active() bool {
+	return task.RetiredAt.IsZero()
 }
 
 type TaskCompletion struct {
@@ -834,6 +885,38 @@ func (state *State) ReviewPlan(id string) (*ReviewPlan, bool) {
 	return nil, false
 }
 
+func (state *State) Reviewer(id string) (*Reviewer, bool) {
+	for index := range state.Reviewers {
+		if state.Reviewers[index].ID == id {
+			return &state.Reviewers[index], true
+		}
+	}
+	return nil, false
+}
+
+// ReviewAssignmentActive reports whether a managed plan currently grants the
+// reviewer this proposal. Legacy plans intentionally keep their shared-pool
+// behavior until an organizer enables managed assignments; callers should
+// pair this method with ReviewPlan.AssignmentsManaged.
+func (state State) ReviewAssignmentActive(planID, submissionID, reviewerID string) bool {
+	for _, assignment := range state.ReviewAssignments {
+		if assignment.PlanID == planID && assignment.SubmissionID == submissionID && assignment.ReviewerID == reviewerID && assignment.Active() {
+			return true
+		}
+	}
+	return false
+}
+
+func (state State) ActiveReviewAssignmentCount(planID, submissionID string) int {
+	count := 0
+	for _, assignment := range state.ReviewAssignments {
+		if assignment.PlanID == planID && assignment.SubmissionID == submissionID && assignment.Active() {
+			count++
+		}
+	}
+	return count
+}
+
 func (state *State) Task(id string) (*Task, bool) {
 	for index := range state.Tasks {
 		if state.Tasks[index].ID == id {
@@ -883,12 +966,40 @@ func (state State) Category(id string) (Category, bool) {
 func (state State) SpeakerTasks(speakerID string) []Task {
 	tasks := make([]Task, 0)
 	for _, task := range state.Tasks {
-		if contains(task.AssignedSpeakerIDs, speakerID) {
+		if state.TaskAssignedToSpeaker(task, speakerID) {
 			tasks = append(tasks, task)
 		}
 	}
 	sort.Slice(tasks, func(i, j int) bool { return tasks[i].DueAt.Before(tasks[j].DueAt) })
 	return tasks
+}
+
+// TaskAssignedToSpeaker is the single authorization predicate for a speaker
+// task. It deliberately folds assignment, lifecycle, and accepted-only policy
+// together so a retired task or a no-longer-eligible speaker cannot submit or
+// upload by addressing an old task URL directly.
+func (state State) TaskAssignedToSpeaker(task Task, speakerID string) bool {
+	if !task.Active() || !contains(task.AssignedSpeakerIDs, speakerID) {
+		return false
+	}
+	return !task.AcceptedOnly || state.SpeakerEligibleForAcceptedTasks(speakerID)
+}
+
+// SpeakerEligibleForAcceptedTasks returns whether the speaker has at least
+// one proposal in an accepted program state. Accepted queue is included: it
+// is already an acceptance-stage state throughout Rostrum's integrations and
+// seed data, while pending or declined proposals never unlock accepted-only
+// work.
+func (state State) SpeakerEligibleForAcceptedTasks(speakerID string) bool {
+	for _, submission := range state.Submissions {
+		if !contains(submission.SpeakerIDs, speakerID) {
+			continue
+		}
+		if submission.Status == SubmissionAccepted || submission.Status == SubmissionAcceptedQueue {
+			return true
+		}
+	}
+	return false
 }
 
 func (state State) OutstandingTaskCount(speakerID string) int {
@@ -930,6 +1041,12 @@ func (state State) Validate() error {
 	if err := validateCommunications(state); err != nil {
 		return err
 	}
+	if err := validateTasks(state); err != nil {
+		return err
+	}
+	if err := validateReview(state); err != nil {
+		return err
+	}
 	for _, submission := range state.Submissions {
 		if !submissionStatusKnown(submission.Status) {
 			return fmt.Errorf("submission %s has an unknown status %q", submission.ID, submission.Status)
@@ -946,19 +1063,173 @@ func (state State) Validate() error {
 			return fmt.Errorf("session %s has an invalid duration", session.ID)
 		}
 	}
+	return nil
+}
+
+func validateReview(state State) error {
+	reviewers := make(map[string]Reviewer, len(state.Reviewers))
+	emails := map[string]string{}
+	for _, reviewer := range state.Reviewers {
+		if strings.TrimSpace(reviewer.ID) == "" || strings.TrimSpace(reviewer.Name) == "" {
+			return fmt.Errorf("reviewer %s is incomplete", reviewer.ID)
+		}
+		if reviewer.Kind != "human" && reviewer.Kind != "virtual" {
+			return fmt.Errorf("reviewer %s has an unknown kind %q", reviewer.ID, reviewer.Kind)
+		}
+		email := strings.ToLower(strings.TrimSpace(reviewer.Email))
+		if reviewer.Kind == "human" && !strings.Contains(email, "@") {
+			return fmt.Errorf("human reviewer %s has an invalid email", reviewer.ID)
+		}
+		if email != "" {
+			if previous, exists := emails[email]; exists {
+				return fmt.Errorf("reviewers %s and %s share email %s", previous, reviewer.ID, email)
+			}
+			emails[email] = reviewer.ID
+		}
+		reviewers[reviewer.ID] = reviewer
+	}
+	submissions := make(map[string]bool, len(state.Submissions))
+	for _, submission := range state.Submissions {
+		submissions[submission.ID] = true
+	}
+	plans := make(map[string]ReviewPlan, len(state.ReviewPlans))
+	activePlans := 0
 	for _, plan := range state.ReviewPlans {
+		if !reviewPlanStatusKnown(plan.Status) {
+			return fmt.Errorf("review plan %s has an unknown status %q", plan.ID, plan.Status)
+		}
+		if plan.Status == "active" || plan.Status == "open" {
+			activePlans++
+		}
+		if strings.TrimSpace(plan.Name) == "" || plan.Round < 1 || plan.DueAt.IsZero() || plan.EvaluationsPerItem < 1 || plan.EvaluationsPerItem > 20 {
+			return fmt.Errorf("review plan %s is incomplete", plan.ID)
+		}
 		if len(plan.Criteria) == 0 {
 			return fmt.Errorf("review plan %s has no rubric criteria", plan.ID)
 		}
 		weight := 0.0
+		criteria := map[string]bool{}
 		for _, criterion := range plan.Criteria {
+			if strings.TrimSpace(criterion.ID) == "" || strings.TrimSpace(criterion.Name) == "" || criterion.MaxScore <= 0 || criterion.MaxScore > 10 || criterion.Weight <= 0 {
+				return fmt.Errorf("review plan %s has an invalid rubric criterion", plan.ID)
+			}
+			if criteria[criterion.ID] {
+				return fmt.Errorf("review plan %s has duplicate rubric criterion %s", plan.ID, criterion.ID)
+			}
+			criteria[criterion.ID] = true
 			weight += criterion.Weight
 		}
 		if weight < 99.99 || weight > 100.01 {
 			return fmt.Errorf("review plan %s rubric weight is %.2f, want 100", plan.ID, weight)
 		}
+		roster := map[string]bool{}
+		for _, reviewerID := range plan.ReviewerIDs {
+			reviewer, found := reviewers[reviewerID]
+			if !found {
+				return fmt.Errorf("review plan %s references unknown reviewer %s", plan.ID, reviewerID)
+			}
+			if roster[reviewerID] {
+				return fmt.Errorf("review plan %s lists reviewer %s more than once", plan.ID, reviewerID)
+			}
+			if (plan.Status == "active" || plan.Status == "open") && !reviewer.Active() {
+				return fmt.Errorf("active review plan %s includes retired reviewer %s", plan.ID, reviewerID)
+			}
+			roster[reviewerID] = true
+		}
+		items := map[string]bool{}
+		for _, submissionID := range plan.SubmissionIDs {
+			if !submissions[submissionID] {
+				return fmt.Errorf("review plan %s references unknown submission %s", plan.ID, submissionID)
+			}
+			if items[submissionID] {
+				return fmt.Errorf("review plan %s lists submission %s more than once", plan.ID, submissionID)
+			}
+			items[submissionID] = true
+		}
+		plans[plan.ID] = plan
+	}
+	if activePlans > 1 {
+		return fmt.Errorf("multiple review plans are open")
+	}
+	activeAssignments := map[string]string{}
+	for _, assignment := range state.ReviewAssignments {
+		if strings.TrimSpace(assignment.ID) == "" || strings.TrimSpace(assignment.PlanID) == "" || strings.TrimSpace(assignment.SubmissionID) == "" || strings.TrimSpace(assignment.ReviewerID) == "" || assignment.AssignedAt.IsZero() {
+			return fmt.Errorf("review assignment %s is incomplete", assignment.ID)
+		}
+		if assignment.Source != "manual" && assignment.Source != "automatic" && assignment.Source != "legacy" {
+			return fmt.Errorf("review assignment %s has an unknown source %q", assignment.ID, assignment.Source)
+		}
+		if _, found := plans[assignment.PlanID]; !found || !submissions[assignment.SubmissionID] || reviewers[assignment.ReviewerID].ID == "" {
+			return fmt.Errorf("review assignment %s has an unknown plan, proposal, or reviewer", assignment.ID)
+		}
+		if assignment.Active() {
+			key := assignment.PlanID + "\x1f" + assignment.SubmissionID + "\x1f" + assignment.ReviewerID
+			if previous, exists := activeAssignments[key]; exists {
+				return fmt.Errorf("review assignments %s and %s are both active for one reviewer/proposal", previous, assignment.ID)
+			}
+			activeAssignments[key] = assignment.ID
+		}
 	}
 	return nil
+}
+
+func reviewPlanStatusKnown(value string) bool {
+	switch value {
+	case "draft", "open", "active", "closed":
+		return true
+	default:
+		return false
+	}
+}
+
+func validateTasks(state State) error {
+	knownSpeakers := make(map[string]bool, len(state.Speakers))
+	for _, speaker := range state.Speakers {
+		knownSpeakers[speaker.ID] = true
+	}
+	for _, task := range state.Tasks {
+		if strings.TrimSpace(task.ID) == "" || strings.TrimSpace(task.Title) == "" || strings.TrimSpace(task.Type) == "" || task.DueAt.IsZero() {
+			return fmt.Errorf("task %s is incomplete", task.ID)
+		}
+		if !taskTypeKnown(task.Type) {
+			return fmt.Errorf("task %s has an unknown type %q", task.ID, task.Type)
+		}
+		assigned := map[string]bool{}
+		for _, speakerID := range task.AssignedSpeakerIDs {
+			if !knownSpeakers[speakerID] {
+				return fmt.Errorf("task %s is assigned to an unknown speaker %s", task.ID, speakerID)
+			}
+			if assigned[speakerID] {
+				return fmt.Errorf("task %s assigns speaker %s more than once", task.ID, speakerID)
+			}
+			if task.AcceptedOnly && !state.SpeakerEligibleForAcceptedTasks(speakerID) {
+				return fmt.Errorf("accepted-only task %s is assigned to an ineligible speaker %s", task.ID, speakerID)
+			}
+			assigned[speakerID] = true
+		}
+	}
+	for _, completion := range state.TaskCompletions {
+		task, found := state.Task(completion.TaskID)
+		if !found {
+			return fmt.Errorf("task completion %s references an unknown task", completion.ID)
+		}
+		if !knownSpeakers[completion.SpeakerID] {
+			return fmt.Errorf("task completion %s references an unknown speaker", completion.ID)
+		}
+		if !contains(task.AssignedSpeakerIDs, completion.SpeakerID) {
+			return fmt.Errorf("task completion %s is not assigned to its speaker", completion.ID)
+		}
+	}
+	return nil
+}
+
+func taskTypeKnown(value string) bool {
+	switch value {
+	case "profile", "form", "file", "headshot":
+		return true
+	default:
+		return false
+	}
 }
 
 func validateSubmissionForms(state State) error {
@@ -1086,6 +1357,7 @@ func validateUniqueIDs(state State) error {
 		{"submission", collectIDs(len(state.Submissions), func(i int) string { return state.Submissions[i].ID })},
 		{"reviewer", collectIDs(len(state.Reviewers), func(i int) string { return state.Reviewers[i].ID })},
 		{"review plan", collectIDs(len(state.ReviewPlans), func(i int) string { return state.ReviewPlans[i].ID })},
+		{"review assignment", collectIDs(len(state.ReviewAssignments), func(i int) string { return state.ReviewAssignments[i].ID })},
 		{"evaluation", collectIDs(len(state.Evaluations), func(i int) string { return state.Evaluations[i].ID })},
 		{"session", collectIDs(len(state.Sessions), func(i int) string { return state.Sessions[i].ID })},
 		{"task", collectIDs(len(state.Tasks), func(i int) string { return state.Tasks[i].ID })},

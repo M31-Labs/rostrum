@@ -106,7 +106,12 @@ func ConditionalFormatFields(props any) Node {
 			<If cond={props.source.help != ""}>
 				<small>{props.source.help}</small>
 			</If>
-			<p class="form-error" id={props.source.id + "-error"} data-gosx-field-error={props.source.id} aria-live="polite">{props.sourceError}</p>
+			<p
+				class="form-error"
+				id={props.source.id + "-error"}
+				data-gosx-field-error={props.source.id}
+				aria-live="polite"
+			>{props.sourceError}</p>
 		</label>
 		<Each of={props.source.targets} as="target">
 			<label class="field-row conditional-field" hidden={answer.Get() != target.ruleValue}>
@@ -154,8 +159,16 @@ func ConditionalFormatFields(props any) Node {
 				<If cond={target.help != ""}>
 					<small>{target.help}</small>
 				</If>
-				<small>Conditional CFP policy · {target.conditionalWhy}</small>
-				<p class="form-error" id={target.id + "-error"} data-gosx-field-error={target.id} aria-live="polite"></p>
+				<small>
+					Conditional CFP policy ·
+					{target.conditionalWhy}
+				</small>
+				<p
+					class="form-error"
+					id={target.id + "-error"}
+					data-gosx-field-error={target.id}
+					aria-live="polite"
+				></p>
 			</label>
 		</Each>
 	</div>
@@ -218,7 +231,9 @@ func Page() Node {
 					<input type="hidden" name="draft_key" value={data.draft.key}></input>
 					<p class="form-status" id="submission-form-status" role="alert" tabindex="-1">{action.message}</p>
 					<If cond={data.draft.active}>
-						<p class="form-status" role="status">You are editing a saved draft. Submitting it will send it into review.</p>
+						<p class="form-status" role="status">
+							You are editing a saved draft. Submitting it will send it into review.
+						</p>
 					</If>
 					<fieldset>
 						<legend>
@@ -268,9 +283,7 @@ func Page() Node {
 						<p>
 							By submitting, you agree to the event code of conduct. Payments are not collected.
 						</p>
-						<button class="button" type="submit" formaction={actionPath("saveDraft")}>
-							Save draft
-						</button>
+						<button class="button" type="submit" formaction={actionPath("saveDraft")}>Save draft</button>
 						<button class="button button-primary" type="submit">
 							Submit proposal
 							<span aria-hidden="true">→</span>

@@ -212,70 +212,97 @@ record; never attach secrets or signed portal/reviewer tokens.
    health version, and named operator. Only then separately approve a public
    launch. Do not change repository visibility as part of this work.
 
-## Explicit post-launch work packets
+## Delivered implementation work
 
-The following are specified product work, not silently omitted safety controls.
-They are not launch blockers for this release cut and should be planned only
-after the release verification runbook is accepted.
+The work packets below are implemented in this private release candidate.
+They remain subject to the credential-backed acceptance steps above; their
+presence does not authorize making the repository or deployment public.
 
 ### PT-4: organizer-created speaker tasks
 
-An organizer can create, edit, assign, and retire a task with type, due date,
-and acceptance policy. The portal must update live, every mutation must be
-audited, and a task must never leak between speakers.
+Organizers can create, edit, assign, and retire portal tasks with a delivery
+type (profile, confirmation/form, file, or headshot), due date, required flag,
+and accepted-speakers-only policy. An optional initial bulk assignment includes
+only speakers with an accepted-stage submission; direct assignment rechecks the
+same policy in the state transaction.
+
+Retirement is non-destructive. It removes the task from portals, reminders,
+and new upload/submission authorization while retaining task completions for
+audit, archive, and exports. The portal action and upload route both use the
+same lifecycle-and-assignment predicate, so an old task URL cannot leak a task
+or accept work from another speaker. File uploads are restricted to file and
+headshot task types; normal task submission validates required fields and
+declared select options server-side.
 
 ### PT-5: approved-upload bundle
 
-An organizer can download a deterministic ZIP containing only explicitly
-approved files. The artifact must include a manifest and per-file checksums,
-enforce authorization and size limits, and produce an audit record.
+`GET /organizer/export/approved-uploads.zip` is an organizer/chair-only,
+audited download. It builds a deterministic ZIP containing a timestamp-free
+`manifest.json` followed by only approved completion files that are regular
+files under Rostrum's private upload directory. Every manifest entry contains
+the completion, task, and speaker IDs, original filename, content type,
+archive path, byte count, and SHA-256.
 
-### CM-2: durable reminder scheduler
+The bundle uses fixed ZIP metadata and stored entries, stable ordering, a
+5,000-file / 512 MiB limit, rejects path escapes and symlinks, and rechecks
+the file digest while streaming. An approved profile/form response with no
+stored file is simply absent; a state reference to a missing or unsafe stored
+file fails closed rather than producing a silently incomplete archive.
 
-A persisted, idempotent scheduler queues reminders from explicit task/state
-criteria, honors cancellation and opt-out rules, survives restart, and records
-each decision/delivery. It must not rely on an in-process timer.
+### CM-2, CM-4, and CM-6: durable communications
 
-### CM-4: editable communication templates
-
-Organizers can revise named templates with validated merge fields, preview
-against a recipient, retain revision history, and audit sends without exposing
-secret links in broad logs.
-
-### CM-6: administrator notifications
-
-Configurable event notifications define recipient, trigger, delivery status,
-retry policy, and suppression conditions. They reuse the durable mail outbox
-rather than creating a parallel sender.
+The persisted email outbox now owns scheduled task/session reminders,
+administrator notifications, delivery leasing, idempotency, retry/backoff,
+cancellation, and opt-out suppression. Startup and a periodic wakeup merely
+drive durable due work; no delivery decision depends solely on an in-process
+timer. Templates are merge-field validated, editable with retained revisions,
+and system templates remain undeletable. Notification rules define trigger,
+recipient, retry, and suppression policy and enqueue through the same outbox.
 
 ### RV-3: review-plan and reviewer editing
 
-Chairs can revise a review plan and reviewer roster with an impact preview,
-conflict/recusal checks, reassignment rules, and immutable provenance for
-existing scores.
+Chairs can create and revise plans, structured rubrics, review targets,
+deadline/state, anonymity, attachments, reminders, and reviewer rosters.
+Only one plan may be open at once. A scored rubric is immutable: changing
+criteria, weights, or score ranges requires a new round, preserving the
+meaning of earlier evaluations.
 
-### FB-2: multiple CFP forms
+Reviewers are added, edited, or retired rather than deleted. Retirement and
+roster removal preserve evaluations, deactivate only future assignment
+eligibility, and create audit history. Explicit review assignments carry
+source (manual, automatic, or legacy), actor, Arbiter rule/trace, assignment
+time, and non-destructive removal reason. The balanced assignment operation
+backfills legacy score provenance, distributes work by current load, excludes
+company conflicts through the review-governance policy, and is idempotent.
+Managed plans require an active assignment for both organizer-entered and
+signed-link reviewer scores. The organizer view exposes active assignments,
+unfilled targets, conflicts, and recorded-score impact before roster changes.
 
-An event can own named form variants with separate public routes, lifecycle
-state, routing policy, and submission attribution while preserving a single
-canonical review/scheduling workflow.
+### FB-2, FB-4, and FB-6: CFP lifecycle
 
-### FB-4: generic conditional-rule editor
+An event owns named CFP variants with separately addressable public routes,
+open/closed lifecycle state, attribution, routing, and a shared downstream
+review/scheduling workflow. The form editor accepts only constrained
+equals/show conditional rules, rejects chaining/unknown/locked targets, and
+records versioned audited changes. Speakers can save signed, owner-bound
+drafts and withdraw eligible proposals; withdrawal removes active review-plan
+membership, cancels linked public sessions, retains historical evaluations,
+and suppresses public exposure.
 
-Organizers can author constrained conditional rules through a safe UI that
-validates against the policy schema, previews affected fields, versions
-changes, and fails closed on invalid rules.
+### Managed interaction contract
 
-### FB-6: draft and withdrawal lifecycle
-
-Speakers can save a private draft and withdraw an eligible submission. Each
-transition needs authorization, audit history, review/scheduling consequences,
-and clear public-data suppression rules.
+Interactive forms use GoSX `ActionForm`, managed `Form`, or the equivalent
+explicit `data-gosx-form` protocol used by the agenda island. Successful
+mutations use managed soft navigation and local result projection rather than
+a document POST/refresh. This includes login magic-link request, workspace
+import, task/review/communications operations, uploads, and the agenda drag
+and unschedule flows. A repository test scans every `.gsx` source form and
+fails if a raw form lacks the managed protocol.
 
 ## Exit condition for this sweep
 
 This implementation and specification sweep is complete when this document,
 the repository tests, and a clean-clone build are reviewed. The next required
 action is operator-owned credential and infrastructure acceptance, beginning
-with the email transport. No repository visibility change is part of that
-action.
+with the selected Resend or SMTP transport. No repository visibility change is
+part of that action.

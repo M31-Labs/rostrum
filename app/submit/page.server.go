@@ -379,7 +379,7 @@ func submitProposal(ctx *action.Context) error {
 			Name: "submission.created", SubmissionID: submissionID, SpeakerID: speakerID,
 		}, now)
 		for index := range state.Tasks {
-			if state.Tasks[index].ID == "task_profile" && !contains(state.Tasks[index].AssignedSpeakerIDs, speakerID) {
+			if state.Tasks[index].ID == "task_profile" && state.Tasks[index].Active() && !state.Tasks[index].AcceptedOnly && !contains(state.Tasks[index].AssignedSpeakerIDs, speakerID) {
 				state.Tasks[index].AssignedSpeakerIDs = append(state.Tasks[index].AssignedSpeakerIDs, speakerID)
 			}
 		}

@@ -155,7 +155,7 @@ func initialSet(state domain.State, ids []string) string {
 // task is assigned that role.
 func findHeadshotTask(state domain.State) *domain.Task {
 	for index := range state.Tasks {
-		if IsHeadshotTask(state.Tasks[index]) {
+		if state.Tasks[index].Active() && IsHeadshotTask(state.Tasks[index]) {
 			return &state.Tasks[index]
 		}
 	}

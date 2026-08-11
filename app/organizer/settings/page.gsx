@@ -305,7 +305,7 @@ func Page() Node {
 						<a class="button" href="/organizer/export/workspace.json">Download workspace</a>
 						<a class="button" href="/organizer/export/archive.tar.gz">Download full archive</a>
 					</p>
-					<form
+					<Form
 						class="settings-form workspace-import-form"
 						method="post"
 						action="/organizer/import/workspace"
@@ -319,8 +319,9 @@ func Page() Node {
 						<p class="form-note">
 							A validated restore first creates a local backup. This host’s organizer principals, passkeys, and pending sign-in links stay in place.
 						</p>
+						<p class="form-status" role="status" aria-live="polite"></p>
 						<button class="button button-primary" type="submit">Restore workspace</button>
-					</form>
+					</Form>
 				</section>
 			</aside>
 		</div>

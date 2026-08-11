@@ -41,7 +41,7 @@ func testWorkspaceState() domain.State {
 		},
 		ReviewPlans: []domain.ReviewPlan{
 			{
-				ID: "plan_test", Status: "open", SubmissionIDs: []string{"sub_ada"}, EvaluationsPerItem: 2,
+				ID: "plan_test", Name: "Test review plan", Round: 1, Status: "open", DueAt: now.Add(48 * time.Hour), SubmissionIDs: []string{"sub_ada"}, EvaluationsPerItem: 2,
 				Criteria: []domain.RubricCriterion{{ID: "fit", Name: "Program fit", Weight: 100, MaxScore: 5}},
 			},
 		},

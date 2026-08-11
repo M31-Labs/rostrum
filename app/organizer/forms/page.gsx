@@ -224,7 +224,12 @@ func CreateForm() Node {
 			</label>
 			<label>
 				<span>Public title</span>
-				<input name="title" value={actions.createForm.values.title} placeholder="Tell us what you are building" required></input>
+				<input
+					name="title"
+					value={actions.createForm.values.title}
+					placeholder="Tell us what you are building"
+					required
+				></input>
 				<p class="form-error" data-gosx-field-error="title" aria-live="polite"></p>
 			</label>
 			<label>
@@ -235,7 +240,10 @@ func CreateForm() Node {
 			<label>
 				<span>Form kind</span>
 				<select name="kind">
-					<option value="abstract" selected={actions.createForm.values.kind == "" || actions.createForm.values.kind == "abstract"}>Abstract</option>
+					<option
+						value="abstract"
+						selected={actions.createForm.values.kind == "" || actions.createForm.values.kind == "abstract"}
+					>Abstract</option>
 					<option value="proposal" selected={actions.createForm.values.kind == "proposal"}>Proposal</option>
 					<option value="application" selected={actions.createForm.values.kind == "application"}>Application</option>
 				</select>
@@ -272,7 +280,11 @@ func AddQuestionRule() Node {
 				<select name="target_field_id" required>
 					<option value="">Choose a target</option>
 					<Each of={data.ruleChoices} as="field">
-						<option value={field.id} selected={field.id == actions.addQuestionRule.values.target_field_id} disabled={field.locked}>{field.label}</option>
+						<option
+							value={field.id}
+							selected={field.id == actions.addQuestionRule.values.target_field_id}
+							disabled={field.locked}
+						>{field.label}</option>
 					</Each>
 				</select>
 				<p class="form-error" data-gosx-field-error="target_field_id" aria-live="polite"></p>
@@ -289,7 +301,11 @@ func RemoveQuestionRule(props any) Node {
 		<input type="hidden" name="rule_id" value={props.id}></input>
 		<p class="form-error" data-gosx-field-error="rule" aria-live="polite"></p>
 		<p class="form-status sr-only" role="status" aria-live="polite">{actions.removeQuestionRule.message}</p>
-		<button class="button button-compact" type="submit" aria-label={"Remove visibility rule for " + props.target}>Remove</button>
+		<button
+			class="button button-compact"
+			type="submit"
+			aria-label={"Remove visibility rule for " + props.target}
+		>Remove</button>
 	</ActionForm>
 }
 
@@ -326,13 +342,26 @@ func Page() Node {
 			</header>
 			<div class="field-builder-list">
 				<Each of={data.forms} as="form">
-					<a class={form.selected ? "field-builder-row selected" : "field-builder-row"} href={form.href} data-gosx-link>
+					<a
+						class={form.selected ? "field-builder-row selected" : "field-builder-row"}
+						href={form.href}
+						data-gosx-link
+					>
 						<div>
 							<strong>{form.name}</strong>
-							<small>{form.title} · {form.kind} · /submit/{form.slug}</small>
+							<small>
+								{form.title}
+								·
+								{form.kind}
+								· /submit/
+								{form.slug}
+							</small>
 						</div>
 						<span class={"status-pill status-" + form.statusTone}>{form.status}</span>
-						<span class="field-requirement">{form.fieldCount} fields</span>
+						<span class="field-requirement">
+							{form.fieldCount}
+							fields
+						</span>
 					</a>
 				</Each>
 			</div>
@@ -345,194 +374,196 @@ func Page() Node {
 			<section class="panel">
 				<p class="panel-kicker">No active form</p>
 				<h2>Create the first closed CFP to begin.</h2>
-				<p>The starter schema adds locked routing and speaker-identity questions; you can add custom questions and rules before opening it.</p>
+				<p>
+					The starter schema adds locked routing and speaker-identity questions; you can add custom questions and rules before opening it.
+				</p>
 			</section>
 		</If>
 		<If cond={data.hasForm}>
-		<section class="form-summary-grid">
-			<article class="form-summary-card summary-primary">
-				<div class="summary-top">
-					<span class={"status-pill status-" + data.form.statusTone}>{data.form.status}</span>
-					<span class="mono">{data.form.id}</span>
-				</div>
-				<p class="panel-kicker">{data.form.name}</p>
-				<h2>{data.form.title}</h2>
-				<p>{data.form.welcomeBody}</p>
-				<div class="summary-facts">
-					<span>
-						<strong>{data.form.fieldCount}</strong>
-						fields
-					</span>
-					<span>
-						<strong>{data.form.conditionalCount}</strong>
-						condition
-					</span>
-					<span>
-						<strong>{data.form.close}</strong>
-						closes
-					</span>
-				</div>
-			</article>
-			<article class="form-summary-card">
-				<p class="panel-kicker">Submission outcome</p>
-				<h2>Close the loop immediately.</h2>
-				<ul class="check-list">
-					<li>
-						<span aria-hidden="true">✓</span>
-						Confirmation email is enabled
-					</li>
-					<li>
-						<span aria-hidden="true">✓</span>
-						Submitter redirects into their portal
-					</li>
-					<li>
-						<span aria-hidden="true">✓</span>
-						Category policy assigns queue, owner, and track
-					</li>
-				</ul>
-				<p class="policy-file">
-					Routing policy
-					<code>{data.form.ruleFile}</code>
-				</p>
-			</article>
-		</section>
-		<div class="two-column-workspace">
-			<section class="panel">
-				<header class="panel-header">
-					<div>
-						<p class="panel-kicker">Builder</p>
-						<h2>Question structure</h2>
+			<section class="form-summary-grid">
+				<article class="form-summary-card summary-primary">
+					<div class="summary-top">
+						<span class={"status-pill status-" + data.form.statusTone}>{data.form.status}</span>
+						<span class="mono">{data.form.id}</span>
 					</div>
-					<span>
-						{data.form.fieldCount}
-						fields
-					</span>
-				</header>
-				<div class="field-builder-list">
-					<Each of={data.fields} as="field">
-						<article class="field-builder-row">
-							<div class="field-move-controls">
-								<MoveFieldForm
-									id={field.id}
-									direction="up"
-									symbol="↑"
-									label={"Move " + field.label + " up"}
-									disabled={field.first}
-								></MoveFieldForm>
-								<MoveFieldForm
-									id={field.id}
-									direction="down"
-									symbol="↓"
-									label={"Move " + field.label + " down"}
-									disabled={field.last}
-								></MoveFieldForm>
-							</div>
-							<span class="field-index mono">{field.index}</span>
-							<div>
-								<strong>{field.label}</strong>
-								<small>
-									{field.section}
-									·
-									{field.kind}
-								</small>
-							</div>
-							<span class="field-requirement">{field.requirement}</span>
-							<If cond={field.locked}>
-								<span class="lock-note">Locked</span>
-							</If>
-						</article>
-						<details class="field-manage-details">
-							<summary>{"Edit " + field.label}</summary>
-							<If cond={!field.locked}>
-								<UpdateFieldForm field={field}></UpdateFieldForm>
-								<RemoveFieldForm id={field.id} label={field.label}></RemoveFieldForm>
-							</If>
-							<If cond={field.locked}>
-								<p class="control-note">
-									Locked core fields preserve routing and speaker identity; custom questions remain fully editable.
-								</p>
-							</If>
-						</details>
-					</Each>
-				</div>
-				<details class="field-add-details">
-					<summary>Add a field</summary>
-					<AddFieldForm></AddFieldForm>
-				</details>
+					<p class="panel-kicker">{data.form.name}</p>
+					<h2>{data.form.title}</h2>
+					<p>{data.form.welcomeBody}</p>
+					<div class="summary-facts">
+						<span>
+							<strong>{data.form.fieldCount}</strong>
+							fields
+						</span>
+						<span>
+							<strong>{data.form.conditionalCount}</strong>
+							condition
+						</span>
+						<span>
+							<strong>{data.form.close}</strong>
+							closes
+						</span>
+					</div>
+				</article>
+				<article class="form-summary-card">
+					<p class="panel-kicker">Submission outcome</p>
+					<h2>Close the loop immediately.</h2>
+					<ul class="check-list">
+						<li>
+							<span aria-hidden="true">✓</span>
+							Confirmation email is enabled
+						</li>
+						<li>
+							<span aria-hidden="true">✓</span>
+							Submitter redirects into their portal
+						</li>
+						<li>
+							<span aria-hidden="true">✓</span>
+							Category policy assigns queue, owner, and track
+						</li>
+					</ul>
+					<p class="policy-file">
+						Routing policy
+						<code>{data.form.ruleFile}</code>
+					</p>
+				</article>
 			</section>
-			<aside class="stacked-panels">
+			<div class="two-column-workspace">
 				<section class="panel">
 					<header class="panel-header">
 						<div>
-							<p class="panel-kicker">Conditional logic</p>
-							<h2>Question rules</h2>
+							<p class="panel-kicker">Builder</p>
+							<h2>Question structure</h2>
 						</div>
+						<span>
+							{data.form.fieldCount}
+							fields
+						</span>
 					</header>
-					<Each of={data.questionRules} as="rule">
-						<article class="logic-card">
-							<div>
-								<span>If</span>
-								<code>{rule.condition}</code>
-							</div>
-							<div>
-								<span>Then</span>
-								<code>{rule.then}</code>
-							</div>
-							<p>{rule.description}</p>
-							<small>
-								{rule.policy}
-								·
-								{rule.trace}
-							</small>
-						</article>
-						<RemoveQuestionRule id={rule.id} target={rule.target}></RemoveQuestionRule>
-					</Each>
+					<div class="field-builder-list">
+						<Each of={data.fields} as="field">
+							<article class="field-builder-row">
+								<div class="field-move-controls">
+									<MoveFieldForm
+										id={field.id}
+										direction="up"
+										symbol="↑"
+										label={"Move " + field.label + " up"}
+										disabled={field.first}
+									></MoveFieldForm>
+									<MoveFieldForm
+										id={field.id}
+										direction="down"
+										symbol="↓"
+										label={"Move " + field.label + " down"}
+										disabled={field.last}
+									></MoveFieldForm>
+								</div>
+								<span class="field-index mono">{field.index}</span>
+								<div>
+									<strong>{field.label}</strong>
+									<small>
+										{field.section}
+										·
+										{field.kind}
+									</small>
+								</div>
+								<span class="field-requirement">{field.requirement}</span>
+								<If cond={field.locked}>
+									<span class="lock-note">Locked</span>
+								</If>
+							</article>
+							<details class="field-manage-details">
+								<summary>{"Edit " + field.label}</summary>
+								<If cond={!field.locked}>
+									<UpdateFieldForm field={field}></UpdateFieldForm>
+									<RemoveFieldForm id={field.id} label={field.label}></RemoveFieldForm>
+								</If>
+								<If cond={field.locked}>
+									<p class="control-note">
+										Locked core fields preserve routing and speaker identity; custom questions remain fully editable.
+									</p>
+								</If>
+							</details>
+						</Each>
+					</div>
 					<details class="field-add-details">
-						<summary>Add a visibility rule</summary>
-						<AddQuestionRule></AddQuestionRule>
+						<summary>Add a field</summary>
+						<AddFieldForm></AddFieldForm>
 					</details>
 				</section>
-				<section class="panel">
-					<header class="panel-header">
-						<div>
-							<p class="panel-kicker">Guardrails</p>
-							<h2>Form controls</h2>
-						</div>
-					</header>
-					<FormScheduleForm></FormScheduleForm>
-					<p class="control-note">
-						The server rejects late submissions even if a stale browser still has the page open.
-					</p>
-				</section>
-			</aside>
-		</div>
-		<section class="panel routing-panel">
-			<header class="panel-header">
-				<div>
-					<p class="panel-kicker">Audited policy</p>
-					<h2>Category routing table</h2>
-				</div>
-				<code>{data.form.ruleFile}</code>
-			</header>
-			<div class="data-table" role="table" aria-label="Category routing decisions">
-				<div class="data-table-head routing-columns" role="row">
-					<span>Category</span>
-					<span>Queue</span>
-					<span>Owner</span>
-					<span>Track</span>
-					<span>Rule</span>
-				</div>
-				<Each of={data.routes} as="route">
-					<div class="data-table-row routing-columns" role="row">
-						<strong>{route.category}</strong>
-						<code>{route.queue}</code>
-						<span>{route.owner}</span>
-						<span>{route.track}</span>
-						<span class="policy-rule">{route.rule}</span>
-					</div>
-				</Each>
+				<aside class="stacked-panels">
+					<section class="panel">
+						<header class="panel-header">
+							<div>
+								<p class="panel-kicker">Conditional logic</p>
+								<h2>Question rules</h2>
+							</div>
+						</header>
+						<Each of={data.questionRules} as="rule">
+							<article class="logic-card">
+								<div>
+									<span>If</span>
+									<code>{rule.condition}</code>
+								</div>
+								<div>
+									<span>Then</span>
+									<code>{rule.then}</code>
+								</div>
+								<p>{rule.description}</p>
+								<small>
+									{rule.policy}
+									·
+									{rule.trace}
+								</small>
+							</article>
+							<RemoveQuestionRule id={rule.id} target={rule.target}></RemoveQuestionRule>
+						</Each>
+						<details class="field-add-details">
+							<summary>Add a visibility rule</summary>
+							<AddQuestionRule></AddQuestionRule>
+						</details>
+					</section>
+					<section class="panel">
+						<header class="panel-header">
+							<div>
+								<p class="panel-kicker">Guardrails</p>
+								<h2>Form controls</h2>
+							</div>
+						</header>
+						<FormScheduleForm></FormScheduleForm>
+						<p class="control-note">
+							The server rejects late submissions even if a stale browser still has the page open.
+						</p>
+					</section>
+				</aside>
 			</div>
-		</section>
+			<section class="panel routing-panel">
+				<header class="panel-header">
+					<div>
+						<p class="panel-kicker">Audited policy</p>
+						<h2>Category routing table</h2>
+					</div>
+					<code>{data.form.ruleFile}</code>
+				</header>
+				<div class="data-table" role="table" aria-label="Category routing decisions">
+					<div class="data-table-head routing-columns" role="row">
+						<span>Category</span>
+						<span>Queue</span>
+						<span>Owner</span>
+						<span>Track</span>
+						<span>Rule</span>
+					</div>
+					<Each of={data.routes} as="route">
+						<div class="data-table-row routing-columns" role="row">
+							<strong>{route.category}</strong>
+							<code>{route.queue}</code>
+							<span>{route.owner}</span>
+							<span>{route.track}</span>
+							<span class="policy-rule">{route.rule}</span>
+						</div>
+					</Each>
+				</div>
+			</section>
 		</If>
 	</main>
 }

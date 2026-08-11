@@ -99,6 +99,26 @@ func TestAssignAcceptedOnlyTasksIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestSpeakerTasksHideRetiredAndIneligibleAcceptedOnlyAssignments(t *testing.T) {
+	now := time.Now().UTC()
+	state := State{
+		Submissions: []Submission{{ID: "sub_pending", SpeakerIDs: []string{"spk_pending"}, Status: SubmissionPending}, {ID: "sub_accepted", SpeakerIDs: []string{"spk_accepted"}, Status: SubmissionAccepted}},
+		Tasks: []Task{
+			{ID: "task_general", Title: "General", Type: "form", DueAt: now, AssignedSpeakerIDs: []string{"spk_pending"}},
+			{ID: "task_gated", Title: "Gated", Type: "form", DueAt: now, AcceptedOnly: true, AssignedSpeakerIDs: []string{"spk_pending", "spk_accepted"}},
+			{ID: "task_retired", Title: "Retired", Type: "file", DueAt: now, AssignedSpeakerIDs: []string{"spk_accepted"}, RetiredAt: now},
+		},
+	}
+	pending := state.SpeakerTasks("spk_pending")
+	if len(pending) != 1 || pending[0].ID != "task_general" {
+		t.Fatalf("pending speaker tasks = %#v, want only active non-gated task", pending)
+	}
+	accepted := state.SpeakerTasks("spk_accepted")
+	if len(accepted) != 1 || accepted[0].ID != "task_gated" {
+		t.Fatalf("accepted speaker tasks = %#v, want only active accepted-only task", accepted)
+	}
+}
+
 func TestAssignPendingToActiveReviewPlanAndDetectCompanyRecusal(t *testing.T) {
 	state := &State{
 		ReviewPlans: []ReviewPlan{{ID: "plan_1", Status: "open", SubmissionIDs: []string{"sub_existing"}}},

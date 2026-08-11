@@ -240,12 +240,12 @@ func enqueueReminders(state *domain.State, now time.Time) int {
 	created := 0
 	if template, found := findTemplate(*state, "tpl_five_day"); found {
 		for _, task := range state.Tasks {
-			if task.DueAt.IsZero() || task.DueAt.Before(now) || task.DueAt.After(now.Add(fiveDays)) {
+			if !task.Active() || task.DueAt.IsZero() || task.DueAt.Before(now) || task.DueAt.After(now.Add(fiveDays)) {
 				continue
 			}
 			for _, speakerID := range task.AssignedSpeakerIDs {
 				speaker, speakerFound := state.Speaker(speakerID)
-				if !speakerFound || !taskOutstanding(*state, task.ID, speakerID) {
+				if !speakerFound || !state.TaskAssignedToSpeaker(task, speakerID) || !taskOutstanding(*state, task.ID, speakerID) {
 					continue
 				}
 				key := "task-reminder:" + task.ID + ":" + speakerID + ":" + task.DueAt.UTC().Format(time.RFC3339)

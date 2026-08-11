@@ -139,7 +139,9 @@ func Seed(now time.Time) State {
 			},
 		},
 		Tasks: []Task{
-			{ID: "task_profile", Title: "Confirm your public profile", Description: "Review your role, company, biography, pronouns, and links.", Type: "profile", Required: true, DueAt: at(2026, time.September, 2, 17, 0), AssignedSpeakerIDs: acceptedSpeakers, AcceptedOnly: true},
+			// Profile completion is intentionally available before a final program
+			// decision. Every other seeded task is acceptance-gated.
+			{ID: "task_profile", Title: "Confirm your public profile", Description: "Review your role, company, biography, pronouns, and links.", Type: "profile", Required: true, DueAt: at(2026, time.September, 2, 17, 0), AssignedSpeakerIDs: acceptedSpeakers, AcceptedOnly: false},
 			{ID: "task_headshot", Title: "Add a high-resolution headshot", Description: "Provide a square or portrait image at least 1200 pixels wide.", Type: "file", Required: true, DueAt: at(2026, time.September, 2, 17, 0), AssignedSpeakerIDs: acceptedSpeakers, AcceptedOnly: true},
 			{ID: "task_agreement", Title: "Accept the speaker agreement", Description: "Review recording, conduct, and cancellation terms.", Type: "form", Required: true, DueAt: at(2026, time.September, 10, 17, 0), AssignedSpeakerIDs: acceptedSpeakers, AcceptedOnly: true, FormFields: []FormField{{ID: "agreement", Label: "I accept the speaker agreement", Type: "checkbox", Required: true}}},
 			{ID: "task_av", Title: "Tell us about your AV needs", Description: "Share microphones, adapters, demos, and accessibility requirements.", Type: "form", Required: true, DueAt: at(2026, time.September, 15, 17, 0), AssignedSpeakerIDs: acceptedSpeakers, AcceptedOnly: true, FormFields: []FormField{{ID: "microphone", Label: "Microphone preference", Type: "select", Required: true, Options: []string{"Lavalier", "Handheld", "Lectern"}}, {ID: "demo", Label: "Will you run a live demo?", Type: "checkbox"}, {ID: "notes", Label: "Other requirements", Type: "textarea"}}},

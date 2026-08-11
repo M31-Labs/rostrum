@@ -19,7 +19,7 @@ func Page() Node {
 					aria-live="polite"
 				>{data.notice.message}</p>
 			</If>
-			<form class="auth-form" method="post" action="/auth/magic-link">
+			<Form class="auth-form" method="post" action="/auth/magic-link">
 				<input type="hidden" name="csrf_token" value={csrf.token}></input>
 				<input type="hidden" name="next" value={data.next}></input>
 				<label>
@@ -33,8 +33,9 @@ func Page() Node {
 						required
 					></input>
 				</label>
+				<p class="form-status" role="status" aria-live="polite"></p>
 				<button class="button button-primary" type="submit">Email me a sign-in link</button>
-			</form>
+			</Form>
 			<div class="auth-divider">
 				<span>or</span>
 			</div>

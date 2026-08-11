@@ -31,6 +31,10 @@ check: check-gosx
 build: check-gosx
 	rm -rf -- dist
 	CGO_ENABLED=0 $(GOSX) build --prod .
+	# GoSX produces the browser assets, but its host-server build does not yet
+	# apply production linker flags. Replace that equivalent binary with the
+	# reproducible stripped server artifact used by the deployment bundle.
+	CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o dist/server/app .
 	find dist/assets/runtime -type f -name '*.map' -delete
 	find dist/app -type f -name '*.go' -delete
 

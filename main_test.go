@@ -4,7 +4,9 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"context"
 	"io"
+	"io/fs"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -71,6 +73,75 @@ func bindPortalSpeaker(speakerID string) func(http.Handler) http.Handler {
 	}
 }
 
+func TestManagedMagicLinkRequestAcceptsFormDataWithoutDocumentRedirect(t *testing.T) {
+	sessions := testSessionManager(t)
+	manager := identity.New(sessions)
+	sent := false
+	links := manager.MagicLinks(auth.MagicLinkOptions{
+		BaseURL: "http://localhost:8080",
+		Sender: auth.MagicLinkSenderFunc(func(_ context.Context, delivery auth.MagicLinkDelivery) error {
+			sent = delivery.Email == "organizer@example.com"
+			return nil
+		}),
+	})
+	handler := sessions.Middleware(manager.Middleware(managedMagicLinkRequest(links)))
+	request := httptest.NewRequest(http.MethodPost, "/auth/magic-link", strings.NewReader("email=organizer%40example.com&next=%2Forganizer"))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set("Accept", "application/json")
+	request.Header.Set("X-Requested-With", "XMLHttpRequest")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("managed magic-link status = %d, want 200; body=%s", recorder.Code, recorder.Body.String())
+	}
+	if !sent {
+		t.Fatal("managed magic-link request did not send a delivery")
+	}
+	if !strings.Contains(recorder.Body.String(), `"redirect":"/login"`) || !strings.Contains(recorder.Body.String(), "Check your email") {
+		t.Fatalf("managed magic-link response = %s, want soft redirect and user-visible message", recorder.Body.String())
+	}
+}
+
+// Interactive forms must use GoSX's managed-form protocol. The only raw
+// lowercase forms left in source are agenda island forms carrying the same
+// explicit data-gosx-form contract; all other form elements are <Form> or
+// <ActionForm>. This protects the launch UX guarantee that ordinary actions
+// do not trigger a document refresh after JavaScript has loaded.
+func TestInteractiveFormsUseManagedProtocol(t *testing.T) {
+	err := filepath.WalkDir("app", func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() || filepath.Ext(path) != ".gsx" {
+			return nil
+		}
+		source, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		remaining := string(source)
+		for {
+			start := strings.Index(remaining, "<form")
+			if start < 0 {
+				return nil
+			}
+			remaining = remaining[start:]
+			end := strings.Index(remaining, ">")
+			if end < 0 {
+				t.Fatalf("%s contains an unterminated raw form tag", path)
+			}
+			tag := remaining[:end+1]
+			if !strings.Contains(tag, "data-gosx-form") {
+				t.Fatalf("%s has an unmanaged raw form tag: %s", path, tag)
+			}
+			remaining = remaining[end+1:]
+		}
+	})
+	if err != nil {
+		t.Fatalf("scan interactive forms: %v", err)
+	}
+}
+
 func testPortalWorkspace(t *testing.T) (domain.State, *store.JSONStore) {
 	t.Helper()
 	state := domain.FreshState(time.Now().UTC())
@@ -79,9 +150,9 @@ func testPortalWorkspace(t *testing.T) (domain.State, *store.JSONStore) {
 		domain.Speaker{ID: "spk_other", FirstName: "Other", LastName: "Speaker", Email: "other@example.com"},
 	)
 	state.Tasks = append(state.Tasks,
-		domain.Task{ID: "task_headshot", Title: "Headshot", Type: "headshot", AssignedSpeakerIDs: []string{"spk_owner"}},
-		domain.Task{ID: "task_slides", Title: "Slides", Type: "file", AssignedSpeakerIDs: []string{"spk_owner"}},
-		domain.Task{ID: "task_other", Title: "Other task", Type: "file", AssignedSpeakerIDs: []string{"spk_other"}},
+		domain.Task{ID: "task_headshot", Title: "Headshot", Type: "headshot", DueAt: time.Now().UTC().Add(24 * time.Hour), AssignedSpeakerIDs: []string{"spk_owner"}},
+		domain.Task{ID: "task_slides", Title: "Slides", Type: "file", DueAt: time.Now().UTC().Add(24 * time.Hour), AssignedSpeakerIDs: []string{"spk_owner"}},
+		domain.Task{ID: "task_other", Title: "Other task", Type: "file", DueAt: time.Now().UTC().Add(24 * time.Hour), AssignedSpeakerIDs: []string{"spk_other"}},
 	)
 	workspace, err := store.Open(":memory:", state)
 	if err != nil {

@@ -159,7 +159,9 @@ func ProfileFields(props any) Node {
 		</div>
 		<label class="checkbox-control">
 			<input type="checkbox" name="email_opt_out" checked={props.emailOptOut}></input>
-			<span>Do not send me non-essential task and session reminders</span>
+			<span>
+				Do not send me non-essential task and session reminders
+			</span>
 		</label>
 		<label>
 			<span>Biography</span>
@@ -313,10 +315,10 @@ func Page() Node {
 											</p>
 										</If>
 									</div>
-									<If cond={task.kind == "file"}>
+									<If cond={task.kind == "file" || task.kind == "headshot"}>
 										<FileAction {...task}></FileAction>
 									</If>
-									<If cond={task.kind != "file"}>
+									<If cond={task.kind != "file" && task.kind != "headshot"}>
 										<TaskAction {...task}></TaskAction>
 									</If>
 								</article>
@@ -409,7 +411,9 @@ func Page() Node {
 								<span class={"status-pill status-" + proposal.tone}>{proposal.status}</span>
 								<small>{proposal.submitted}</small>
 								<If cond={proposal.scheduled && proposal.canWithdraw}>
-									<p class="form-error">Withdrawing will remove the linked session from the public agenda.</p>
+									<p class="form-error">
+										Withdrawing will remove the linked session from the public agenda.
+									</p>
 								</If>
 								<If cond={proposal.hasResume}>
 									<a class="button button-compact" href={proposal.resumeURL} data-gosx-link>Continue draft</a>

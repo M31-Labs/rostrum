@@ -32,8 +32,14 @@ func Overview(state domain.State) map[string]any {
 	totalAssignments := 0
 	completedAssignments := 0
 	for _, task := range state.Tasks {
-		totalAssignments += len(task.AssignedSpeakerIDs)
+		if !task.Active() {
+			continue
+		}
 		for _, speakerID := range task.AssignedSpeakerIDs {
+			if !state.TaskAssignedToSpeaker(task, speakerID) {
+				continue
+			}
+			totalAssignments++
 			completion, found := completion(state, task.ID, speakerID)
 			if found && (completion.Status == domain.TaskApproved || completion.Status == domain.TaskSubmitted) {
 				completedAssignments++

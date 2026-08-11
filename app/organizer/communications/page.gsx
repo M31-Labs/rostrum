@@ -196,7 +196,9 @@ func Page() Node {
 						</label>
 						<label class="checkbox-control">
 							<input type="checkbox" name="attach_calendar" checked={data.preview.calendar}></input>
-							<span>Attach a calendar invite when this recipient has a scheduled session</span>
+							<span>
+								Attach a calendar invite when this recipient has a scheduled session
+							</span>
 						</label>
 						<p class="form-error" data-gosx-field-error="template" aria-live="polite"></p>
 						<p class="form-status" role="status" aria-live="polite">{actions.saveTemplate.message}</p>
@@ -215,7 +217,12 @@ func Page() Node {
 							<strong>Recorded revisions</strong>
 							<Each of={data.revisions} as="revision">
 								<p>
-									Revision {revision.revision} · {revision.when} · {revision.actor}
+									Revision
+									{revision.revision}
+									·
+									{revision.when}
+									·
+									{revision.actor}
 									<small>{revision.subject}</small>
 								</p>
 							</Each>
@@ -234,21 +241,47 @@ func Page() Node {
 			<ActionForm class="settings-form" actionName="createTemplate">
 				<input type="hidden" name="csrf_token" value={csrf.token}></input>
 				<div class="form-grid-two">
-					<label><span>Name</span><input name="name" required placeholder="Final slides reminder"></input></label>
+					<label>
+						<span>Name</span>
+						<input name="name" required placeholder="Final slides reminder"></input>
+					</label>
 					<label>
 						<span>Audience</span>
-						<select name="audience"><option value="speaker">Speaker</option><option value="submitter">Submitter</option><option value="administrator">Administrator</option></select>
+						<select name="audience">
+							<option value="speaker">Speaker</option>
+							<option value="submitter">Submitter</option>
+							<option value="administrator">Administrator</option>
+						</select>
 					</label>
 				</div>
-				<label><span>Subject</span><input name="subject" maxlength="240" required></input></label>
-				<label><span>Message</span><textarea name="body" maxlength="20000" required></textarea></label>
-				<label><span>Reply-to</span><input type="email" name="reply_to"></input></label>
-				<label class="checkbox-control"><input type="checkbox" name="attach_calendar"></input><span>Attach a calendar invite when applicable</span></label>
+				<label>
+					<span>Subject</span>
+					<input name="subject" maxlength="240" required></input>
+				</label>
+				<label>
+					<span>Message</span>
+					<textarea name="body" maxlength="20000" required></textarea>
+				</label>
+				<label>
+					<span>Reply-to</span>
+					<input type="email" name="reply_to"></input>
+				</label>
+				<label class="checkbox-control">
+					<input type="checkbox" name="attach_calendar"></input>
+					<span>
+						Attach a calendar invite when applicable
+					</span>
+				</label>
 				<p class="form-error" data-gosx-field-error="template" aria-live="polite"></p>
 				<p class="form-status" role="status" aria-live="polite">{actions.createTemplate.message}</p>
 				<button class="button" type="submit">Create template</button>
 			</ActionForm>
-			<p class="form-note">Supported merge fields: <Each of={data.mergeFields} as="field"><code>{field}</code> </Each></p>
+			<p class="form-note">
+				Supported merge fields:
+				<Each of={data.mergeFields} as="field">
+					<code>{field}</code>
+				</Each>
+			</p>
 		</section>
 		<section class="panel outbox-panel">
 			<header class="panel-header">
@@ -292,7 +325,9 @@ func Page() Node {
 					<p class="panel-kicker">Operations alerts</p>
 					<h2>Administrator notification rules</h2>
 				</div>
-				<p>Triggers queue durable mail with retries and visible suppression decisions.</p>
+				<p>
+					Triggers queue durable mail with retries and visible suppression decisions.
+				</p>
 			</header>
 			<div class="notification-rule-list">
 				<Each of={data.rules} as="rule">
@@ -301,7 +336,10 @@ func Page() Node {
 						<input type="hidden" name="rule_id" value={rule.id}></input>
 						<input type="hidden" name="selected_template" value={data.preview.id}></input>
 						<div class="form-grid-two">
-							<label><span>Name</span><input name="name" value={rule.name} required></input></label>
+							<label>
+								<span>Name</span>
+								<input name="name" value={rule.name} required></input>
+							</label>
 							<label>
 								<span>Trigger</span>
 								<select name="trigger">
@@ -322,12 +360,24 @@ func Page() Node {
 								</Each>
 							</select>
 						</label>
-						<label><span>Recipients (comma-separated)</span><input type="text" name="recipients" value={rule.recipients} required></input></label>
+						<label>
+							<span>Recipients (comma-separated)</span>
+							<input type="text" name="recipients" value={rule.recipients} required></input>
+						</label>
 						<div class="form-grid-two">
-							<label><span>Attempts</span><input type="number" name="retry_limit" min="1" max="10" value={rule.retryLimit}></input></label>
-							<label><span>Suppress duplicates (minutes)</span><input type="number" name="suppress_minutes" min="0" value={rule.suppressMinutes}></input></label>
+							<label>
+								<span>Attempts</span>
+								<input type="number" name="retry_limit" min="1" max="10" value={rule.retryLimit}></input>
+							</label>
+							<label>
+								<span>Suppress duplicates (minutes)</span>
+								<input type="number" name="suppress_minutes" min="0" value={rule.suppressMinutes}></input>
+							</label>
 						</div>
-						<label class="checkbox-control"><input type="checkbox" name="enabled" checked={rule.enabled}></input><span>Enabled</span></label>
+						<label class="checkbox-control">
+							<input type="checkbox" name="enabled" checked={rule.enabled}></input>
+							<span>Enabled</span>
+						</label>
 						<p class="form-error" data-gosx-field-error="rule" aria-live="polite"></p>
 						<p class="form-status" role="status" aria-live="polite">{actions.saveNotificationRule.message}</p>
 						<button class="button" type="submit">Save rule</button>
@@ -336,7 +386,9 @@ func Page() Node {
 						<input type="hidden" name="csrf_token" value={csrf.token}></input>
 						<input type="hidden" name="rule_id" value={rule.id}></input>
 						<input type="hidden" name="selected_template" value={data.preview.id}></input>
-						<p class="form-status" role="status" aria-live="polite">{actions.removeNotificationRule.message}</p>
+						<p class="form-status" role="status" aria-live="polite">
+							{actions.removeNotificationRule.message}
+						</p>
 						<button class="button button-compact" type="submit">Remove rule</button>
 					</ActionForm>
 				</Each>
@@ -345,18 +397,47 @@ func Page() Node {
 				<input type="hidden" name="csrf_token" value={csrf.token}></input>
 				<input type="hidden" name="selected_template" value={data.preview.id}></input>
 				<h3>Add notification rule</h3>
-				<label><span>Name</span><input name="name" required placeholder="Notify program team about task submissions"></input></label>
+				<label>
+					<span>Name</span>
+					<input name="name" required placeholder="Notify program team about task submissions"></input>
+				</label>
 				<label>
 					<span>Trigger</span>
-					<select name="trigger"><option value="submission.created">New proposal</option><option value="submission.withdrawn">Proposal withdrawn</option><option value="task.submitted">Task submitted</option><option value="task.approved">Task approved</option></select>
+					<select name="trigger">
+						<option value="submission.created">New proposal</option>
+						<option value="submission.withdrawn">Proposal withdrawn</option>
+						<option value="task.submitted">Task submitted</option>
+						<option value="task.approved">Task approved</option>
+					</select>
 				</label>
 				<label>
 					<span>Administrator template</span>
-					<select name="template_id"><Each of={data.templates} as="template"><If cond={template.audienceID == "administrator"}><option value={template.id}>{template.name}</option></If></Each></select>
+					<select name="template_id">
+						<Each of={data.templates} as="template">
+							<If cond={template.audienceID == "administrator"}>
+								<option value={template.id}>{template.name}</option>
+							</If>
+						</Each>
+					</select>
 				</label>
-				<label><span>Recipients</span><input name="recipients" required placeholder="program@example.com"></input></label>
-				<div class="form-grid-two"><label><span>Attempts</span><input type="number" name="retry_limit" value="5" min="1" max="10"></input></label><label><span>Suppress duplicates (minutes)</span><input type="number" name="suppress_minutes" value="10" min="0"></input></label></div>
-				<label class="checkbox-control"><input type="checkbox" name="enabled" checked></input><span>Enabled</span></label>
+				<label>
+					<span>Recipients</span>
+					<input name="recipients" required placeholder="program@example.com"></input>
+				</label>
+				<div class="form-grid-two">
+					<label>
+						<span>Attempts</span>
+						<input type="number" name="retry_limit" value="5" min="1" max="10"></input>
+					</label>
+					<label>
+						<span>Suppress duplicates (minutes)</span>
+						<input type="number" name="suppress_minutes" value="10" min="0"></input>
+					</label>
+				</div>
+				<label class="checkbox-control">
+					<input type="checkbox" name="enabled" checked></input>
+					<span>Enabled</span>
+				</label>
 				<p class="form-status" role="status" aria-live="polite">{actions.saveNotificationRule.message}</p>
 				<button class="button button-primary" type="submit">Add rule</button>
 			</ActionForm>

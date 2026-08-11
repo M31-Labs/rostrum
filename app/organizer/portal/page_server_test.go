@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/m31-labs/rostrum/internal/domain"
 )
 
 func TestStagedHeadshotCommitsOnlyWhenAsked(t *testing.T) {
@@ -39,5 +41,16 @@ func TestStagedHeadshotCommitsOnlyWhenAsked(t *testing.T) {
 	stage.Discard(true)
 	if _, err := os.Stat(filepath.Join(directory, "spk_test.jpg")); !os.IsNotExist(err) {
 		t.Fatalf("Discard(true) did not remove public image, stat err = %v", err)
+	}
+}
+
+func TestOrganizerTaskInputRejectsInvalidTypeAndDueDate(t *testing.T) {
+	_, fieldErrors := parseTaskInput(map[string]string{
+		"title":  "Slides",
+		"type":   "shell-command",
+		"due_at": "not-a-date",
+	}, domain.Event{TimeZone: "UTC"})
+	if fieldErrors["type"] == "" || fieldErrors["due_at"] == "" {
+		t.Fatalf("field errors = %#v, want type and due date failures", fieldErrors)
 	}
 }
