@@ -1,46 +1,51 @@
-# Rostrum live — single-instance organizer deployment.
+# Rostrum hosted preview — deliberately separate from deploy/k8s/rostrum.yaml.
 #
-# For the anonymous fictional preview, use rostrum-demo.yaml instead. Never
-# point the preview at this workload's namespace or persistent volume.
-#
-# The JSON store is single-writer, so run exactly one replica against a
-# ReadWriteOnce volume and use the Recreate strategy. Substitute the four
-# __PLACEHOLDER__ values (image tag, hostname, ingress class, cert issuer),
-# then apply the rostrum-secrets Secret (see secret.example.yaml) before this.
+# Replace __IMAGE_TAG__ and __DEMO_HOSTNAME__, create the demo secret, and
+# apply this manifest as its own namespace. Do not combine this workload with
+# a live deployment or reuse a live data volume.
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: rostrum
+  name: rostrum-demo
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: rostrum-data
-  namespace: rostrum
+  name: rostrum-demo-data
+  namespace: rostrum-demo
 spec:
   accessModes: ["ReadWriteOnce"]
   resources:
     requests:
       storage: 2Gi
 ---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: rostrum-demo-secrets
+  namespace: rostrum-demo
+type: Opaque
+stringData:
+  SESSION_SECRET: "REPLACE_WITH_32_PLUS_RANDOM_CHARS"
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: rostrum
-  namespace: rostrum
+  name: rostrum-demo
+  namespace: rostrum-demo
   labels:
-    app: rostrum
+    app: rostrum-demo
 spec:
   replicas: 1
   strategy:
     type: Recreate
   selector:
     matchLabels:
-      app: rostrum
+      app: rostrum-demo
   template:
     metadata:
       labels:
-        app: rostrum
+        app: rostrum-demo
     spec:
       securityContext:
         runAsNonRoot: true
@@ -50,30 +55,48 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       containers:
-        - name: rostrum
+        - name: rostrum-demo
           image: harbor.draco.quest/m31labs.dev/rostrum:__IMAGE_TAG__
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080
           env:
             - name: APP_MODE
-              value: "live"
+              value: "demo"
             - name: APP_ENV
               value: "production"
             - name: PORT
               value: "8080"
             - name: PUBLIC_URL
-              value: "https://__HOSTNAME__"
+              value: "https://__DEMO_HOSTNAME__"
+            - name: ROSTRUM_VERSION
+              value: "__IMAGE_TAG__"
+            - name: SEED
+              value: "demo"
+            - name: STORE_DRIVER
+              value: "sqlite"
             - name: DATA_PATH
-              value: "/app/data/rostrum.json"
+              value: "/app/demo-data/rostrum.sqlite"
+            - name: AUDIT_LOG_PATH
+              value: "/app/demo-data/audit.log"
+            - name: BACKUP_DIR
+              value: "/app/demo-data/backups"
             - name: DEMO_MODE
               value: "false"
-          envFrom:
-            - secretRef:
-                name: rostrum-secrets
+            - name: MAIL_DRIVER
+              value: "outbox"
+            - name: ORGANIZER_EMAILS
+              value: ""
+            - name: RESET_SECRET
+              value: ""
+            - name: SESSION_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: rostrum-demo-secrets
+                  key: SESSION_SECRET
           volumeMounts:
             - name: data
-              mountPath: /app/data
+              mountPath: /app/demo-data
           readinessProbe:
             httpGet:
               path: /api/health
@@ -100,16 +123,16 @@ spec:
       volumes:
         - name: data
           persistentVolumeClaim:
-            claimName: rostrum-data
+            claimName: rostrum-demo-data
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: rostrum
-  namespace: rostrum
+  name: rostrum-demo
+  namespace: rostrum-demo
 spec:
   selector:
-    app: rostrum
+    app: rostrum-demo
   ports:
     - port: 80
       targetPort: 8080
@@ -117,27 +140,26 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: rostrum
-  namespace: rostrum
+  name: rostrum-demo
+  namespace: rostrum-demo
   annotations:
     cert-manager.io/cluster-issuer: "__CLUSTER_ISSUER__"
-    # Keep the /live WebSocket connection open through the proxy.
     nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
 spec:
   ingressClassName: __INGRESS_CLASS__
   tls:
     - hosts:
-        - __HOSTNAME__
-      secretName: rostrum-tls
+        - __DEMO_HOSTNAME__
+      secretName: rostrum-demo-tls
   rules:
-    - host: __HOSTNAME__
+    - host: __DEMO_HOSTNAME__
       http:
         paths:
           - path: /
             pathType: Prefix
             backend:
               service:
-                name: rostrum
+                name: rostrum-demo
                 port:
                   number: 80

@@ -19,3 +19,11 @@ func DemoMode() bool {
 	}
 	return strings.EqualFold(seed, "demo")
 }
+
+// ReadOnlyDemoMode reports the explicit hosted-demo posture. It is separate
+// from DemoMode because a local seeded workspace remains intentionally
+// interactive, while APP_MODE=demo is a deployment boundary that disables
+// identity, mutations, imports, exports, and resets.
+func ReadOnlyDemoMode() bool {
+	return strings.EqualFold(strings.TrimSpace(os.Getenv("APP_MODE")), "demo")
+}

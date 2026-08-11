@@ -2,7 +2,7 @@
 
 **Status:** the implementation sweep is complete. Credential-backed and
 live-service acceptance remains operator-owned. This document is the release
-gate for the private Rostrum repository as of 2026-08-10; it does not authorize
+gate for the private Rostrum repository as of 2026-08-11; it does not authorize
 making the repository or a deployment public.
 
 ## Release decision
@@ -12,6 +12,15 @@ operator checklist in this document is completed and evidenced. It is not yet
 declared publicly launch-ready: sending real email, exercising the selected
 database and provider configuration, and approving the deployed release require
 credentials and infrastructure that are outside this repository.
+
+The public-facing review posture is now explicit: production remains
+organizer-gated, while the hosted preview is a separate `APP_MODE=demo`
+deployment containing only the fictional seed. It is anonymous and
+read-only, refuses every mutation/export/import/upload/auth/setup path, uses a
+durable JSON or SQLite volume behind a store-level write barrier, and sends a
+no-index signal. The preview is a demoable back-of-house, not a shared
+playground or a second source of truth; local quickstart runs remain the
+interactive evaluation path.
 
 Rostrum is always canonical. JSON, SQLite, and Postgres are alternative
 canonical storage backends. Airtable is a one-way operational projection only;
@@ -119,6 +128,23 @@ and filesystem, and the release must not claim that it is.
 - ROSTRUM_VERSION is a deployment-owned immutable tag or commit SHA exposed
   by GET /api/health. The Docker image accepts it as a build argument and
   local smoke asserts a known health version.
+
+### Hosted preview isolation
+
+- The demo process must set `APP_MODE=demo`, `SEED=demo`, an absolute durable
+  `DATA_PATH`, `STORE_DRIVER=json` or `sqlite`, and an immutable
+  `ROSTRUM_VERSION`.
+- Keep the demo on its own subdomain, process, volume, audit path, and
+  session secret. Never point it at production JSON, SQLite, Postgres,
+  uploads, or identity state.
+- Leave `ORGANIZER_EMAILS` and `RESET_SECRET` empty; use `MAIL_DRIVER=outbox`
+  and no Resend, SMTP, Accelevents, Airtable, or OAuth credentials.
+- Verify `/organizer` is anonymously readable for inspection, while POST,
+  PUT, PATCH, DELETE, `/auth/*`, `/setup`, `/demo/reset`, all exports/imports,
+  and uploads return 403. Verify the read-only banner, login explanation,
+  `X-Robots-Tag`, and the absence of provider calls.
+- If any demo startup invariant fails, keep the process down and fix the
+  deployment configuration; do not weaken the guard or seed live state.
 
 ## Provider acceptance contracts
 

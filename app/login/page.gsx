@@ -9,57 +9,65 @@ func Page() Node {
 		<section class="auth-card">
 			<p class="eyebrow">Sign in</p>
 			<h1>Rostrum</h1>
-			<p>
-				Sign in with a magic link, a passkey, or a connected account.
-			</p>
-			<If cond={data.notice.show}>
-				<p
-					class={"form-status" + (data.notice.kind == "error" ? " form-error" : "")}
-					role="status"
-					aria-live="polite"
-				>{data.notice.message}</p>
+			<If cond={data.readOnlyDemo}>
+				<p>
+					This hosted preview uses fictional data and is read-only. Sign-in, uploads, and workspace changes are disabled.
+				</p>
+				<a class="button button-primary" href="/organizer" data-gosx-link>Browse the demo workspace</a>
 			</If>
-			<Form class="auth-form" method="post" action="/auth/magic-link">
-				<input type="hidden" name="csrf_token" value={csrf.token}></input>
-				<input type="hidden" name="next" value={data.next}></input>
-				<label>
-					<span>Email</span>
-					<input
-						id="auth-email"
-						type="email"
-						name="email"
-						placeholder="you@example.com"
-						autocomplete="email"
-						required
-					></input>
-				</label>
-				<p class="form-status" role="status" aria-live="polite"></p>
-				<button class="button button-primary" type="submit">Email me a sign-in link</button>
-			</Form>
-			<div class="auth-divider">
-				<span>or</span>
-			</div>
-			<button
-				class="button"
-				type="button"
-				data-gosx-webauthn-action="authenticate"
-				data-gosx-webauthn-options="/auth/webauthn/login-options"
-				data-gosx-webauthn-finish="/auth/webauthn/login"
-				data-gosx-webauthn-email="#auth-email"
-				data-gosx-webauthn-payload={data.webauthnPayload}
-				data-gosx-webauthn-status="#auth-passkey-status"
-				data-gosx-webauthn-success="/organizer"
-			>Sign in with a passkey</button>
-			<p id="auth-passkey-status" class="form-status" role="status" aria-live="polite"></p>
-			<If cond={data.hasProviders}>
+			<If cond={!data.readOnlyDemo}>
+				<p>
+					Sign in with a magic link, a passkey, or a connected account.
+				</p>
+				<If cond={data.notice.show}>
+					<p
+						class={"form-status" + (data.notice.kind == "error" ? " form-error" : "")}
+						role="status"
+						aria-live="polite"
+					>{data.notice.message}</p>
+				</If>
+				<Form class="auth-form" method="post" action="/auth/magic-link">
+					<input type="hidden" name="csrf_token" value={csrf.token}></input>
+					<input type="hidden" name="next" value={data.next}></input>
+					<label>
+						<span>Email</span>
+						<input
+							id="auth-email"
+							type="email"
+							name="email"
+							placeholder="you@example.com"
+							autocomplete="email"
+							required
+						></input>
+					</label>
+					<p class="form-status" role="status" aria-live="polite"></p>
+					<button class="button button-primary" type="submit">Email me a sign-in link</button>
+				</Form>
 				<div class="auth-divider">
-					<span>or continue with</span>
+					<span>or</span>
 				</div>
-				<div class="auth-oauth-list">
-					<Each of={data.providers} as="provider">
-						<OAuthLink href={provider.href} label={provider.label}></OAuthLink>
-					</Each>
-				</div>
+				<button
+					class="button"
+					type="button"
+					data-gosx-webauthn-action="authenticate"
+					data-gosx-webauthn-options="/auth/webauthn/login-options"
+					data-gosx-webauthn-finish="/auth/webauthn/login"
+					data-gosx-webauthn-email="#auth-email"
+					data-gosx-webauthn-payload={data.webauthnPayload}
+					data-gosx-webauthn-status="#auth-passkey-status"
+					data-gosx-webauthn-success="/organizer"
+				>Sign in with a passkey</button>
+				<p id="auth-passkey-status" class="form-status" role="status" aria-live="polite"></p>
+				<If cond={data.hasProviders}>
+					<div class="auth-divider">
+						<span>or continue with</span>
+					</div>
+					<div class="auth-oauth-list">
+						<Each of={data.providers} as="provider">
+							<OAuthLink href={provider.href} label={provider.label}></OAuthLink>
+						</Each>
+					</div>
+				</If>
 			</If>
 		</section>
 	</main>

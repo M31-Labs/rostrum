@@ -327,13 +327,19 @@ func Layout() Node {
 					data-gosx-link
 					aria-current={data.section == "settings" ? "page" : ""}
 				>Event settings</a>
-				<If cond={data.demoMode}>
+				<If cond={data.demoMode && !data.workspace.readOnlyDemo}>
 					<span>Demo mode · local data</span>
 				</If>
 			</div>
 		</aside>
 		<div class="workspace-main">
-			<If cond={data.demoMode}>
+			<If cond={data.workspace.readOnlyDemo}>
+				<div class="demo-banner" role="status">
+					<span>Read-only demo</span>
+					Fictional data for inspection. Sign-in and workspace actions are disabled; redeploy the demo to reset it.
+				</div>
+			</If>
+			<If cond={data.demoMode && !data.workspace.readOnlyDemo}>
 				<div class="demo-banner" role="status">
 					<span>Interactive demo</span>
 					Changes persist locally.

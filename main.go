@@ -24,6 +24,7 @@ import (
 	"github.com/m31-labs/rostrum/internal/audit"
 	programcalendar "github.com/m31-labs/rostrum/internal/calendar"
 	delivery "github.com/m31-labs/rostrum/internal/communications"
+	"github.com/m31-labs/rostrum/internal/demomode"
 	"github.com/m31-labs/rostrum/internal/domain"
 	"github.com/m31-labs/rostrum/internal/identity"
 	"github.com/m31-labs/rostrum/internal/live"
@@ -72,9 +73,35 @@ func main() {
 	if strings.EqualFold(getenv("DEMO_MODE", "true"), "memory") {
 		dataPath = ":memory:"
 	}
-	workspace, err := store.OpenConfigured(storeDriver, dataPath, getenv("DATABASE_URL", ""), selectSeed(getenv("SEED", "demo"), now))
+	port := getenv("PORT", "8080")
+	publicBase := getenv("PUBLIC_URL", "http://localhost:"+port)
+	// Release identity is deployment-owned rather than tied to the framework
+	// version. A container or process manager should set ROSTRUM_VERSION to an
+	// immutable tag or commit SHA, allowing /api/health to prove the exact app
+	// build that is serving traffic.
+	rostrumVersion := getenv("ROSTRUM_VERSION", "dev")
+	appEnv := strings.ToLower(getenv("APP_ENV", "development"))
+	readOnlyDemo := demomode.Enabled()
+	if err := demomode.Validate(demomode.Config{
+		Mode:           getenv("APP_MODE", demomode.ModeLive),
+		Seed:           getenv("SEED", "demo"),
+		LegacyDemoMode: getenv("DEMO_MODE", "true"),
+		StoreDriver:    storeDriver,
+		DataPath:       dataPath,
+		RostrumVersion: rostrumVersion,
+	}); err != nil {
+		log.Fatal(err)
+	}
+	seed := selectSeed(getenv("SEED", "demo"), now)
+	workspace, err := store.OpenConfigured(storeDriver, dataPath, getenv("DATABASE_URL", ""), seed)
 	if err != nil {
 		log.Fatal(err)
+	}
+	if readOnlyDemo {
+		if err := demomode.ValidateState(workspace.Snapshot(), seed); err != nil {
+			_ = workspace.Close()
+			log.Fatal(err)
+		}
 	}
 	auditPath := getenv("AUDIT_LOG_PATH", filepath.Join(root, "data", "audit.log"))
 	backupDirectory := getenv("BACKUP_DIR", filepath.Join(root, "data", "backups"))
@@ -84,6 +111,9 @@ func main() {
 		log.Fatal(err)
 	}
 	workspace = store.WithAudit(workspace, ledger)
+	if readOnlyDemo {
+		workspace = store.ReadOnly(workspace)
+	}
 	defer func() {
 		if err := workspace.Close(); err != nil {
 			log.Printf("close workspace store: %v", err)
@@ -91,14 +121,6 @@ func main() {
 	}()
 	appstate.Set(workspace)
 
-	port := getenv("PORT", "8080")
-	publicBase := getenv("PUBLIC_URL", "http://localhost:"+port)
-	// Release identity is deployment-owned rather than tied to the framework
-	// version. A container or process manager should set ROSTRUM_VERSION to an
-	// immutable tag or commit SHA, allowing /api/health to prove the exact app
-	// build that is serving traffic.
-	rostrumVersion := getenv("ROSTRUM_VERSION", "dev")
-	appEnv := strings.ToLower(getenv("APP_ENV", "development"))
 	sessionSecret := getenv("SESSION_SECRET", developmentSessionSecret)
 	// Organizer roles now live in the signed, encrypted session cookie, so the
 	// session secret is the sole trust anchor for organizer access. Refuse the
@@ -138,7 +160,9 @@ func main() {
 	// directly instead when it is false.
 	authManager := identity.New(sessions)
 	mailSender := mail.FromEnv()
-	startOutboxRunner(workspace, mailSender)
+	if !readOnlyDemo {
+		startOutboxRunner(workspace, mailSender)
+	}
 	mailConfigured := mail.TransportConfigured()
 	magicLinks := authManager.MagicLinks(auth.MagicLinkOptions{
 		BaseURL:     publicBase,
@@ -160,7 +184,13 @@ func main() {
 		Origin: publicBase,
 		Store:  identity.DurableWebAuthnStore{},
 	})
-	identity.SetSetup(identity.NewSetup(authManager, magicLinks, mailConfigured, publicBase))
+	if readOnlyDemo {
+		// The break-glass setup path is an identity mutation and must not be
+		// reachable from a hosted demo, even when its workspace is empty.
+		identity.SetSetup(nil)
+	} else {
+		identity.SetSetup(identity.NewSetup(authManager, magicLinks, mailConfigured, publicBase))
+	}
 
 	router := route.NewRouter()
 	router.SetLayout(func(ctx *route.RouteContext, body gosx.Node) gosx.Node {
@@ -228,6 +258,7 @@ func main() {
 	app.Use(noCacheStaticCSS())
 	app.Use(sessions.Middleware)
 	app.Use(authManager.Middleware)
+	app.Use(readOnlyDemoGate())
 	app.Use(organizerGate())
 	app.Use(bodyLimit())
 	app.Use(sessions.Protect)
@@ -254,9 +285,9 @@ func main() {
 		return publicapi.Speakers(appstate.MustGet().Snapshot()), nil
 	})
 	// /live streams workspace activity events (new submissions, task uploads),
-	// so gate it to organizer-facing roles; an anonymous subscriber must not
-	// observe organizer activity metadata (review, out-of-scope /live note).
-	app.Mount("/live", identity.RequireAnyRole(identity.RoleOrganizer, identity.RoleChair, identity.RoleObserver)(live.Dashboard))
+	// so gate it to organizer-facing roles in live mode. The isolated demo
+	// explicitly uses the same read-only stream as an inspection surface.
+	app.Mount("/live", liveDashboardHandler())
 	app.Mount("/calendar/", http.HandlerFunc(calendarDownload))
 	app.Mount("/portal-upload/", http.HandlerFunc(portalUpload(root)))
 	app.Mount("/portal-file/", http.HandlerFunc(portalFile(root)))
@@ -449,6 +480,12 @@ func securityHeaders(publicBase string, scriptHashes ...string) server.Middlewar
 			w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
 			w.Header().Set("X-Content-Type-Options", "nosniff")
 			w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()")
+			if readOnlyDemoMode() {
+				// The demo is a review surface, not a canonical public event
+				// site. Keep search engines and archive crawlers from indexing
+				// its fictional back-of-house data.
+				w.Header().Set("X-Robots-Tag", "noindex, nofollow, noarchive")
+			}
 			if secure {
 				w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 			}
@@ -610,13 +647,84 @@ func bodyLimit() server.Middleware {
 	}
 }
 
+// readOnlyDemoMode is deliberately an explicit environment check. Startup
+// validation fails closed for an unknown APP_MODE, while request-level tests
+// and middleware keep the deployment boundary easy to audit.
+func readOnlyDemoMode() bool {
+	return demomode.Enabled()
+}
+
+// readOnlyDemoGate is the last defense before any route handler. In the
+// hosted demo every unsafe HTTP method is refused, and sensitive surfaces
+// that could otherwise issue a GET-side effect or reveal an identity/setup
+// flow are refused too. The store wrapper remains the authoritative backstop
+// for writes made by code paths that are added later.
+func readOnlyDemoGate() server.Middleware {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !readOnlyDemoMode() {
+				next.ServeHTTP(w, r)
+				return
+			}
+			if ip := ratelimit.ClientIP(r); ip != "" && !readOnlyDemoIPLimiter.Allow(ip) {
+				w.Header().Set("Retry-After", "60")
+				http.Error(w, "demo rate limit exceeded", http.StatusTooManyRequests)
+				return
+			}
+			if isMutationMethod(r.Method) || readOnlyDemoForbiddenPath(r.URL.Path) {
+				w.Header().Set("Cache-Control", "no-store")
+				http.Error(w, "read-only demo", http.StatusForbidden)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+func readOnlyDemoForbiddenPath(path string) bool {
+	trimmed := strings.TrimSuffix(path, "/")
+	if trimmed == "" {
+		trimmed = "/"
+	}
+	if trimmed == "/auth" || strings.HasPrefix(trimmed, "/auth/") {
+		return true
+	}
+	if trimmed == "/setup" || strings.HasPrefix(trimmed, "/setup/") {
+		return true
+	}
+	if trimmed == "/demo/reset" {
+		return true
+	}
+	if trimmed == "/organizer/import" || strings.HasPrefix(trimmed, "/organizer/import/") {
+		return true
+	}
+	if trimmed == "/portal-file" || strings.HasPrefix(trimmed, "/portal-file/") {
+		return true
+	}
+	return trimmed == "/organizer/export" || strings.HasPrefix(trimmed, "/organizer/export/")
+}
+
+// The hosted preview is intentionally small, but it is still an internet
+// facing process. Keep accidental crawlers or a single noisy client from
+// turning the anonymous read surface into an unbounded origin workload.
+var readOnlyDemoIPLimiter = ratelimit.NewTokenBucket(300, time.Minute)
+
+func liveDashboardHandler() http.Handler {
+	if readOnlyDemoMode() {
+		return live.Dashboard
+	}
+	return identity.RequireAnyRole(identity.RoleOrganizer, identity.RoleChair, identity.RoleObserver)(live.Dashboard)
+}
+
 // organizerGate requires an organizer, chair, or observer session on every
-// `/organizer` path (identity-plane spec AU-5). Anonymous or
+// `/organizer` path in live mode (identity-plane spec AU-5). Anonymous or
 // under-privileged visitors get RequireAnyRole's usual response: a JSON
 // request gets 401, everything else redirects to /login with the original
-// path preserved. This replaces the deleted organizerContext, which trusted
-// whoever a reverse proxy already let reach `/organizer` -- the leak this
-// gate closes.
+// path preserved. The isolated APP_MODE=demo deployment is the deliberate
+// exception: readOnlyDemoGate has already removed every unsafe path, so it
+// can expose the same workspace UI anonymously for inspection. This replaces
+// the deleted organizerContext, which trusted whoever a reverse proxy already
+// let reach `/organizer` -- the leak this gate closes.
 //
 // The three /organizer/export paths are deliberately excluded: each enforces
 // its own tighter, non-redirecting 403 (organizer and chair only, never
@@ -644,6 +752,17 @@ func organizerGate() server.Middleware {
 		guarded := gate(next)
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if isOrganizerGatedPath(r.URL.Path) {
+				if readOnlyDemoMode() {
+					// The hosted demo is intentionally anonymous and inspect-only.
+					// readOnlyDemoGate catches the real app chain first; keep this
+					// guard here too so the organizer boundary is safe in isolation.
+					if isMutationMethod(r.Method) {
+						http.Error(w, "read-only demo", http.StatusForbidden)
+						return
+					}
+					next.ServeHTTP(w, r)
+					return
+				}
 				// Observers are intentionally read-only. File-route actions and
 				// custom organizer endpoints are POSTs, so enforce the narrower
 				// role here instead of trusting every individual action to repeat

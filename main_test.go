@@ -391,6 +391,7 @@ func TestRemoveSupersededUploadProtectsSharedAndOutsidePaths(t *testing.T) {
 }
 
 func TestSecurityHeadersAuthorizeOnlyTheGoSXInlineRuntime(t *testing.T) {
+	t.Setenv("APP_MODE", "live")
 	hash := navigationScriptCSPHash()
 	if !strings.HasPrefix(hash, "'sha256-") {
 		t.Fatalf("navigation CSP hash = %q", hash)
@@ -420,7 +421,80 @@ func TestSecurityHeadersAuthorizeOnlyTheGoSXInlineRuntime(t *testing.T) {
 	}
 }
 
+func TestReadOnlyDemoGateBlocksMutationsAndSensitiveSurfaces(t *testing.T) {
+	t.Setenv("APP_MODE", "demo")
+	handler := readOnlyDemoGate()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	cases := []struct {
+		method string
+		path   string
+		want   int
+	}{
+		{http.MethodPost, "/submit/systems-forum-cfp", http.StatusForbidden},
+		{http.MethodPut, "/organizer/settings", http.StatusForbidden},
+		{http.MethodPatch, "/review/token", http.StatusForbidden},
+		{http.MethodDelete, "/portal-upload/speaker/task", http.StatusForbidden},
+		{http.MethodGet, "/organizer/export/workspace.json", http.StatusForbidden},
+		{http.MethodGet, "/organizer/export/approved-uploads.zip", http.StatusForbidden},
+		{http.MethodGet, "/organizer/import/workspace", http.StatusForbidden},
+		{http.MethodGet, "/portal-file/done_demo", http.StatusForbidden},
+		{http.MethodGet, "/auth/magic-link", http.StatusForbidden},
+		{http.MethodGet, "/setup", http.StatusForbidden},
+		{http.MethodGet, "/demo/reset", http.StatusForbidden},
+		{http.MethodGet, "/organizer", http.StatusNoContent},
+		{http.MethodGet, "/review/token", http.StatusNoContent},
+		{http.MethodGet, "/login", http.StatusNoContent},
+		{http.MethodGet, "/public/m31-systems-forum-2026/agenda", http.StatusNoContent},
+	}
+	for _, test := range cases {
+		t.Run(test.method+" "+test.path, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, httptest.NewRequest(test.method, test.path, nil))
+			if recorder.Code != test.want {
+				t.Fatalf("status = %d, want %d; body=%s", recorder.Code, test.want, recorder.Body.String())
+			}
+			if test.want == http.StatusForbidden && recorder.Header().Get("Cache-Control") != "no-store" {
+				t.Fatalf("blocked response Cache-Control = %q, want no-store", recorder.Header().Get("Cache-Control"))
+			}
+		})
+	}
+}
+
+func TestOrganizerGateAllowsAnonymousReadOnlyDemoInspection(t *testing.T) {
+	t.Setenv("APP_MODE", "demo")
+	t.Setenv("GOSX_STATIC_EXPORT", "")
+	handler := organizerGate()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	read := httptest.NewRecorder()
+	handler.ServeHTTP(read, httptest.NewRequest(http.MethodGet, "/organizer/agenda", nil))
+	if read.Code != http.StatusNoContent {
+		t.Fatalf("anonymous demo organizer GET status = %d, want 204", read.Code)
+	}
+	write := httptest.NewRecorder()
+	handler.ServeHTTP(write, httptest.NewRequest(http.MethodPost, "/organizer/agenda", nil))
+	if write.Code != http.StatusForbidden {
+		t.Fatalf("anonymous demo organizer POST status = %d, want 403", write.Code)
+	}
+}
+
+func TestSecurityHeadersMarkReadOnlyDemoResponsesNoindex(t *testing.T) {
+	t.Setenv("APP_MODE", "demo")
+	handler := securityHeaders("https://demo.rostrum.example", navigationScriptCSPHash())(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	for _, path := range []string{"/", "/organizer", "/public/m31-systems-forum-2026/agenda", "/login"} {
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+		if got := recorder.Header().Get("X-Robots-Tag"); got != "noindex, nofollow, noarchive" {
+			t.Errorf("path %s X-Robots-Tag = %q, want noindex policy", path, got)
+		}
+	}
+}
+
 func TestFrameAncestorsScopedToPublicRoutes(t *testing.T) {
+	t.Setenv("APP_MODE", "live")
 	hash := navigationScriptCSPHash()
 	handler := securityHeaders("https://rostrum.example", hash)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)

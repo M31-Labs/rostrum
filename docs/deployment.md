@@ -59,6 +59,51 @@ That remote mode checks public and login surfaces. Perform the authenticated
 organizer workflow in the launch checklist separately; a smoke script must not
 need a production organizer credential.
 
+## Hosted read-only preview
+
+The public preview uses a separate process, subdomain, volume, and release
+configuration from every live organizer deployment. Set the explicit posture
+below; `APP_MODE=demo` is fail-closed and does not turn an ordinary live
+instance into a demo:
+
+```text
+APP_MODE=demo
+APP_ENV=production
+PUBLIC_URL=https://demo.example.com
+ROSTRUM_VERSION=2026.08.11-<immutable-commit>
+SESSION_SECRET=<unique-random-secret-at-least-32-characters>
+SEED=demo
+STORE_DRIVER=sqlite
+DATA_PATH=/app/demo-data/rostrum.sqlite
+MAIL_DRIVER=outbox
+ORGANIZER_EMAILS=
+RESET_SECRET=
+```
+
+Use only fictional seeded data. The demo refuses `DATABASE_URL`, the legacy
+`DEMO_MODE=memory` setting, relative or in-memory paths, a mutable `dev`
+release identity, Resend/SMTP/Accelevents/Airtable credentials, OAuth
+credentials, and a network mail driver. It also validates the opened state
+before serving and refuses a workspace containing a non-demo event or stored
+organizer identity. Keep the demo volume and audit path separate from the
+live volume; never reuse a production `DATA_PATH`, upload directory, or
+session secret.
+
+The demo exposes public pages, signed-link read surfaces, `/organizer/*`, and
+`/live` for inspection without an organizer session. Every unsafe HTTP method,
+authentication/setup route, reset, import, export, and upload is refused with
+403. A store-level read-only wrapper remains in place even if a future route
+forgets the middleware. The UI labels the workspace as read-only, the login
+page explains that sign-in is disabled, and every response sends
+`X-Robots-Tag: noindex, nofollow, noarchive`. The local quickstart remains the
+place to exercise interactive mutations. A process-local client-IP limiter
+also caps anonymous preview traffic; keep the reverse proxy's normal rate
+limits enabled for a public deployment.
+
+For Kubernetes, start from [`deploy/k8s/rostrum-demo.yaml`](../deploy/k8s/rostrum-demo.yaml).
+It creates a separate namespace, volume, service, ingress, and session secret.
+Replace only its documented image, host, ingress, and secret placeholders.
+
 ## Reverse proxy
 
 Terminate TLS (Transport Layer Security) at a trusted reverse proxy and

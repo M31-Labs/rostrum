@@ -7,9 +7,11 @@ carries a proposal from an open call, through review and scheduling, to a
 published agenda. Every routing and scheduling decision shows its rule and a
 readable reason.
 
-**Live demo:** [rostrum.m31labs.dev](https://rostrum.m31labs.dev). The seeded
-event is M31 Systems Forum 2026. The demo leaves the organizer workspace open
-so you can explore every surface.
+**Hosted preview:** [rostrum.m31labs.dev](https://rostrum.m31labs.dev). The
+preview uses fictional M31 Systems Forum 2026 data and exposes the organizer
+back-of-house as an anonymous, read-only inspection surface. It never accepts
+submissions, sign-ins, uploads, exports, imports, resets, or provider
+credentials. To try mutations, run the local quickstart below.
 
 ## What Rostrum does today
 
@@ -50,15 +52,15 @@ so you can explore every surface.
 ## Try the live demo
 
 1. Open the [public call](https://rostrum.m31labs.dev/submit/systems-forum-cfp)
-   and submit a proposal. Choose the "Workshop" format to see a conditional
-   question appear.
-2. Follow the success page into your new speaker portal. Update your profile
-   and complete a task.
-3. Open the [organizer workspace](https://rostrum.m31labs.dev/organizer) and
-   watch your submission arrive with its routing trace.
-4. Open the [agenda](https://rostrum.m31labs.dev/organizer/agenda), drag a
-   session into a conflict, and read the rule that blocks it.
-5. End at the [public agenda](https://rostrum.m31labs.dev/public/m31-systems-forum-2026/agenda)
+   and choose the "Workshop" format to inspect its conditional question. The
+   hosted preview intentionally refuses the final submit action.
+2. Open the [organizer workspace](https://rostrum.m31labs.dev/organizer) to
+   inspect the seeded routing trace, review rounds, task matrix, and audit
+   context without signing in.
+3. Open the [agenda](https://rostrum.m31labs.dev/organizer/agenda) to inspect
+   the seeded conflict explanation. Controls remain visible for discoverability
+   but every action is disabled at the deployment boundary.
+4. End at the [public agenda](https://rostrum.m31labs.dev/public/m31-systems-forum-2026/agenda)
    and the [speaker gallery](https://rostrum.m31labs.dev/public/m31-systems-forum-2026/speakers).
 
 ## Quickstart
@@ -91,6 +93,10 @@ Entry points:
 
 In the organizer workspace, press `Ctrl/Cmd K` for the search switcher, or
 press `G` plus a route key to jump to any surface.
+
+The hosted preview is a separate `APP_MODE=demo` deployment. It is not the
+local quickstart: the local process is deliberately interactive so you can
+submit, review, schedule, and reset fictional data while evaluating the app.
 
 ## How a program moves through Rostrum
 

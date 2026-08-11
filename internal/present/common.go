@@ -209,6 +209,7 @@ func WorkspaceIdentity(state domain.State) map[string]any {
 	return map[string]any{
 		"eventName":          state.Event.Name,
 		"monogram":           EventMonogram(state.Event.Name),
+		"readOnlyDemo":       ReadOnlyDemoMode(),
 		"hasCFP":             cfpSlug != "",
 		"cfpHref":            "/submit/" + cfpSlug,
 		"publicAgendaHref":   "/public/" + state.Event.Slug + "/agenda",
