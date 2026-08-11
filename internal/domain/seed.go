@@ -103,9 +103,9 @@ func Seed(now time.Time) State {
 			{ID: "spk_ben", FirstName: "Ben", LastName: "Ito", Email: "ben@example.com", Pronouns: "he/him", Role: "Community programs director", Company: "Open Assembly", Biography: "Ben runs contributor programs and speaker operations for open-source events.", LinkedInURL: "https://www.linkedin.com", City: "Portland", CreatedAt: now.Add(-24 * 24 * time.Hour), UpdatedAt: now.Add(-20 * time.Hour)},
 		},
 		Reviewers: []Reviewer{
-			{ID: "rev_ada", Name: "Ada Romero", Email: "ada@example.com", Expertise: []string{"agents", "evaluation"}, Kind: "human"},
-			{ID: "rev_marcus", Name: "Marcus Lee", Email: "marcus@example.com", Expertise: []string{"infrastructure", "compilers"}, Kind: "human"},
-			{ID: "rev_ines", Name: "Ines Silva", Email: "ines@example.com", Expertise: []string{"interfaces", "accessibility"}, Kind: "human"},
+			{ID: "rev_ada", Name: "Ada Romero", Email: "ada@example.com", Company: "Tidal Systems", Expertise: []string{"agents", "evaluation"}, Kind: "human"},
+			{ID: "rev_marcus", Name: "Marcus Lee", Email: "marcus@example.com", Company: "Forgeworks", Expertise: []string{"infrastructure", "compilers"}, Kind: "human"},
+			{ID: "rev_ines", Name: "Ines Silva", Email: "ines@example.com", Company: "Civic Interface Lab", Expertise: []string{"interfaces", "accessibility"}, Kind: "human"},
 			{ID: "rev_virtual_practitioner", Name: "Practitioner lens", Email: "", Expertise: []string{"applicability", "evidence"}, Kind: "virtual"},
 		},
 		ReviewPlans: []ReviewPlan{

@@ -27,7 +27,7 @@ var FieldSections = []map[string]string{
 }
 
 func Forms(state domain.State) (map[string]any, error) {
-	engine, err := decisionrules.New()
+	engine, err := decisionrules.Shared()
 	if err != nil {
 		return nil, err
 	}

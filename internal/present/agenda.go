@@ -19,7 +19,7 @@ func Agenda(state domain.State, view string, dayParam string) (map[string]any, e
 	default:
 		view = "day"
 	}
-	engine, err := decisionrules.New()
+	engine, err := decisionrules.Shared()
 	if err != nil {
 		return nil, err
 	}

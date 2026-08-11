@@ -16,7 +16,7 @@ func SubmissionForm(state domain.State, slug string) (map[string]any, error) {
 	if !found {
 		return nil, fmt.Errorf("form %s not found", slug)
 	}
-	engine, err := decisionrules.New()
+	engine, err := decisionrules.Shared()
 	if err != nil {
 		return nil, err
 	}

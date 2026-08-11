@@ -31,6 +31,7 @@ import (
 	"github.com/m31-labs/rostrum/internal/live"
 	"github.com/m31-labs/rostrum/internal/present"
 	"github.com/m31-labs/rostrum/internal/token"
+	decisionrules "github.com/m31-labs/rostrum/rules"
 	"m31labs.dev/gosx/action"
 	"m31labs.dev/gosx/route"
 	"m31labs.dev/gosx/server"
@@ -73,8 +74,8 @@ func loadReview(ctx *route.RouteContext, page route.FilePage) (any, error) {
 		return reviewUnavailable(snapshot), nil
 	}
 
-	plan, hasActivePlan := activeReviewPlan(snapshot)
-	if !hasActivePlan {
+	plan, err := snapshot.ActiveReviewPlan()
+	if err != nil {
 		return map[string]any{
 			"available":       true,
 			"workspace":       present.WorkspaceIdentity(snapshot),
@@ -116,20 +117,6 @@ func reviewerSummary(reviewer domain.Reviewer) map[string]any {
 	return map[string]any{"id": reviewer.ID, "name": reviewer.Name, "initials": reviewerInitials(reviewer.Name)}
 }
 
-// activeReviewPlan returns the most recent review plan whose Status is
-// "active" or "open" — the same activity test saveReview already applies in
-// app/organizer/review/page.server.go — so a reviewer link only ever
-// surfaces proposals for a round the program team currently has open.
-func activeReviewPlan(state domain.State) (domain.ReviewPlan, bool) {
-	for index := len(state.ReviewPlans) - 1; index >= 0; index-- {
-		plan := state.ReviewPlans[index]
-		if plan.Status == "active" || plan.Status == "open" {
-			return plan, true
-		}
-	}
-	return domain.ReviewPlan{}, false
-}
-
 // reviewerSubmissionRows lists the active plan's assigned proposals for
 // reviewer, each carrying its own rubric score inputs pre-filled from any
 // evaluation this reviewer already recorded. It returns an empty slice
@@ -147,6 +134,12 @@ func reviewerSubmissionRows(state domain.State, plan domain.ReviewPlan, reviewer
 	for _, submissionID := range plan.SubmissionIDs {
 		submission, found := state.Submission(submissionID)
 		if !found {
+			continue
+		}
+		// Recused reviewers receive no proposal card at all. The score action
+		// independently rechecks the same fact and policy, so a stale page or
+		// forged post cannot bypass recusal.
+		if state.ReviewerCompanyConflict(reviewer, *submission) {
 			continue
 		}
 		existing, hasExisting := reviewerEvaluation(state, plan.ID, submission.ID, reviewer.ID)
@@ -262,12 +255,27 @@ func scoreSubmission(ctx *action.Context) error {
 	if !found || (plan.Status != "active" && plan.Status != "open") {
 		return action.Validation("This review round is no longer open.", map[string]string{"plan_id": "The review plan is not active."}, ctx.FormData)
 	}
-	if _, found := snapshot.Submission(submissionID); !found || !containsID(plan.SubmissionIDs, submissionID) {
+	submission, found := snapshot.Submission(submissionID)
+	if !found || !containsID(plan.SubmissionIDs, submissionID) {
 		return action.Validation("Choose a proposal assigned to this round.", map[string]string{"submission_id": "Proposal is not assigned."}, ctx.FormData)
 	}
 	reviewer, reviewerFound := findReviewer(snapshot, reviewerID)
 	if !reviewerFound || reviewer.Kind != "human" || !containsID(plan.ReviewerIDs, reviewerID) {
 		return action.Validation("Your reviewer link is not assigned to this round.", nil, ctx.FormData)
+	}
+	engine, err := decisionrules.Shared()
+	if err != nil {
+		return fmt.Errorf("load review governance: %w", err)
+	}
+	governance, err := engine.EvaluateReviewGovernance(decisionrules.ReviewGovernanceInput{
+		Operation:       "score",
+		CompanyConflict: snapshot.ReviewerCompanyConflict(reviewer, *submission),
+	})
+	if err != nil {
+		return fmt.Errorf("evaluate review governance: %w", err)
+	}
+	if !governance.Allowed {
+		return action.Validation("This review cannot be recorded.", map[string]string{"submission_id": governance.Reason}, ctx.FormData)
 	}
 
 	validRecommendation := false
@@ -299,7 +307,20 @@ func scoreSubmission(ctx *action.Context) error {
 	}
 
 	created := false
-	if err := appstate.MustGet().Update(func(state *domain.State) error {
+	if err := appstate.MustGet().UpdateAudit(domain.AuditMeta{
+		Actor:      "reviewer:" + reviewerID,
+		Action:     "review.scored",
+		EntityType: "evaluation",
+		EntityID:   planID + ":" + submissionID + ":" + reviewerID,
+		Summary:    "human review recorded by assigned reviewer",
+		Origin:     "reviewer-link",
+		Rule:       governance.Rule,
+		Trace:      strings.Join(governance.Trace, "; "),
+	}, func(state *domain.State) error {
+		currentSubmission, found := state.Submission(submissionID)
+		if !found || state.ReviewerCompanyConflict(reviewer, *currentSubmission) {
+			return fmt.Errorf("reviewer is no longer eligible to score this proposal")
+		}
 		now := time.Now().UTC()
 		for index := range state.Evaluations {
 			evaluation := &state.Evaluations[index]

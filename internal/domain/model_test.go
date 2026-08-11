@@ -1,9 +1,12 @@
 package domain
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestAddSessionForSubmissionIsIdempotent(t *testing.T) {
@@ -90,6 +93,50 @@ func TestAssignAcceptedOnlyTasksIsIdempotent(t *testing.T) {
 	}
 	if len(state.Tasks[0].AssignedSpeakerIDs) != 2 {
 		t.Fatalf("task_profile.AssignedSpeakerIDs = %v, want exactly 2 entries after repeat assign", state.Tasks[0].AssignedSpeakerIDs)
+	}
+}
+
+func TestAssignPendingToActiveReviewPlanAndDetectCompanyRecusal(t *testing.T) {
+	state := &State{
+		ReviewPlans: []ReviewPlan{{ID: "plan_1", Status: "open", SubmissionIDs: []string{"sub_existing"}}},
+		Submissions: []Submission{
+			{ID: "sub_existing", Status: SubmissionPending},
+			{ID: "sub_pending", Status: SubmissionPending, SpeakerIDs: []string{"speaker_1"}},
+			{ID: "sub_accepted", Status: SubmissionAccepted},
+		},
+		Speakers: []Speaker{{ID: "speaker_1", Company: "Northstar Research"}},
+	}
+
+	planID, assigned, err := state.AssignPendingToActiveReviewPlan()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if planID != "plan_1" || assigned != 1 || !containsReviewID(state.ReviewPlans[0].SubmissionIDs, "sub_pending") {
+		t.Fatalf("assignment = (%q, %d, %#v), want pending submission in active plan", planID, assigned, state.ReviewPlans[0].SubmissionIDs)
+	}
+	if _, assigned, err = state.AssignPendingToActiveReviewPlan(); err != nil || assigned != 0 {
+		t.Fatalf("second assignment = (%d, %v), want idempotent zero", assigned, err)
+	}
+	if !state.ReviewerCompanyConflict(Reviewer{Company: " northstar   research "}, state.Submissions[1]) {
+		t.Fatal("ReviewerCompanyConflict = false, want normalized company match")
+	}
+}
+
+func TestVerifyAuditTrailAcceptsLegacyHashWithoutGovernanceFields(t *testing.T) {
+	event := AuditEvent{
+		ID: "audit_legacy", At: time.Date(2026, time.August, 1, 10, 0, 0, 0, time.UTC),
+		Actor: "organizer", Action: "event.updated", EntityType: "event", EntityID: "evt_1",
+		Summary: "event updated", Origin: "organizer-settings",
+	}
+	legacyPayload := strings.Join([]string{
+		event.ID, event.At.UTC().Format(time.RFC3339Nano), event.Actor, event.Action,
+		event.EntityType, event.EntityID, event.Summary, event.Origin, event.PreviousHash,
+	}, "\x1f")
+	sum := sha256.Sum256([]byte(legacyPayload))
+	event.Hash = hex.EncodeToString(sum[:])
+
+	if err := (State{AuditEvents: []AuditEvent{event}}).VerifyAuditTrail(); err != nil {
+		t.Fatalf("VerifyAuditTrail legacy event: %v", err)
 	}
 }
 

@@ -14,6 +14,7 @@ import (
 	"github.com/m31-labs/rostrum/internal/live"
 	"github.com/m31-labs/rostrum/internal/present"
 	"github.com/m31-labs/rostrum/internal/token"
+	decisionrules "github.com/m31-labs/rostrum/rules"
 	"m31labs.dev/gosx/action"
 	"m31labs.dev/gosx/route"
 	"m31labs.dev/gosx/server"
@@ -31,7 +32,10 @@ func init() {
 		Metadata: func(ctx *route.RouteContext, page route.FilePage, data any) (server.Metadata, error) {
 			return server.Metadata{Title: server.Title{Default: "Review — Rostrum"}, Description: "Multi-round rubric review with attributable scoring."}, nil
 		},
-		Actions: route.FileActions{"saveReview": saveReview},
+		Actions: route.FileActions{
+			"assignPendingToActivePlan": assignPendingToActivePlan,
+			"saveReview":                saveReview,
+		},
 	}); err != nil {
 		log.Fatal(err)
 	}
@@ -111,12 +115,27 @@ func saveReview(ctx *action.Context) error {
 	if !found || (plan.Status != "active" && plan.Status != "open") {
 		return action.Validation("Choose the active review round.", map[string]string{"plan_id": "The review plan is not active."}, ctx.FormData)
 	}
-	if _, found := snapshot.Submission(submissionID); !found || !containsReviewID(plan.SubmissionIDs, submissionID) {
+	submission, found := snapshot.Submission(submissionID)
+	if !found || !containsReviewID(plan.SubmissionIDs, submissionID) {
 		return action.Validation("Choose a proposal assigned to this round.", map[string]string{"submission_id": "Proposal is not assigned."}, ctx.FormData)
 	}
 	reviewer, reviewerFound := reviewParticipant(snapshot, reviewerID)
 	if !reviewerFound || reviewer.Kind != "human" || !containsReviewID(plan.ReviewerIDs, reviewerID) {
 		return action.Validation("Choose a human reviewer assigned to this round.", map[string]string{"reviewer_id": "Reviewer is not assigned."}, ctx.FormData)
+	}
+	engine, err := decisionrules.Shared()
+	if err != nil {
+		return fmt.Errorf("load review governance: %w", err)
+	}
+	governance, err := engine.EvaluateReviewGovernance(decisionrules.ReviewGovernanceInput{
+		Operation:       "score",
+		CompanyConflict: snapshot.ReviewerCompanyConflict(reviewer, *submission),
+	})
+	if err != nil {
+		return fmt.Errorf("evaluate review governance: %w", err)
+	}
+	if !governance.Allowed {
+		return action.Validation("This review cannot be recorded.", map[string]string{"reviewer_id": governance.Reason}, ctx.FormData)
 	}
 	validRecommendation := false
 	for _, candidate := range []string{"strong_yes", "yes", "maybe", "no", "strong_no"} {
@@ -147,7 +166,20 @@ func saveReview(ctx *action.Context) error {
 	}
 
 	created := false
-	if err := appstate.MustGet().Update(func(state *domain.State) error {
+	if err := appstate.MustGet().UpdateAudit(domain.AuditMeta{
+		Actor:      "organizer",
+		Action:     "review.scored",
+		EntityType: "evaluation",
+		EntityID:   planID + ":" + submissionID + ":" + reviewerID,
+		Summary:    "human review recorded by program staff",
+		Origin:     "organizer-review",
+		Rule:       governance.Rule,
+		Trace:      strings.Join(governance.Trace, "; "),
+	}, func(state *domain.State) error {
+		currentSubmission, found := state.Submission(submissionID)
+		if !found || state.ReviewerCompanyConflict(reviewer, *currentSubmission) {
+			return fmt.Errorf("reviewer is no longer eligible to score this proposal")
+		}
 		now := time.Now().UTC()
 		for index := range state.Evaluations {
 			evaluation := &state.Evaluations[index]
@@ -174,6 +206,42 @@ func saveReview(ctx *action.Context) error {
 	}
 	session.AddFlash(ctx.Request, "notice", verb+" a human rubric review from "+reviewer.Name+".")
 	live.Broadcast("review:updated", map[string]string{"submission": submissionID, "source": "human"})
+	actionflow.Redirect(ctx, "/organizer/review#candidates")
+	return nil
+}
+
+// assignPendingToActivePlan is the explicit organizer action that moves only
+// pending submissions into one open review round. Domain code enforces the
+// same invariant for imports and future clients; this action supplies the
+// audited, human-visible control point.
+func assignPendingToActivePlan(ctx *action.Context) error {
+	plan, err := appstate.MustGet().Snapshot().ActiveReviewPlan()
+	if err != nil {
+		return action.Validation("Open exactly one review round before assigning pending proposals.", map[string]string{"plan_id": "Choose one active review plan."}, ctx.FormData)
+	}
+	assigned := 0
+	if err := appstate.MustGet().UpdateAudit(domain.AuditMeta{
+		Actor:      "organizer",
+		Action:     "review.pending_assigned",
+		EntityType: "review_plan",
+		EntityID:   plan.ID,
+		Summary:    "pending submissions assigned to active review plan",
+		Origin:     "organizer-review",
+	}, func(state *domain.State) error {
+		_, count, err := state.AssignPendingToActiveReviewPlan()
+		assigned = count
+		return err
+	}); err != nil {
+		return err
+	}
+	message := "No pending proposals needed assignment."
+	if assigned == 1 {
+		message = "Assigned 1 pending proposal to the active review round."
+	} else if assigned > 1 {
+		message = fmt.Sprintf("Assigned %d pending proposals to the active review round.", assigned)
+	}
+	session.AddFlash(ctx.Request, "notice", message)
+	live.Broadcast("review:assigned", map[string]string{"plan": plan.ID})
 	actionflow.Redirect(ctx, "/organizer/review#candidates")
 	return nil
 }

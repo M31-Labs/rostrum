@@ -4,6 +4,7 @@ import (
 	"embed"
 	"fmt"
 	"sort"
+	"sync"
 
 	"github.com/m31-labs/rostrum/internal/domain"
 	"m31labs.dev/arbiter"
@@ -20,6 +21,7 @@ type Engine struct {
 	routing    *arbiter.Program
 	visibility *arbiter.Program
 	conflicts  *arbiter.Program
+	review     *arbiter.Program
 }
 
 type RoutingDecision struct {
@@ -48,6 +50,26 @@ type ConflictDecision struct {
 	Trace    []string
 }
 
+// ReviewGovernanceInput carries normalized facts for a review score or final
+// program decision. It deliberately contains no comments, speaker identity,
+// or other review content that could become an audit leak.
+type ReviewGovernanceInput struct {
+	Operation             string
+	CompanyConflict       bool
+	HumanEvaluations      int
+	RequiredEvaluations   int
+	ChairOverride         bool
+	OverrideReasonPresent bool
+}
+
+type ReviewGovernanceDecision struct {
+	Allowed bool
+	Reason  string
+	Rule    string
+	Action  string
+	Trace   []string
+}
+
 func New() (*Engine, error) {
 	routing, err := compile("cfp-routing.arb")
 	if err != nil {
@@ -61,7 +83,20 @@ func New() (*Engine, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Engine{routing: routing, visibility: visibility, conflicts: conflicts}, nil
+	review, err := compile("review-governance.arb")
+	if err != nil {
+		return nil, err
+	}
+	return &Engine{routing: routing, visibility: visibility, conflicts: conflicts, review: review}, nil
+}
+
+var shared = sync.OnceValues(New)
+
+// Shared returns the process-wide, immutable policy engine. Compiling policy
+// once ensures every HTTP action evaluates the same reviewed source without
+// repeatedly parsing it on a request path.
+func Shared() (*Engine, error) {
+	return shared()
 }
 
 func (e *Engine) Route(category, format, level string) (RoutingDecision, error) {
@@ -132,6 +167,30 @@ func (e *Engine) EvaluateConflict(conflict domain.Conflict) (ConflictDecision, e
 		Rule:     match.Name,
 		Action:   match.Action,
 		Trace:    trace,
+	}, nil
+}
+
+func (e *Engine) EvaluateReviewGovernance(input ReviewGovernanceInput) (ReviewGovernanceDecision, error) {
+	match, trace, err := evaluate(e.review, map[string]any{
+		"review": map[string]any{
+			"operation":               input.Operation,
+			"company_conflict":        input.CompanyConflict,
+			"human_evaluations":       input.HumanEvaluations,
+			"required_evaluations":    input.RequiredEvaluations,
+			"chair_override":          input.ChairOverride,
+			"override_reason_present": input.OverrideReasonPresent,
+		},
+	})
+	if err != nil {
+		return ReviewGovernanceDecision{}, err
+	}
+	allowed := match.Action == "AllowReview" || match.Action == "AllowDecision"
+	return ReviewGovernanceDecision{
+		Allowed: allowed,
+		Reason:  stringParam(match, "reason"),
+		Rule:    match.Name,
+		Action:  match.Action,
+		Trace:   trace,
 	}, nil
 }
 

@@ -144,7 +144,7 @@ func submitProposal(ctx *action.Context) error {
 		return action.Validation("Correct the highlighted fields and submit again.", fieldErrors, ctx.FormData)
 	}
 
-	engine, err := decisionrules.New()
+	engine, err := decisionrules.Shared()
 	if err != nil {
 		return err
 	}

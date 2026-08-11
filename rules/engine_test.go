@@ -67,6 +67,34 @@ func TestEngineGovernsScheduleConflicts(t *testing.T) {
 	}
 }
 
+func TestEngineGovernsReviewRecusalAndQuorum(t *testing.T) {
+	engine := mustEngine(t)
+
+	recusal, err := engine.EvaluateReviewGovernance(ReviewGovernanceInput{Operation: "score", CompanyConflict: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recusal.Allowed || recusal.Rule != "BlockCompanyRecusal" {
+		t.Fatalf("unexpected recusal decision: %#v", recusal)
+	}
+
+	quorum, err := engine.EvaluateReviewGovernance(ReviewGovernanceInput{Operation: "decision", HumanEvaluations: 1, RequiredEvaluations: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if quorum.Allowed || quorum.Rule != "BlockDecisionWithoutQuorum" {
+		t.Fatalf("unexpected quorum decision: %#v", quorum)
+	}
+
+	override, err := engine.EvaluateReviewGovernance(ReviewGovernanceInput{Operation: "decision", ChairOverride: true, OverrideReasonPresent: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !override.Allowed || override.Rule != "AllowChairOverride" {
+		t.Fatalf("unexpected chair override decision: %#v", override)
+	}
+}
+
 func mustEngine(t *testing.T) *Engine {
 	t.Helper()
 	engine, err := New()

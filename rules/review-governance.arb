@@ -1,0 +1,85 @@
+# Review governance is a policy boundary: application code supplies only
+# normalized facts, while Arbiter decides whether a score or final decision
+# may proceed and leaves a named, replayable trace.
+
+feature review from "programma" {
+    operation: string
+    company_conflict: bool
+    human_evaluations: number
+    required_evaluations: number
+    chair_override: bool
+    override_reason_present: bool
+}
+
+rule BlockCompanyRecusal priority 1 {
+    when {
+        review.operation == "score"
+        and review.company_conflict == true
+    }
+    then BlockReview {
+        reason: "reviewer has a declared company conflict with this proposal",
+    }
+}
+
+rule BlockChairOverrideWithoutReason priority 1 {
+    when {
+        review.operation == "decision"
+        and review.chair_override == true
+        and review.override_reason_present == false
+    }
+    then BlockDecision {
+        reason: "a chair override requires a recorded reason",
+    }
+}
+
+rule AllowChairOverride priority 2 {
+    when {
+        review.operation == "decision"
+        and review.chair_override == true
+        and review.override_reason_present == true
+    }
+    then AllowDecision {
+        reason: "chair override has a recorded reason",
+    }
+}
+
+rule BlockDecisionWithoutQuorum priority 3 {
+    when {
+        review.operation == "decision"
+        and review.chair_override == false
+        and review.human_evaluations < review.required_evaluations
+    }
+    then BlockDecision {
+        reason: "the required number of distinct human evaluations is not complete",
+    }
+}
+
+rule BlockDecisionWithoutReviewRequirement priority 4 {
+    when {
+        review.operation == "decision"
+        and review.chair_override == false
+        and review.required_evaluations < 1
+    }
+    then BlockDecision {
+        reason: "the active review plan must require at least one human evaluation",
+    }
+}
+
+rule AllowHumanReview priority 10 {
+    when {
+        review.operation == "score"
+    }
+    then AllowReview {
+        reason: "reviewer is eligible to score this assigned proposal",
+    }
+}
+
+rule AllowDecisionWithQuorum priority 10 {
+    when {
+        review.operation == "decision"
+        and review.human_evaluations >= review.required_evaluations
+    }
+    then AllowDecision {
+        reason: "the required number of distinct human evaluations is complete",
+    }
+}

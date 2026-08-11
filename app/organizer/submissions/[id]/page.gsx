@@ -21,7 +21,23 @@ func AcceptForm(props any) Node {
 		<input type="hidden" name="status" value="accepted"></input>
 		<p class="form-status" role="status" aria-live="polite">{action.message}</p>
 		<button class="button button-primary" type="submit">Accept proposal</button>
+		<ChairOverrideFields></ChairOverrideFields>
 	</ActionForm>
+}
+
+func ChairOverrideFields() Node {
+	return <details class="rubric-details">
+		<summary>Chair override (only if quorum is incomplete)</summary>
+		<label>
+			<span><input type="checkbox" name="chair_override"></input> Record a chair override</span>
+		</label>
+		<label>
+			<span>Decision rationale</span>
+			<textarea name="override_reason" maxlength="1000" placeholder="Why this final decision should proceed without the usual review quorum"></textarea>
+			<p class="form-error" data-gosx-field-error="override_reason" aria-live="polite"></p>
+		</label>
+		<p class="form-error" data-gosx-field-error="chair_override" aria-live="polite"></p>
+	</details>
 }
 
 func StatusForm(props any) Node {
@@ -30,13 +46,14 @@ func StatusForm(props any) Node {
 		<input type="hidden" name="submission_id" value={props.id}></input>
 		<label>
 			<span>Change status</span>
-			<select name="status" data-gosx-submit-on="change">
+			<select name="status">
 				<Each of={data.statusOptions} as="option">
 					<option value={option.value} selected={option.value == props.status}>{option.label}</option>
 				</Each>
 			</select>
 			<p class="form-error" data-gosx-field-error="status" aria-live="polite"></p>
 		</label>
+		<ChairOverrideFields></ChairOverrideFields>
 		<p class="form-status" role="status" aria-live="polite">{action.message}</p>
 		<button class="button button-compact" type="submit">Update status</button>
 	</ActionForm>

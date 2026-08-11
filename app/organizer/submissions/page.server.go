@@ -3,18 +3,23 @@ package submissions
 import (
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/m31-labs/rostrum/internal/actionflow"
 	"github.com/m31-labs/rostrum/internal/appstate"
 	programcalendar "github.com/m31-labs/rostrum/internal/calendar"
 	"github.com/m31-labs/rostrum/internal/domain"
+	"github.com/m31-labs/rostrum/internal/identity"
 	"github.com/m31-labs/rostrum/internal/live"
 	"github.com/m31-labs/rostrum/internal/mail"
 	"github.com/m31-labs/rostrum/internal/present"
+	decisionrules "github.com/m31-labs/rostrum/rules"
 	"m31labs.dev/gosx/action"
+	"m31labs.dev/gosx/auth"
 	"m31labs.dev/gosx/route"
 	"m31labs.dev/gosx/server"
 	"m31labs.dev/gosx/session"
@@ -55,15 +60,43 @@ func updateStatus(ctx *action.Context) error {
 	if !valid {
 		return action.Validation("Choose a valid status.", map[string]string{"status": "Unknown submission status."}, ctx.FormData)
 	}
+	decision, err := governFinalDecision(ctx, id, status)
+	if err != nil {
+		return err
+	}
 	title := ""
 	acceptedSessionID := ""
 	var acceptedSpeakerIDs []string
-	if err := appstate.MustGet().Update(func(state *domain.State) error {
+	audit := domain.AuditMeta{
+		Actor:      decision.Actor,
+		Action:     "submission.status_updated",
+		EntityType: "submission",
+		EntityID:   id,
+		Summary:    "submission status changed to " + status,
+		Origin:     "organizer-submissions",
+	}
+	if decision.Applies {
+		audit.Action = "review.decision_recorded"
+		audit.Summary = "final submission decision changed to " + status
+		if decision.ChairOverride {
+			audit.Summary = "final submission decision changed to " + status + " through chair override"
+		}
+		audit.Rule = decision.Governance.Rule
+		audit.Trace = strings.Join(decision.Governance.Trace, "; ")
+	}
+	if err := appstate.MustGet().UpdateAudit(audit, func(state *domain.State) error {
 		submission, found := state.Submission(id)
 		if !found {
 			return fmt.Errorf("submission %s not found", id)
 		}
 		submission.Status = status
+		if decision.Applies {
+			submission.DecisionActor = decision.Actor
+			submission.DecisionReason = decision.OverrideReason
+			submission.DecisionRule = decision.Governance.Rule
+			submission.DecisionTrace = append([]string(nil), decision.Governance.Trace...)
+			submission.DecisionAt = time.Now().UTC()
+		}
 		title = submission.Title
 		if status == domain.SubmissionAccepted {
 			state.AddSessionForSubmission(id)
@@ -111,6 +144,110 @@ func updateStatus(ctx *action.Context) error {
 	}
 	actionflow.Redirect(ctx, target)
 	return nil
+}
+
+type finalDecisionGovernance struct {
+	Applies        bool
+	ChairOverride  bool
+	OverrideReason string
+	Actor          string
+	Governance     decisionrules.ReviewGovernanceDecision
+}
+
+// governFinalDecision applies the policy boundary before the store mutation.
+// Authorization (whether the caller holds the chair role) stays outside the
+// rule program; the policy decides the business effect of a valid override,
+// recusal, or quorum fact.
+func governFinalDecision(ctx *action.Context, submissionID, status string) (finalDecisionGovernance, error) {
+	actor := organizerActor(ctx.Request)
+	if status != domain.SubmissionAccepted && status != domain.SubmissionDeclined {
+		return finalDecisionGovernance{Actor: actor}, nil
+	}
+
+	snapshot := appstate.MustGet().Snapshot()
+	submission, found := snapshot.Submission(submissionID)
+	if !found {
+		return finalDecisionGovernance{}, action.Validation("Choose an existing proposal.", map[string]string{"submission_id": "Proposal was not found."}, ctx.FormData)
+	}
+	// Repeating an already-final state is idempotent. Do not strand an already
+	// accepted proposal because its historical round later closed.
+	if submission.Status == status {
+		return finalDecisionGovernance{Actor: actor}, nil
+	}
+	plan, err := snapshot.ActiveReviewPlanForSubmission(submissionID)
+	if err != nil {
+		return finalDecisionGovernance{}, action.Validation("Assign this proposal to exactly one active review round before making a final decision.", map[string]string{"submission_id": "No unambiguous active review assignment."}, ctx.FormData)
+	}
+
+	chairOverride := checkboxValue(ctx.FormData["chair_override"])
+	overrideReason := strings.TrimSpace(ctx.FormData["override_reason"])
+	if len([]rune(overrideReason)) > 1_000 {
+		return finalDecisionGovernance{}, action.Validation("Keep a chair override rationale to 1,000 characters or fewer.", map[string]string{"override_reason": "Rationale is too long."}, ctx.FormData)
+	}
+	if chairOverride && !requestHasRole(ctx.Request, identity.RoleChair) {
+		return finalDecisionGovernance{}, action.Validation("Only a chair can use a decision override.", map[string]string{"chair_override": "A chair role is required."}, ctx.FormData)
+	}
+	engine, err := decisionrules.Shared()
+	if err != nil {
+		return finalDecisionGovernance{}, fmt.Errorf("load review governance: %w", err)
+	}
+	governance, err := engine.EvaluateReviewGovernance(decisionrules.ReviewGovernanceInput{
+		Operation:             "decision",
+		HumanEvaluations:      snapshot.HumanEvaluationCount(plan.ID, submissionID),
+		RequiredEvaluations:   plan.EvaluationsPerItem,
+		ChairOverride:         chairOverride,
+		OverrideReasonPresent: overrideReason != "",
+	})
+	if err != nil {
+		return finalDecisionGovernance{}, fmt.Errorf("evaluate review governance: %w", err)
+	}
+	if !governance.Allowed {
+		field := "status"
+		if chairOverride && overrideReason == "" {
+			field = "override_reason"
+		}
+		return finalDecisionGovernance{}, action.Validation("This final decision cannot be recorded.", map[string]string{field: governance.Reason}, ctx.FormData)
+	}
+	if !chairOverride {
+		overrideReason = ""
+	}
+	return finalDecisionGovernance{
+		Applies:        true,
+		ChairOverride:  chairOverride,
+		OverrideReason: overrideReason,
+		Actor:          actor,
+		Governance:     governance,
+	}, nil
+}
+
+func checkboxValue(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "true", "on", "yes":
+		return true
+	default:
+		return false
+	}
+}
+
+func requestHasRole(request *http.Request, want string) bool {
+	user, ok := auth.Current(request)
+	if !ok {
+		return false
+	}
+	for _, role := range user.Roles {
+		if role == want {
+			return true
+		}
+	}
+	return false
+}
+
+func organizerActor(request *http.Request) string {
+	user, ok := auth.Current(request)
+	if !ok || strings.TrimSpace(user.ID) == "" {
+		return "organizer"
+	}
+	return "organizer:" + strings.TrimSpace(user.ID)
 }
 
 // sendAcceptanceInvite sends the queued acceptance Communication

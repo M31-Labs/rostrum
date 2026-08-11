@@ -46,7 +46,7 @@ func moveSession(ctx *action.Context) error {
 		return action.Validation("Choose a session, time, room, and track.", map[string]string{"starts_at": "All placement fields are required."}, ctx.FormData)
 	}
 
-	engine, err := decisionrules.New()
+	engine, err := decisionrules.Shared()
 	if err != nil {
 		return err
 	}

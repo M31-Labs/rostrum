@@ -1,6 +1,7 @@
 package submissions
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,6 +13,8 @@ import (
 	"github.com/m31-labs/rostrum/internal/mail"
 	"github.com/m31-labs/rostrum/internal/store"
 	"m31labs.dev/gosx/action"
+	"m31labs.dev/gosx/auth"
+	"m31labs.dev/gosx/session"
 )
 
 // testWorkspaceState builds the minimum valid domain.State an
@@ -35,6 +38,16 @@ func testWorkspaceState() domain.State {
 				ID: "sub_ada", EventID: "evt_test", Title: "Engines and Analysis",
 				SpeakerIDs: []string{"spk_ada"}, Status: domain.SubmissionPending,
 			},
+		},
+		ReviewPlans: []domain.ReviewPlan{
+			{
+				ID: "plan_test", Status: "open", SubmissionIDs: []string{"sub_ada"}, EvaluationsPerItem: 2,
+				Criteria: []domain.RubricCriterion{{ID: "fit", Name: "Program fit", Weight: 100, MaxScore: 5}},
+			},
+		},
+		Evaluations: []domain.Evaluation{
+			{ID: "eval_ada", PlanID: "plan_test", SubmissionID: "sub_ada", ReviewerID: "reviewer_1", Source: "human", CreatedAt: now, UpdatedAt: now},
+			{ID: "eval_ben", PlanID: "plan_test", SubmissionID: "sub_ada", ReviewerID: "reviewer_2", Source: "human", CreatedAt: now, UpdatedAt: now},
 		},
 		Sessions: []domain.Session{
 			{
@@ -165,5 +178,83 @@ func TestReacceptingASubmissionDoesNotResendTheAcceptanceInvite(t *testing.T) {
 
 	if after := len(outbox.Sent()); after-before != 1 {
 		t.Fatalf("outbox recorded %d new messages across two accepts, want 1 (the second accept is a no-op)", after-before)
+	}
+}
+
+func TestUpdateStatusRejectsFinalDecisionWithoutReviewQuorum(t *testing.T) {
+	state := testWorkspaceState()
+	state.Evaluations = state.Evaluations[:1]
+	workspace, err := store.Open(":memory:", state)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	appstate.Set(workspace)
+
+	err = updateStatus(&action.Context{
+		Request:  httptest.NewRequest(http.MethodPost, "/organizer/submissions/__actions/updateStatus", nil),
+		FormData: map[string]string{"submission_id": "sub_ada", "status": domain.SubmissionAccepted},
+	})
+	var result *action.ResultError
+	if !errors.As(err, &result) {
+		t.Fatalf("updateStatus error = %v, want validation failure", err)
+	}
+	if result.Result.FieldErrors["status"] == "" {
+		t.Fatalf("field errors = %#v, want status quorum message", result.Result.FieldErrors)
+	}
+	snapshot := workspace.Snapshot()
+	submission, found := snapshot.Submission("sub_ada")
+	if !found || submission.Status != domain.SubmissionPending {
+		t.Fatalf("submission after blocked decision = %#v, want pending", submission)
+	}
+}
+
+func TestChairOverrideRecordsRationaleAndPolicyAudit(t *testing.T) {
+	state := testWorkspaceState()
+	state.Evaluations = nil
+	workspace, err := store.Open(":memory:", state)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	appstate.Set(workspace)
+
+	sessions := session.MustNew("submission-chair-test-secret", session.Options{AllowInsecure: true})
+	chairAuth := auth.New(sessions, auth.Options{Provider: auth.ProviderFunc(func(*http.Request) (auth.User, bool) {
+		return auth.User{ID: "chair_1", Roles: []string{"chair"}}, true
+	})})
+	request := httptest.NewRequest(http.MethodPost, "/organizer/submissions/__actions/updateStatus", nil)
+	var actionErr error
+	handler := sessions.Middleware(chairAuth.Middleware(http.HandlerFunc(func(_ http.ResponseWriter, request *http.Request) {
+		actionErr = updateStatus(&action.Context{
+			Request: request,
+			FormData: map[string]string{
+				"submission_id":   "sub_ada",
+				"status":          domain.SubmissionAccepted,
+				"chair_override":  "true",
+				"override_reason": "Program balance requires this topic before the deadline.",
+			},
+		})
+	})))
+	handler.ServeHTTP(httptest.NewRecorder(), request)
+	if actionErr != nil {
+		t.Fatalf("chair override returned an error: %v", actionErr)
+	}
+
+	snapshot := workspace.Snapshot()
+	submission, found := snapshot.Submission("sub_ada")
+	if !found || submission.Status != domain.SubmissionAccepted {
+		t.Fatalf("submission after chair override = %#v, want accepted", submission)
+	}
+	if submission.DecisionActor != "organizer:chair_1" || submission.DecisionReason == "" || submission.DecisionRule != "AllowChairOverride" {
+		t.Fatalf("decision record = %#v, want chair rationale and rule", submission)
+	}
+	var decisionAudit domain.AuditEvent
+	for _, audit := range snapshot.AuditEvents {
+		if audit.Action == "review.decision_recorded" {
+			decisionAudit = audit
+			break
+		}
+	}
+	if decisionAudit.Rule != "AllowChairOverride" || decisionAudit.Trace == "" {
+		t.Fatalf("decision audit = %#v, want policy trace", decisionAudit)
 	}
 }

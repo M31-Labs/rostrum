@@ -177,24 +177,29 @@ func (speaker Speaker) Initials() string {
 }
 
 type Submission struct {
-	ID          string            `json:"id"`
-	EventID     string            `json:"eventId"`
-	FormID      string            `json:"formId"`
-	Title       string            `json:"title"`
-	Abstract    string            `json:"abstract"`
-	Format      string            `json:"format"`
-	CategoryID  string            `json:"categoryId"`
-	TrackID     string            `json:"trackId"`
-	Level       string            `json:"level"`
-	Tags        []string          `json:"tags"`
-	SpeakerIDs  []string          `json:"speakerIds"`
-	Status      string            `json:"status"`
-	RoutedQueue string            `json:"routedQueue"`
-	RoutedOwner string            `json:"routedOwner"`
-	RuleTrace   []string          `json:"ruleTrace"`
-	Answers     map[string]string `json:"answers"`
-	SubmittedAt time.Time         `json:"submittedAt"`
-	UpdatedAt   time.Time         `json:"updatedAt"`
+	ID             string            `json:"id"`
+	EventID        string            `json:"eventId"`
+	FormID         string            `json:"formId"`
+	Title          string            `json:"title"`
+	Abstract       string            `json:"abstract"`
+	Format         string            `json:"format"`
+	CategoryID     string            `json:"categoryId"`
+	TrackID        string            `json:"trackId"`
+	Level          string            `json:"level"`
+	Tags           []string          `json:"tags"`
+	SpeakerIDs     []string          `json:"speakerIds"`
+	Status         string            `json:"status"`
+	DecisionActor  string            `json:"decisionActor"`
+	DecisionReason string            `json:"decisionReason"`
+	DecisionRule   string            `json:"decisionRule"`
+	DecisionTrace  []string          `json:"decisionTrace"`
+	DecisionAt     time.Time         `json:"decisionAt"`
+	RoutedQueue    string            `json:"routedQueue"`
+	RoutedOwner    string            `json:"routedOwner"`
+	RuleTrace      []string          `json:"ruleTrace"`
+	Answers        map[string]string `json:"answers"`
+	SubmittedAt    time.Time         `json:"submittedAt"`
+	UpdatedAt      time.Time         `json:"updatedAt"`
 }
 
 const (
@@ -233,6 +238,7 @@ type Reviewer struct {
 	ID        string   `json:"id"`
 	Name      string   `json:"name"`
 	Email     string   `json:"email"`
+	Company   string   `json:"company"`
 	Expertise []string `json:"expertise"`
 	Kind      string   `json:"kind"`
 }
@@ -503,6 +509,8 @@ type AuditMeta struct {
 	EntityID   string
 	Summary    string
 	Origin     string
+	Rule       string
+	Trace      string
 	At         time.Time
 }
 
@@ -518,6 +526,8 @@ type AuditEvent struct {
 	EntityID     string    `json:"entityId"`
 	Summary      string    `json:"summary"`
 	Origin       string    `json:"origin"`
+	Rule         string    `json:"rule"`
+	Trace        string    `json:"trace"`
 	PreviousHash string    `json:"previousHash"`
 	Hash         string    `json:"hash"`
 }
@@ -563,6 +573,8 @@ func (state *State) AppendAudit(meta AuditMeta) {
 		EntityID:     auditText(meta.EntityID, 160),
 		Summary:      auditText(meta.Summary, 500),
 		Origin:       auditText(meta.Origin, 120),
+		Rule:         auditText(meta.Rule, 160),
+		Trace:        auditText(meta.Trace, 1_000),
 		PreviousHash: previous,
 	}
 	event.Hash = event.chainHash()
@@ -590,7 +602,7 @@ func (state State) VerifyAuditTrail() error {
 }
 
 func (event AuditEvent) chainHash() string {
-	payload := strings.Join([]string{
+	parts := []string{
 		event.ID,
 		event.At.UTC().Format(time.RFC3339Nano),
 		event.Actor,
@@ -599,8 +611,16 @@ func (event AuditEvent) chainHash() string {
 		event.EntityID,
 		event.Summary,
 		event.Origin,
-		event.PreviousHash,
-	}, "\x1f")
+	}
+	// Version-one audit hashes ended after Origin and PreviousHash. Retain
+	// that byte-for-byte shape while Rule and Trace are both empty, so a
+	// workspace written before governed decision metadata was introduced still
+	// verifies on upgrade. New governed records bind both fields into the hash.
+	if event.Rule != "" || event.Trace != "" {
+		parts = append(parts, event.Rule, event.Trace)
+	}
+	parts = append(parts, event.PreviousHash)
+	payload := strings.Join(parts, "\x1f")
 	sum := sha256.Sum256([]byte(payload))
 	return hex.EncodeToString(sum[:])
 }
