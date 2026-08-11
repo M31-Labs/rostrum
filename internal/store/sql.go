@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -17,7 +18,11 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const workspaceTable = "rostrum_workspace"
+const (
+	workspaceTable       = "rostrum_workspace"
+	migrationsTable      = "rostrum_schema_migrations"
+	workspaceSchemaLevel = 1
+)
 
 // SQLStore stores the entire validated workspace document as one versioned
 // JSON row. That deliberately mirrors JSONStore's transactional semantics:
@@ -45,6 +50,9 @@ func OpenSQLite(path string, seed domain.State) (*SQLStore, error) {
 	}
 	if path != ":memory:" {
 		path = filepath.Clean(path)
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			return nil, fmt.Errorf("create sqlite data directory: %w", err)
+		}
 	}
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
@@ -56,6 +64,21 @@ func OpenSQLite(path string, seed domain.State) (*SQLStore, error) {
 	// workspaces.
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
+	if path != ":memory:" {
+		var journalMode string
+		if err := db.QueryRow("PRAGMA journal_mode = WAL").Scan(&journalMode); err != nil {
+			_ = db.Close()
+			return nil, fmt.Errorf("enable sqlite WAL: %w", err)
+		}
+		if !strings.EqualFold(strings.TrimSpace(journalMode), "wal") {
+			_ = db.Close()
+			return nil, fmt.Errorf("enable sqlite WAL: database returned journal mode %q", journalMode)
+		}
+		if _, err := db.Exec("PRAGMA synchronous = NORMAL"); err != nil {
+			_ = db.Close()
+			return nil, fmt.Errorf("configure sqlite WAL durability: %w", err)
+		}
+	}
 	// A short busy timeout turns ordinary concurrent HTTP writes into normal
 	// serialized transactions rather than a surprising immediate SQLITE_BUSY.
 	if _, err := db.Exec("PRAGMA busy_timeout = 5000"); err != nil {
@@ -105,7 +128,7 @@ func openSQLStore(db *sql.DB, dialect, path string, seed domain.State) (*SQLStor
 		return nil, fmt.Errorf("connect %s store: %w", dialect, err)
 	}
 	store := &SQLStore{db: db, dialect: dialect, path: path, seed: clone(seed)}
-	if err := store.createTable(); err != nil {
+	if err := store.applyMigrations(); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -116,18 +139,38 @@ func openSQLStore(db *sql.DB, dialect, path string, seed domain.State) (*SQLStor
 	return store, nil
 }
 
-func (store *SQLStore) createTable() error {
+// applyMigrations keeps the aggregate table intentionally compact while
+// making SQL startup explicit and forward-compatible. A pre-migration v0
+// database is adopted by creating the migration ledger and recording level 1;
+// future migrations append another numbered entry rather than guessing from
+// the table shape.
+func (store *SQLStore) applyMigrations() error {
 	// TEXT works for JSON and timestamp values in both SQLite and Postgres;
 	// version is used to invalidate a process-local immutable snapshot when a
 	// second process commits a workspace change.
-	_, err := store.db.Exec(`CREATE TABLE IF NOT EXISTS ` + workspaceTable + ` (
+	if _, err := store.db.Exec(`CREATE TABLE IF NOT EXISTS ` + workspaceTable + ` (
 		id INTEGER PRIMARY KEY,
 		version BIGINT NOT NULL,
 		state TEXT NOT NULL,
 		updated_at TEXT NOT NULL
-	)`)
-	if err != nil {
+	)`); err != nil {
 		return fmt.Errorf("create workspace table: %w", err)
+	}
+	if _, err := store.db.Exec(`CREATE TABLE IF NOT EXISTS ` + migrationsTable + ` (
+		version BIGINT PRIMARY KEY,
+		applied_at TEXT NOT NULL
+	)`); err != nil {
+		return fmt.Errorf("create store migrations table: %w", err)
+	}
+	var recorded bool
+	err := store.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM ` + migrationsTable + ` WHERE version = ` + fmt.Sprint(workspaceSchemaLevel) + `)`).Scan(&recorded)
+	if err != nil {
+		return fmt.Errorf("read store migration level: %w", err)
+	}
+	if !recorded {
+		if _, err := store.db.Exec(store.insertMigrationSQL(), workspaceSchemaLevel, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+			return fmt.Errorf("record store migration %d: %w", workspaceSchemaLevel, err)
+		}
 	}
 	return nil
 }
@@ -299,6 +342,13 @@ func (store *SQLStore) updateSQL() string {
 		return `UPDATE ` + workspaceTable + ` SET version = $1, state = $2, updated_at = $3 WHERE id = 1`
 	}
 	return `UPDATE ` + workspaceTable + ` SET version = ?, state = ?, updated_at = ? WHERE id = 1`
+}
+
+func (store *SQLStore) insertMigrationSQL() string {
+	if store.dialect == "postgres" {
+		return `INSERT INTO ` + migrationsTable + ` (version, applied_at) VALUES ($1, $2)`
+	}
+	return `INSERT INTO ` + migrationsTable + ` (version, applied_at) VALUES (?, ?)`
 }
 
 func encodeState(state domain.State) (string, error) {

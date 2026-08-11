@@ -112,7 +112,11 @@ press `G` plus a route key to jump to any surface.
   versioned policy files under `rules/`. Every decision keeps its rule name
   and a human-readable reason.
 - **Your program in one file.** The whole workspace lives in one JSON file
-  with validated, atomic writes. Back it up with one copy command.
+  with validated, atomic writes. SQLite (WAL) and Postgres use the same
+  aggregate contract when an operator needs a database backend.
+- **Independent audit history.** Every durable workspace mutation is also
+  appended and fsynced to an operator-owned JSON Lines ledger, so a workspace
+  restore cannot rewrite the operational history that preceded it.
 - **One binary.** A single Go process serves every page, the live dashboard,
   and the API. No database and no background workers.
 - **A careful public edge.** Public JSON serves only published sessions and
@@ -151,6 +155,10 @@ Rostrum runs complete with zero credentials. Add these when you want them:
   driver, messages record to a visible demo outbox.
 - **Accelevents.** Set `ACCELEVENTS_API_KEY` and `ACCELEVENTS_EVENT_URL` to
   unlock live publishing. Dry runs work without either.
+- **Storage.** Set `STORE_DRIVER=sqlite` for a local WAL-backed database, or
+  `STORE_DRIVER=postgres` with `DATABASE_URL` for Postgres. Set
+  `AUDIT_LOG_PATH` when the independent audit ledger should live outside the
+  default `data/` directory.
 
 See [.env.example](.env.example) for every setting.
 

@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/m31-labs/rostrum/internal/appstate"
+	"github.com/m31-labs/rostrum/internal/audit"
 	programcalendar "github.com/m31-labs/rostrum/internal/calendar"
 	"github.com/m31-labs/rostrum/internal/domain"
 	"github.com/m31-labs/rostrum/internal/identity"
@@ -73,6 +74,13 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	auditPath := getenv("AUDIT_LOG_PATH", filepath.Join(root, "data", "audit.log"))
+	ledger, err := audit.Open(auditPath)
+	if err != nil {
+		_ = workspace.Close()
+		log.Fatal(err)
+	}
+	workspace = store.WithAudit(workspace, ledger)
 	defer func() {
 		if err := workspace.Close(); err != nil {
 			log.Printf("close workspace store: %v", err)

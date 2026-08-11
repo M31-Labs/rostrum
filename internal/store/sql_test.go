@@ -2,6 +2,7 @@ package store
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -46,6 +47,20 @@ func TestSQLiteStorePersistsStateAndAuditAcrossReopen(t *testing.T) {
 	}
 	if err := snapshot.VerifyAuditTrail(); err != nil {
 		t.Fatalf("VerifyAuditTrail: %v", err)
+	}
+	var journalMode string
+	if err := reopened.db.QueryRow("PRAGMA journal_mode").Scan(&journalMode); err != nil {
+		t.Fatalf("read journal mode: %v", err)
+	}
+	if !strings.EqualFold(journalMode, "wal") {
+		t.Fatalf("journal mode = %q, want WAL", journalMode)
+	}
+	var migrations int
+	if err := reopened.db.QueryRow("SELECT COUNT(*) FROM "+migrationsTable+" WHERE version = ?", workspaceSchemaLevel).Scan(&migrations); err != nil {
+		t.Fatalf("read store migrations: %v", err)
+	}
+	if migrations != 1 {
+		t.Fatalf("migration records = %d, want one level %d record", migrations, workspaceSchemaLevel)
 	}
 }
 
