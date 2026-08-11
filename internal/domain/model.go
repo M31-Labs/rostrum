@@ -537,16 +537,17 @@ type AuditEvent struct {
 // connector run; an integration can therefore fail or be disabled without
 // making Airtable (or any future projection) the source of truth.
 type SyncOutboxItem struct {
-	ID          string    `json:"id"`
-	Integration string    `json:"integration"`
-	Kind        string    `json:"kind"`
-	EntityID    string    `json:"entityId"`
-	Payload     string    `json:"payload"`
-	Attempts    int       `json:"attempts"`
-	AvailableAt time.Time `json:"availableAt"`
-	DeliveredAt time.Time `json:"deliveredAt"`
-	LastError   string    `json:"lastError"`
-	CreatedAt   time.Time `json:"createdAt"`
+	ID             string    `json:"id"`
+	Integration    string    `json:"integration"`
+	Kind           string    `json:"kind"`
+	EntityID       string    `json:"entityId"`
+	Payload        string    `json:"payload"`
+	IdempotencyKey string    `json:"idempotencyKey"`
+	Attempts       int       `json:"attempts"`
+	AvailableAt    time.Time `json:"availableAt"`
+	DeliveredAt    time.Time `json:"deliveredAt"`
+	LastError      string    `json:"lastError"`
+	CreatedAt      time.Time `json:"createdAt"`
 }
 
 // AppendAudit appends one hash-chained record. It is called only by a

@@ -5182,6 +5182,13 @@ code {
   font-weight: var(--weight-medium);
 }
 
+.airtable-logo {
+  color: var(--color-text);
+  background: var(--color-accent-bright);
+  font-family: var(--font-mono);
+  font-size: var(--type-sm);
+}
+
 .integration-copy h2 {
   margin-bottom: var(--space-xs);
   font-weight: var(--weight-medium);
@@ -5208,6 +5215,19 @@ code {
   color: var(--color-text);
   font-family: var(--font-mono);
   font-size: var(--type-sm);
+}
+
+.integration-actions {
+  margin-top: var(--space-md);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+  align-items: start;
+}
+
+.integration-actions form {
+  display: grid;
+  gap: var(--space-2xs);
 }
 
 .connection-state {

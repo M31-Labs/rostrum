@@ -157,6 +157,10 @@ Rostrum runs complete with zero credentials. Add these when you want them:
   driver, messages record to a visible demo outbox.
 - **Accelevents.** Set `ACCELEVENTS_API_KEY` and `ACCELEVENTS_EVENT_URL` to
   unlock live publishing. Dry runs work without either.
+- **Airtable.** Set `AIRTABLE_PAT` and `AIRTABLE_BASE_ID` to enable a
+  one-way, batched upsert projection. Rostrum remains the canonical store;
+  Airtable receives accepted-speaker and scheduled-session records keyed by
+  stable `Rostrum ID` values. Dry runs work without a token.
 - **Storage.** Set `STORE_DRIVER=sqlite` for a local WAL-backed database, or
   `STORE_DRIVER=postgres` with `DATABASE_URL` for Postgres. Set
   `AUDIT_LOG_PATH` when the independent audit ledger should live outside the

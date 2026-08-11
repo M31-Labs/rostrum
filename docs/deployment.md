@@ -170,6 +170,37 @@ Keep the staged `audit/` directory with the recovery record; do not splice it
 into a live audit log, whose hash chain belongs to the receiving instance.
 This preserves both the source evidence and the destination’s audit history.
 
+## Airtable projection
+
+Rostrum treats Airtable as a one-way operational projection, never as the
+transactional program database. Keep `STORE_DRIVER=json`, `sqlite`, or
+`postgres` as the canonical source, then configure:
+
+```text
+AIRTABLE_PAT=...
+AIRTABLE_BASE_ID=app...
+AIRTABLE_SPEAKERS_TABLE=Speakers
+AIRTABLE_SESSIONS_TABLE=Sessions
+```
+
+Use an Airtable Personal Access Token scoped only to the target base with
+record-write access. Airtable API keys are retired; do not add a legacy key to
+the environment. The connector makes batched `PATCH` requests with
+`performUpsert` keyed on the `Rostrum ID` field, so replay after a process
+failure is safe. Create these fields in both tables before enabling live sync:
+
+| Table | Required fields |
+| --- | --- |
+| Speakers | `Rostrum ID`, `Rostrum Schema`, `Name`, `Email`, `Role`, `Company`, `Biography`, `Website`, `LinkedIn` |
+| Sessions | `Rostrum ID`, `Rostrum Schema`, `Title`, `Description`, `Starts At`, `Ends At`, `Room`, `Track`, `Speaker IDs` |
+
+The Integrations page offers a credential-free dry run and an explicit
+**Sync Airtable now** control. It queues changed records in the canonical
+outbox before network delivery, batches ten records per request, stays below
+the five-requests-per-second base limit, stops on the first remote error, and
+uses durable backoff for failed records. Rostrum does not upload speaker files
+as Airtable attachments and does not pull any Airtable changes back.
+
 ## Operational configuration
 
 - Use a secret manager for the session, SMTP, and Accelevents credentials.

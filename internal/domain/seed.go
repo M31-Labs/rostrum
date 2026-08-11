@@ -159,6 +159,7 @@ func Seed(now time.Time) State {
 		},
 		Integrations: []Integration{
 			{ID: "integration_accelevents", Kind: "accelevents", Name: "Accelevents", Enabled: false, EventURL: "m31-systems-forum-2026", CredentialsOK: false, LastStatus: "Ready for dry run"},
+			{ID: "integration_airtable", Kind: "airtable", Name: "Airtable", Enabled: false, CredentialsOK: false, LastStatus: "Configure a Personal Access Token and base ID"},
 		},
 		UpdatedAt: now,
 	}
