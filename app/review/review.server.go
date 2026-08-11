@@ -18,6 +18,7 @@ package review
 import (
 	"fmt"
 	"log"
+	"math"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -235,6 +236,64 @@ func reviewerInitials(name string) string {
 	return strings.ToUpper(result)
 }
 
+// reviewScoreEligibility performs the current-state authorization checks for
+// a reviewer score. It is intentionally called both before and inside the
+// mutation: the preflight gives the reviewer immediate feedback, while the
+// transaction-time call makes roster, assignment, and recusal changes take
+// effect before any score is persisted.
+func reviewScoreEligibility(ctx *action.Context, state domain.State, planID, submissionID, reviewerID string, engine *decisionrules.Engine) (domain.ReviewPlan, decisionrules.ReviewGovernanceDecision, error) {
+	plan, found := state.ReviewPlan(planID)
+	if !found || (plan.Status != "active" && plan.Status != "open") {
+		return domain.ReviewPlan{}, decisionrules.ReviewGovernanceDecision{}, action.Validation("This review round is no longer open.", map[string]string{"plan_id": "The review plan is not active."}, ctx.FormData)
+	}
+	submission, found := state.Submission(submissionID)
+	if !found || !containsID(plan.SubmissionIDs, submissionID) {
+		return domain.ReviewPlan{}, decisionrules.ReviewGovernanceDecision{}, action.Validation("Choose a proposal assigned to this round.", map[string]string{"submission_id": "Proposal is not assigned."}, ctx.FormData)
+	}
+	reviewer, reviewerFound := findReviewer(state, reviewerID)
+	if !reviewerFound || !reviewer.Active() || reviewer.Kind != "human" || !containsID(plan.ReviewerIDs, reviewerID) {
+		return domain.ReviewPlan{}, decisionrules.ReviewGovernanceDecision{}, action.Validation("Your reviewer link is not assigned to this round.", nil, ctx.FormData)
+	}
+	if plan.AssignmentsManaged && !state.ReviewAssignmentActive(planID, submissionID, reviewerID) {
+		return domain.ReviewPlan{}, decisionrules.ReviewGovernanceDecision{}, action.Validation("This proposal is not assigned to your reviewer link.", nil, ctx.FormData)
+	}
+	governance, err := engine.EvaluateReviewGovernance(decisionrules.ReviewGovernanceInput{
+		Operation:       "score",
+		CompanyConflict: state.ReviewerCompanyConflict(reviewer, *submission),
+	})
+	if err != nil {
+		return domain.ReviewPlan{}, decisionrules.ReviewGovernanceDecision{}, fmt.Errorf("evaluate review governance: %w", err)
+	}
+	if !governance.Allowed {
+		return domain.ReviewPlan{}, decisionrules.ReviewGovernanceDecision{}, action.Validation("This review cannot be recorded.", map[string]string{"submission_id": governance.Reason}, ctx.FormData)
+	}
+	return *plan, governance, nil
+}
+
+func parseReviewScoreInput(ctx *action.Context, plan domain.ReviewPlan, recommendation, comments string) (map[string]float64, error) {
+	fieldErrors := map[string]string{}
+	if !domain.EvaluationRecommendationKnown(recommendation) {
+		fieldErrors["recommendation"] = "Choose a recommendation."
+	}
+	if len([]rune(comments)) < 20 {
+		fieldErrors["comments"] = "Add at least 20 characters of decision-relevant context."
+	}
+	scores := make(map[string]float64, len(plan.Criteria))
+	for _, criterion := range plan.Criteria {
+		field := "score_" + criterion.ID
+		score, err := strconv.ParseFloat(strings.TrimSpace(ctx.FormData[field]), 64)
+		if err != nil || math.IsNaN(score) || math.IsInf(score, 0) || score < 0 || score > criterion.MaxScore {
+			fieldErrors[field] = fmt.Sprintf("Use a score from 0 to %.0f.", criterion.MaxScore)
+			continue
+		}
+		scores[criterion.ID] = score
+	}
+	if len(fieldErrors) > 0 {
+		return nil, action.Validation("Complete every rubric criterion.", fieldErrors, ctx.FormData)
+	}
+	return scores, nil
+}
+
 // scoreSubmission is the reviewer-facing counterpart to
 // app/organizer/review/page.server.go's saveReview. It applies the
 // identical rubric validation and upsert-by-(plan, submission, reviewer)
@@ -253,63 +312,17 @@ func scoreSubmission(ctx *action.Context) error {
 	recommendation := strings.TrimSpace(ctx.FormData["recommendation"])
 	comments := strings.TrimSpace(ctx.FormData["comments"])
 
-	snapshot := appstate.MustGet().Snapshot()
-	plan, found := snapshot.ReviewPlan(planID)
-	if !found || (plan.Status != "active" && plan.Status != "open") {
-		return action.Validation("This review round is no longer open.", map[string]string{"plan_id": "The review plan is not active."}, ctx.FormData)
-	}
-	submission, found := snapshot.Submission(submissionID)
-	if !found || !containsID(plan.SubmissionIDs, submissionID) {
-		return action.Validation("Choose a proposal assigned to this round.", map[string]string{"submission_id": "Proposal is not assigned."}, ctx.FormData)
-	}
-	reviewer, reviewerFound := findReviewer(snapshot, reviewerID)
-	if !reviewerFound || !reviewer.Active() || reviewer.Kind != "human" || !containsID(plan.ReviewerIDs, reviewerID) {
-		return action.Validation("Your reviewer link is not assigned to this round.", nil, ctx.FormData)
-	}
-	if plan.AssignmentsManaged && !snapshot.ReviewAssignmentActive(planID, submissionID, reviewerID) {
-		return action.Validation("This proposal is not assigned to your reviewer link.", nil, ctx.FormData)
-	}
 	engine, err := decisionrules.Shared()
 	if err != nil {
 		return fmt.Errorf("load review governance: %w", err)
 	}
-	governance, err := engine.EvaluateReviewGovernance(decisionrules.ReviewGovernanceInput{
-		Operation:       "score",
-		CompanyConflict: snapshot.ReviewerCompanyConflict(reviewer, *submission),
-	})
+	snapshot := appstate.MustGet().Snapshot()
+	plan, governance, err := reviewScoreEligibility(ctx, snapshot, planID, submissionID, reviewerID, engine)
 	if err != nil {
-		return fmt.Errorf("evaluate review governance: %w", err)
+		return err
 	}
-	if !governance.Allowed {
-		return action.Validation("This review cannot be recorded.", map[string]string{"submission_id": governance.Reason}, ctx.FormData)
-	}
-
-	validRecommendation := false
-	for _, candidate := range []string{"strong_yes", "yes", "maybe", "no", "strong_no"} {
-		if recommendation == candidate {
-			validRecommendation = true
-			break
-		}
-	}
-	fieldErrors := map[string]string{}
-	if !validRecommendation {
-		fieldErrors["recommendation"] = "Choose a recommendation."
-	}
-	if len([]rune(comments)) < 20 {
-		fieldErrors["comments"] = "Add at least 20 characters of decision-relevant context."
-	}
-	scores := make(map[string]float64, len(plan.Criteria))
-	for _, criterion := range plan.Criteria {
-		field := "score_" + criterion.ID
-		score, err := strconv.ParseFloat(strings.TrimSpace(ctx.FormData[field]), 64)
-		if err != nil || score < 0 || score > criterion.MaxScore {
-			fieldErrors[field] = fmt.Sprintf("Use a score from 0 to %.0f.", criterion.MaxScore)
-			continue
-		}
-		scores[criterion.ID] = score
-	}
-	if len(fieldErrors) > 0 {
-		return action.Validation("Complete every rubric criterion.", fieldErrors, ctx.FormData)
+	if _, err := parseReviewScoreInput(ctx, plan, recommendation, comments); err != nil {
+		return err
 	}
 
 	created := false
@@ -323,15 +336,19 @@ func scoreSubmission(ctx *action.Context) error {
 		Rule:       governance.Rule,
 		Trace:      strings.Join(governance.Trace, "; "),
 	}, func(state *domain.State) error {
-		currentSubmission, found := state.Submission(submissionID)
-		if !found || state.ReviewerCompanyConflict(reviewer, *currentSubmission) {
-			return fmt.Errorf("reviewer is no longer eligible to score this proposal")
+		currentPlan, _, err := reviewScoreEligibility(ctx, *state, planID, submissionID, reviewerID, engine)
+		if err != nil {
+			return err
+		}
+		currentScores, err := parseReviewScoreInput(ctx, currentPlan, recommendation, comments)
+		if err != nil {
+			return err
 		}
 		now := time.Now().UTC()
 		for index := range state.Evaluations {
 			evaluation := &state.Evaluations[index]
 			if evaluation.PlanID == planID && evaluation.SubmissionID == submissionID && evaluation.ReviewerID == reviewerID && evaluation.Source == "human" {
-				evaluation.Scores = scores
+				evaluation.Scores = currentScores
 				evaluation.Comments = comments
 				evaluation.Recommendation = recommendation
 				evaluation.UpdatedAt = now
@@ -340,7 +357,7 @@ func scoreSubmission(ctx *action.Context) error {
 		}
 		state.Evaluations = append(state.Evaluations, domain.Evaluation{
 			ID: domain.NewID("eval"), PlanID: planID, SubmissionID: submissionID, ReviewerID: reviewerID,
-			Scores: scores, Comments: comments, Recommendation: recommendation, Source: "human", CreatedAt: now, UpdatedAt: now,
+			Scores: currentScores, Comments: comments, Recommendation: recommendation, Source: "human", CreatedAt: now, UpdatedAt: now,
 		})
 		created = true
 		return nil

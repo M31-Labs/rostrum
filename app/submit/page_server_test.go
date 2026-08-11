@@ -1,6 +1,7 @@
 package submit
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -21,6 +22,23 @@ func submissionTestState(t *testing.T) *store.JSONStore {
 	}
 	appstate.Set(workspace)
 	return workspace
+}
+
+type mutateAfterSnapshotStore struct {
+	store.StateStore
+	mutate  func(*domain.State) error
+	mutated bool
+}
+
+func (store *mutateAfterSnapshotStore) Snapshot() domain.State {
+	snapshot := store.StateStore.Snapshot()
+	if !store.mutated {
+		store.mutated = true
+		if err := store.StateStore.Update(store.mutate); err != nil {
+			panic(err)
+		}
+	}
+	return snapshot
 }
 
 func TestSaveDraftCreatesAuditedPrivateDraft(t *testing.T) {
@@ -136,5 +154,58 @@ func TestSubmittingDraftPromotesTheSameAuditedRecord(t *testing.T) {
 	// A confirmation communication audit follows the submission audit.
 	if audit.Action != "submission.draft_submitted" || audit.EntityID != draft.ID {
 		t.Fatalf("promotion audit = %#v, want draft entity %s", audit, draft.ID)
+	}
+}
+
+func TestSubmitProposalRevalidatesTheCurrentFormSchema(t *testing.T) {
+	now := time.Now().UTC()
+	state := domain.Seed(now)
+	state.Forms[0].CloseAt = now.Add(time.Hour)
+	workspace, err := store.Open(":memory:", state)
+	if err != nil {
+		t.Fatalf("open workspace: %v", err)
+	}
+	before := len(workspace.Snapshot().Submissions)
+	appstate.Set(&mutateAfterSnapshotStore{
+		StateStore: workspace,
+		mutate: func(current *domain.State) error {
+			form, found := current.Form("form_cfp_2026")
+			if !found {
+				return errors.New("form disappeared")
+			}
+			for index := range form.Fields {
+				if form.Fields[index].ID == "topics" {
+					form.Fields[index].MaxLength = 8
+					return nil
+				}
+			}
+			return errors.New("topics field disappeared")
+		},
+	})
+
+	err = submitProposal(&action.Context{
+		Request: httptest.NewRequest(http.MethodPost, "/submit/systems-forum-cfp/__actions/submitProposal", nil),
+		FormData: map[string]string{
+			"form_id":    "form_cfp_2026",
+			"title":      "A current schema must win",
+			"abstract":   "This proposal is valid under the first form snapshot but not the current form schema.",
+			"format":     "Talk",
+			"category":   "agents",
+			"level":      "Intermediate",
+			"topics":     "A durable set of useful takeaways.",
+			"first_name": "Current",
+			"last_name":  "Schema",
+			"email":      "current-schema@example.com",
+		},
+	})
+	var result *action.ResultError
+	if !errors.As(err, &result) {
+		t.Fatalf("submitProposal error = %v, want structured validation failure", err)
+	}
+	if result.Result.FieldErrors["topics"] == "" {
+		t.Fatalf("field errors = %#v, want current topics constraint", result.Result.FieldErrors)
+	}
+	if after := len(workspace.Snapshot().Submissions); after != before {
+		t.Fatalf("submissions after stale-schema rejection = %d, want %d", after, before)
 	}
 }

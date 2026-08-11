@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -315,6 +316,19 @@ type Evaluation struct {
 	Source         string             `json:"source"`
 	CreatedAt      time.Time          `json:"createdAt"`
 	UpdatedAt      time.Time          `json:"updatedAt"`
+}
+
+// EvaluationRecommendationKnown reports whether value is one of the durable
+// reviewer recommendation values accepted by the scoring actions. Keeping the
+// check next to the persisted record prevents archive imports from introducing
+// a value the presentation and decision layers cannot interpret.
+func EvaluationRecommendationKnown(value string) bool {
+	switch value {
+	case "strong_yes", "yes", "maybe", "no", "strong_no":
+		return true
+	default:
+		return false
+	}
 }
 
 type Session struct {
@@ -1168,6 +1182,59 @@ func validateReview(state State) error {
 				return fmt.Errorf("review assignments %s and %s are both active for one reviewer/proposal", previous, assignment.ID)
 			}
 			activeAssignments[key] = assignment.ID
+		}
+	}
+	return validateEvaluations(state.Evaluations, plans, submissions, reviewers)
+}
+
+// validateEvaluations makes each persisted score independently safe to load
+// from a JSON/SQLite/Postgres workspace or an imported archive. Historical
+// evaluations may outlive a current roster or assignment, but their durable
+// plan, submission, reviewer, rubric, recommendation, source, and timestamps
+// must remain internally coherent.
+func validateEvaluations(evaluations []Evaluation, plans map[string]ReviewPlan, submissions map[string]bool, reviewers map[string]Reviewer) error {
+	for _, evaluation := range evaluations {
+		if strings.TrimSpace(evaluation.PlanID) == "" || strings.TrimSpace(evaluation.SubmissionID) == "" || strings.TrimSpace(evaluation.ReviewerID) == "" {
+			return fmt.Errorf("evaluation %s is incomplete", evaluation.ID)
+		}
+		plan, found := plans[evaluation.PlanID]
+		if !found {
+			return fmt.Errorf("evaluation %s references unknown review plan %s", evaluation.ID, evaluation.PlanID)
+		}
+		if !submissions[evaluation.SubmissionID] {
+			return fmt.Errorf("evaluation %s references unknown submission %s", evaluation.ID, evaluation.SubmissionID)
+		}
+		reviewer, found := reviewers[evaluation.ReviewerID]
+		if !found {
+			return fmt.Errorf("evaluation %s references unknown reviewer %s", evaluation.ID, evaluation.ReviewerID)
+		}
+		if evaluation.Source != "human" {
+			return fmt.Errorf("evaluation %s has an unknown source %q", evaluation.ID, evaluation.Source)
+		}
+		if reviewer.Kind != "human" {
+			return fmt.Errorf("human evaluation %s references non-human reviewer %s", evaluation.ID, evaluation.ReviewerID)
+		}
+		if !EvaluationRecommendationKnown(evaluation.Recommendation) {
+			return fmt.Errorf("evaluation %s has an unknown recommendation %q", evaluation.ID, evaluation.Recommendation)
+		}
+		if evaluation.CreatedAt.IsZero() || evaluation.UpdatedAt.IsZero() || evaluation.UpdatedAt.Before(evaluation.CreatedAt) {
+			return fmt.Errorf("evaluation %s has invalid timestamps", evaluation.ID)
+		}
+		criteria := make(map[string]RubricCriterion, len(plan.Criteria))
+		for _, criterion := range plan.Criteria {
+			criteria[criterion.ID] = criterion
+		}
+		if len(evaluation.Scores) != len(criteria) {
+			return fmt.Errorf("evaluation %s scores do not cover the %s rubric", evaluation.ID, plan.Name)
+		}
+		for criterionID, score := range evaluation.Scores {
+			criterion, found := criteria[criterionID]
+			if !found {
+				return fmt.Errorf("evaluation %s has a score for unknown criterion %s", evaluation.ID, criterionID)
+			}
+			if math.IsNaN(score) || math.IsInf(score, 0) || score < 0 || score > criterion.MaxScore {
+				return fmt.Errorf("evaluation %s has invalid score for criterion %s", evaluation.ID, criterionID)
+			}
 		}
 	}
 	return nil

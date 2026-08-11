@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -266,5 +267,37 @@ func TestStateValidateRequiresWithdrawalTimestamp(t *testing.T) {
 	state.Submissions[0].WithdrawnAt = time.Time{}
 	if err := state.Validate(); err == nil {
 		t.Fatal("State.Validate accepted a withdrawn submission without a timestamp")
+	}
+}
+
+func TestStateValidateRejectsInvalidEvaluations(t *testing.T) {
+	now := time.Date(2026, time.August, 10, 12, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name   string
+		mutate func(*Evaluation)
+	}{
+		{name: "unknown plan", mutate: func(evaluation *Evaluation) { evaluation.PlanID = "plan_missing" }},
+		{name: "unknown submission", mutate: func(evaluation *Evaluation) { evaluation.SubmissionID = "sub_missing" }},
+		{name: "unknown reviewer", mutate: func(evaluation *Evaluation) { evaluation.ReviewerID = "rev_missing" }},
+		{name: "missing criterion", mutate: func(evaluation *Evaluation) { delete(evaluation.Scores, "relevance") }},
+		{name: "unknown criterion", mutate: func(evaluation *Evaluation) {
+			delete(evaluation.Scores, "relevance")
+			evaluation.Scores["invented"] = 5
+		}},
+		{name: "out of range score", mutate: func(evaluation *Evaluation) { evaluation.Scores["relevance"] = 6 }},
+		{name: "not a number score", mutate: func(evaluation *Evaluation) { evaluation.Scores["relevance"] = math.NaN() }},
+		{name: "unknown source", mutate: func(evaluation *Evaluation) { evaluation.Source = "manual" }},
+		{name: "unknown recommendation", mutate: func(evaluation *Evaluation) { evaluation.Recommendation = "approve" }},
+		{name: "missing timestamp", mutate: func(evaluation *Evaluation) { evaluation.CreatedAt = time.Time{} }},
+		{name: "reversed timestamps", mutate: func(evaluation *Evaluation) { evaluation.UpdatedAt = evaluation.CreatedAt.Add(-time.Second) }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			state := Seed(now)
+			test.mutate(&state.Evaluations[0])
+			if err := state.Validate(); err == nil {
+				t.Fatal("State.Validate accepted an invalid evaluation")
+			}
+		})
 	}
 }

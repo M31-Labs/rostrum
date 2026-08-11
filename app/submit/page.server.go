@@ -256,30 +256,15 @@ func submitProposal(ctx *action.Context) error {
 	}
 
 	snapshot := appstate.MustGet().Snapshot()
-	form, found := snapshot.Form(ctx.FormData["form_id"])
-	if !found {
-		return fmt.Errorf("submission form not found")
-	}
-
-	if message, ok := rejectUnknownFields(ctx.FormData, form.Fields); !ok {
-		return action.Validation(message, map[string]string{"form": message}, ctx.FormData)
-	}
-
 	engine, err := decisionrules.Shared()
 	if err != nil {
 		return err
 	}
-	visibleFields, visibilityTrace, err := visibleSchemaFields(engine, form, ctx.FormData)
+	validated, err := validateSubmittedProposal(snapshot, ctx.FormData["form_id"], ctx.FormData, engine, time.Now().UTC())
 	if err != nil {
 		return err
 	}
-	fieldErrors := validateSchemaFields(form.Fields, snapshot, ctx.FormData, visibleFields)
-	if !strings.Contains(ctx.FormData["email"], "@") {
-		fieldErrors["email"] = "Enter a valid email address."
-	}
-	if len(fieldErrors) > 0 {
-		return action.Validation("Correct the highlighted fields and submit again.", fieldErrors, ctx.FormData)
-	}
+	form := validated.Form
 	draftID := strings.TrimSpace(ctx.FormData["draft_id"])
 	plannedSubmissionID := draftID
 	if plannedSubmissionID == "" {
@@ -288,6 +273,7 @@ func submitProposal(ctx *action.Context) error {
 		plannedSubmissionID = domain.NewID("sub")
 	}
 	draftSpeakerID := ""
+	found := false
 	if draftID != "" {
 		_, draftSpeakerID, found = accessibleDraft(snapshot, form.Slug, draftID, ctx.FormData["draft_key"])
 		if !found {
@@ -298,14 +284,11 @@ func submitProposal(ctx *action.Context) error {
 		}
 	}
 
-	decision, err := engine.Route(ctx.FormData["category"], ctx.FormData["format"], ctx.FormData["level"])
-	if err != nil {
-		return err
-	}
 	speakerID := ""
 	submissionID := ""
 	speakerEmail := ""
 	speakerName := ""
+	submissionQueue := ""
 	title := strings.TrimSpace(ctx.FormData["title"])
 	confirmationID := domain.NewID("comm")
 	auditAction := "submission.created"
@@ -321,19 +304,15 @@ func submitProposal(ctx *action.Context) error {
 		EntityID:   plannedSubmissionID,
 		Summary:    auditSummary,
 		Origin:     "public-submission",
-		Rule:       decision.Rule,
-		Trace:      strings.Join(append(append([]string(nil), decision.Trace...), visibilityTrace...), " | "),
+		Rule:       validated.Decision.Rule,
+		Trace:      strings.Join(append(append([]string(nil), validated.Decision.Trace...), validated.VisibilityTrace...), " | "),
 	}, func(state *domain.State) error {
-		form, found := state.Form(ctx.FormData["form_id"])
-		if !found {
-			return fmt.Errorf("submission form not found")
+		current, err := validateSubmittedProposal(*state, ctx.FormData["form_id"], ctx.FormData, engine, time.Now().UTC())
+		if err != nil {
+			return err
 		}
-		if form.Status != "open" || time.Now().After(form.CloseAt) {
-			return action.Validation("This call for speakers is closed.", map[string]string{"form": "The submission deadline has passed."}, ctx.FormData)
-		}
-		if _, found := state.Category(ctx.FormData["category"]); !found {
-			return action.Validation("Choose a valid category.", map[string]string{"category": "Unknown category."}, ctx.FormData)
-		}
+		form = current.Form
+		submissionQueue = current.Decision.Queue
 		now := time.Now().UTC()
 		email := strings.ToLower(strings.TrimSpace(ctx.FormData["email"]))
 		for index := range state.Speakers {
@@ -365,11 +344,11 @@ func submitProposal(ctx *action.Context) error {
 				return action.Validation("This draft is no longer available.", map[string]string{"form": "Please start a new draft."}, ctx.FormData)
 			}
 			submissionID = draft.ID
-			applySubmittedSubmission(draft, state.Event.ID, form.ID, speakerID, ctx.FormData, decision, visibilityTrace, now, form.Fields, visibleFields)
+			applySubmittedSubmission(draft, state.Event.ID, form.ID, speakerID, ctx.FormData, current.Decision, current.VisibilityTrace, now, form.Fields, current.VisibleFields)
 		} else {
 			submissionID = plannedSubmissionID
 			submission := domain.Submission{ID: submissionID}
-			applySubmittedSubmission(&submission, state.Event.ID, form.ID, speakerID, ctx.FormData, decision, visibilityTrace, now, form.Fields, visibleFields)
+			applySubmittedSubmission(&submission, state.Event.ID, form.ID, speakerID, ctx.FormData, current.Decision, current.VisibilityTrace, now, form.Fields, current.VisibleFields)
 			state.Submissions = append(state.Submissions, submission)
 		}
 		// Administrator notification rules enqueue only stable IDs while this
@@ -424,7 +403,7 @@ func submitProposal(ctx *action.Context) error {
 	}
 
 	session.AddFlash(ctx.Request, "notice", "Proposal received. We sent a confirmation and opened your portal.")
-	live.Broadcast("submission:created", map[string]string{"submission": submissionID, "speaker": speakerID, "queue": decision.Queue})
+	live.Broadcast("submission:created", map[string]string{"submission": submissionID, "speaker": speakerID, "queue": submissionQueue})
 	live.Broadcast("communication:queued", map[string]string{"speaker": speakerID})
 	if form.RedirectToPortal {
 		// FB-5: land on the customizable success page first. Its meta
@@ -436,6 +415,54 @@ func submitProposal(ctx *action.Context) error {
 		actionflow.Redirect(ctx, "/portal/"+speakerID+"?submitted=1")
 	}
 	return nil
+}
+
+// submittedProposalValidation is the complete, current form interpretation
+// used to persist a public submission. Re-running it inside UpdateAudit keeps
+// a concurrently edited CFP from committing answers, visibility, or routing
+// decisions computed from an earlier schema snapshot.
+type submittedProposalValidation struct {
+	Form            domain.SubmissionForm
+	Decision        decisionrules.RoutingDecision
+	VisibilityTrace []string
+	VisibleFields   map[string]bool
+}
+
+func validateSubmittedProposal(state domain.State, formID string, formData map[string]string, engine *decisionrules.Engine, now time.Time) (submittedProposalValidation, error) {
+	form, found := state.Form(formID)
+	if !found {
+		return submittedProposalValidation{}, fmt.Errorf("submission form not found")
+	}
+	if form.Status != "open" || now.After(form.CloseAt) {
+		return submittedProposalValidation{}, action.Validation("This call for speakers is closed.", map[string]string{"form": "The submission deadline has passed."}, formData)
+	}
+	if message, ok := rejectUnknownFields(formData, form.Fields); !ok {
+		return submittedProposalValidation{}, action.Validation(message, map[string]string{"form": message}, formData)
+	}
+	visibleFields, visibilityTrace, err := visibleSchemaFields(engine, form, formData)
+	if err != nil {
+		return submittedProposalValidation{}, err
+	}
+	fieldErrors := validateSchemaFields(form.Fields, state, formData, visibleFields)
+	if !strings.Contains(formData["email"], "@") {
+		fieldErrors["email"] = "Enter a valid email address."
+	}
+	if _, found := state.Category(formData["category"]); !found {
+		fieldErrors["category"] = "Unknown category."
+	}
+	if len(fieldErrors) > 0 {
+		return submittedProposalValidation{}, action.Validation("Correct the highlighted fields and submit again.", fieldErrors, formData)
+	}
+	decision, err := engine.Route(formData["category"], formData["format"], formData["level"])
+	if err != nil {
+		return submittedProposalValidation{}, err
+	}
+	return submittedProposalValidation{
+		Form:            *form,
+		Decision:        decision,
+		VisibilityTrace: visibilityTrace,
+		VisibleFields:   visibleFields,
+	}, nil
 }
 
 // thanksRedirectURL builds the /submit/{slug}/thanks target submitProposal

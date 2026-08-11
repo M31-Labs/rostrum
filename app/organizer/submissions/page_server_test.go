@@ -42,12 +42,17 @@ func testWorkspaceState() domain.State {
 		ReviewPlans: []domain.ReviewPlan{
 			{
 				ID: "plan_test", Name: "Test review plan", Round: 1, Status: "open", DueAt: now.Add(48 * time.Hour), SubmissionIDs: []string{"sub_ada"}, EvaluationsPerItem: 2,
-				Criteria: []domain.RubricCriterion{{ID: "fit", Name: "Program fit", Weight: 100, MaxScore: 5}},
+				ReviewerIDs: []string{"reviewer_1", "reviewer_2"},
+				Criteria:    []domain.RubricCriterion{{ID: "fit", Name: "Program fit", Weight: 100, MaxScore: 5}},
 			},
 		},
+		Reviewers: []domain.Reviewer{
+			{ID: "reviewer_1", Name: "Reviewer One", Email: "reviewer1@example.com", Kind: "human"},
+			{ID: "reviewer_2", Name: "Reviewer Two", Email: "reviewer2@example.com", Kind: "human"},
+		},
 		Evaluations: []domain.Evaluation{
-			{ID: "eval_ada", PlanID: "plan_test", SubmissionID: "sub_ada", ReviewerID: "reviewer_1", Source: "human", CreatedAt: now, UpdatedAt: now},
-			{ID: "eval_ben", PlanID: "plan_test", SubmissionID: "sub_ada", ReviewerID: "reviewer_2", Source: "human", CreatedAt: now, UpdatedAt: now},
+			{ID: "eval_ada", PlanID: "plan_test", SubmissionID: "sub_ada", ReviewerID: "reviewer_1", Scores: map[string]float64{"fit": 5}, Comments: "The session has strong program fit and clear evidence.", Recommendation: "yes", Source: "human", CreatedAt: now, UpdatedAt: now},
+			{ID: "eval_ben", PlanID: "plan_test", SubmissionID: "sub_ada", ReviewerID: "reviewer_2", Scores: map[string]float64{"fit": 4}, Comments: "The proposal gives attendees a concrete technical outcome.", Recommendation: "yes", Source: "human", CreatedAt: now, UpdatedAt: now},
 		},
 		Sessions: []domain.Session{
 			{

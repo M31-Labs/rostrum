@@ -49,6 +49,32 @@ func TestEnvelopeRejectsTamperingAndPreservesCurrentIdentity(t *testing.T) {
 	}
 }
 
+func TestDecodeRejectsChecksummedInvalidEvaluation(t *testing.T) {
+	state := domain.Seed(time.Date(2026, time.August, 10, 12, 0, 0, 0, time.UTC))
+	data, err := Marshal(state)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+
+	var envelope Envelope
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		t.Fatal(err)
+	}
+	delete(envelope.State.Evaluations[0].Scores, "relevance")
+	encoded, err := json.Marshal(envelope.State)
+	if err != nil {
+		t.Fatal(err)
+	}
+	envelope.SHA256 = stateHash(encoded)
+	invalid, err := json.Marshal(envelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Decode(invalid); err == nil {
+		t.Fatal("Decode accepted a checksummed import with an incomplete evaluation rubric")
+	}
+}
+
 func TestRebaseUploadPathsUsesOnlyGeneratedBasenames(t *testing.T) {
 	state := domain.Seed(time.Now().UTC())
 	state.TaskCompletions = append(state.TaskCompletions, domain.TaskCompletion{
