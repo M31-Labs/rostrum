@@ -194,6 +194,13 @@ func (log *Log) Verify() error {
 	return err
 }
 
+// SegmentFiles returns the retained segment paths, oldest first and with the
+// active file last. Archive export uses it to include the complete independent
+// ledger without guessing at the rotation naming convention.
+func SegmentFiles(path string) ([]string, error) {
+	return segmentPaths(path)
+}
+
 func (log *Log) Close() error {
 	if log == nil {
 		return nil
