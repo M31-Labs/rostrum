@@ -13,28 +13,30 @@ import (
 const CurrentSchemaVersion = 1
 
 type State struct {
-	SchemaVersion   int              `json:"schemaVersion"`
-	Event           Event            `json:"event"`
-	Forms           []SubmissionForm `json:"forms"`
-	Speakers        []Speaker        `json:"speakers"`
-	Submissions     []Submission     `json:"submissions"`
-	Reviewers       []Reviewer       `json:"reviewers"`
-	ReviewPlans     []ReviewPlan     `json:"reviewPlans"`
-	Evaluations     []Evaluation     `json:"evaluations"`
-	Sessions        []Session        `json:"sessions"`
-	Tasks           []Task           `json:"tasks"`
-	TaskCompletions []TaskCompletion `json:"taskCompletions"`
-	Resources       []Resource       `json:"resources"`
-	EmailTemplates  []EmailTemplate  `json:"emailTemplates"`
-	Communications  []Communication  `json:"communications"`
-	Integrations    []Integration    `json:"integrations"`
-	SyncRuns        []SyncRun        `json:"syncRuns"`
-	Principals      []Principal      `json:"principals"`
-	AuthMagicLinks  []AuthMagicLink  `json:"authMagicLinks"`
-	AuthPasskeys    []AuthPasskey    `json:"authPasskeys"`
-	AuditEvents     []AuditEvent     `json:"auditEvents"`
-	SyncOutbox      []SyncOutboxItem `json:"syncOutbox"`
-	UpdatedAt       time.Time        `json:"updatedAt"`
+	SchemaVersion     int                     `json:"schemaVersion"`
+	Event             Event                   `json:"event"`
+	Forms             []SubmissionForm        `json:"forms"`
+	Speakers          []Speaker               `json:"speakers"`
+	Submissions       []Submission            `json:"submissions"`
+	Reviewers         []Reviewer              `json:"reviewers"`
+	ReviewPlans       []ReviewPlan            `json:"reviewPlans"`
+	Evaluations       []Evaluation            `json:"evaluations"`
+	Sessions          []Session               `json:"sessions"`
+	Tasks             []Task                  `json:"tasks"`
+	TaskCompletions   []TaskCompletion        `json:"taskCompletions"`
+	Resources         []Resource              `json:"resources"`
+	EmailTemplates    []EmailTemplate         `json:"emailTemplates"`
+	TemplateRevisions []EmailTemplateRevision `json:"templateRevisions"`
+	NotificationRules []NotificationRule      `json:"notificationRules"`
+	Communications    []Communication         `json:"communications"`
+	Integrations      []Integration           `json:"integrations"`
+	SyncRuns          []SyncRun               `json:"syncRuns"`
+	Principals        []Principal             `json:"principals"`
+	AuthMagicLinks    []AuthMagicLink         `json:"authMagicLinks"`
+	AuthPasskeys      []AuthPasskey           `json:"authPasskeys"`
+	AuditEvents       []AuditEvent            `json:"auditEvents"`
+	SyncOutbox        []SyncOutboxItem        `json:"syncOutbox"`
+	UpdatedAt         time.Time               `json:"updatedAt"`
 }
 
 type Event struct {
@@ -151,20 +153,27 @@ func (form SubmissionForm) SuccessPageBody() string {
 }
 
 type Speaker struct {
-	ID          string    `json:"id"`
-	FirstName   string    `json:"firstName"`
-	LastName    string    `json:"lastName"`
-	Email       string    `json:"email"`
-	Pronouns    string    `json:"pronouns"`
-	Role        string    `json:"role"`
-	Company     string    `json:"company"`
-	Biography   string    `json:"biography"`
-	HeadshotURL string    `json:"headshotUrl"`
-	LinkedInURL string    `json:"linkedInUrl"`
-	WebsiteURL  string    `json:"websiteUrl"`
-	City        string    `json:"city"`
-	CreatedAt   time.Time `json:"createdAt"`
-	UpdatedAt   time.Time `json:"updatedAt"`
+	ID          string `json:"id"`
+	FirstName   string `json:"firstName"`
+	LastName    string `json:"lastName"`
+	Email       string `json:"email"`
+	Pronouns    string `json:"pronouns"`
+	Role        string `json:"role"`
+	Company     string `json:"company"`
+	Biography   string `json:"biography"`
+	HeadshotURL string `json:"headshotUrl"`
+	LinkedInURL string `json:"linkedInUrl"`
+	WebsiteURL  string `json:"websiteUrl"`
+	City        string `json:"city"`
+	// EmailOptOut prevents non-essential reminder and administrator-triggered
+	// mail from being delivered to this speaker. Transactional confirmation
+	// and account-recovery paths remain explicit product flows outside the
+	// scheduler; this preference only governs the durable communications
+	// outbox.
+	EmailOptOut   bool      `json:"emailOptOut"`
+	EmailOptOutAt time.Time `json:"emailOptOutAt"`
+	CreatedAt     time.Time `json:"createdAt"`
+	UpdatedAt     time.Time `json:"updatedAt"`
 }
 
 func (speaker Speaker) Name() string {
@@ -518,18 +527,80 @@ type EmailTemplate struct {
 	System         bool   `json:"system"`
 }
 
-type Communication struct {
-	ID           string    `json:"id"`
-	TemplateID   string    `json:"templateId"`
-	SpeakerID    string    `json:"speakerId"`
-	SessionID    string    `json:"sessionId"`
-	Subject      string    `json:"subject"`
-	Status       string    `json:"status"`
-	Provider     string    `json:"provider"`
-	ScheduledFor time.Time `json:"scheduledFor"`
-	SentAt       time.Time `json:"sentAt"`
-	Error        string    `json:"error"`
+// EmailTemplateRevision is an immutable copy of a template's content at a
+// successful organizer edit. Keeping revisions in canonical state lets a
+// historical Communication retain its stable TemplateID while operators can
+// still inspect the exact prior wording that was approved for use.
+type EmailTemplateRevision struct {
+	ID             string    `json:"id"`
+	TemplateID     string    `json:"templateId"`
+	Revision       int       `json:"revision"`
+	Name           string    `json:"name"`
+	Subject        string    `json:"subject"`
+	Body           string    `json:"body"`
+	ReplyTo        string    `json:"replyTo"`
+	AttachCalendar bool      `json:"attachCalendar"`
+	Actor          string    `json:"actor"`
+	CreatedAt      time.Time `json:"createdAt"`
 }
+
+// NotificationRule describes an administrator-facing event trigger. Its
+// recipients are direct operational addresses rather than Speaker records,
+// so administrative notification delivery can remain wholly independent of
+// the public speaker workflow.
+type NotificationRule struct {
+	ID              string   `json:"id"`
+	Name            string   `json:"name"`
+	Trigger         string   `json:"trigger"`
+	TemplateID      string   `json:"templateId"`
+	RecipientEmails []string `json:"recipientEmails"`
+	Enabled         bool     `json:"enabled"`
+	RetryLimit      int      `json:"retryLimit"`
+	SuppressMinutes int      `json:"suppressMinutes"`
+}
+
+type Communication struct {
+	ID                 string    `json:"id"`
+	TemplateID         string    `json:"templateId"`
+	SpeakerID          string    `json:"speakerId"`
+	SessionID          string    `json:"sessionId"`
+	SubmissionID       string    `json:"submissionId"`
+	TaskID             string    `json:"taskId"`
+	NotificationRuleID string    `json:"notificationRuleId"`
+	RecipientEmail     string    `json:"recipientEmail"`
+	RecipientName      string    `json:"recipientName"`
+	Subject            string    `json:"subject"`
+	Status             string    `json:"status"`
+	Provider           string    `json:"provider"`
+	DeliveryMode       string    `json:"deliveryMode"`
+	Trigger            string    `json:"trigger"`
+	IdempotencyKey     string    `json:"idempotencyKey"`
+	ScheduledFor       time.Time `json:"scheduledFor"`
+	NextAttemptAt      time.Time `json:"nextAttemptAt"`
+	LeaseUntil         time.Time `json:"leaseUntil"`
+	LastAttemptAt      time.Time `json:"lastAttemptAt"`
+	SentAt             time.Time `json:"sentAt"`
+	CancelledAt        time.Time `json:"cancelledAt"`
+	SuppressedAt       time.Time `json:"suppressedAt"`
+	CreatedAt          time.Time `json:"createdAt"`
+	AttemptCount       int       `json:"attemptCount"`
+	MaxAttempts        int       `json:"maxAttempts"`
+	Error              string    `json:"error"`
+}
+
+const (
+	CommunicationQueued     = "queued"
+	CommunicationScheduled  = "scheduled"
+	CommunicationSending    = "sending"
+	CommunicationRetrying   = "retrying"
+	CommunicationSent       = "sent"
+	CommunicationFailed     = "failed"
+	CommunicationCancelled  = "cancelled"
+	CommunicationSuppressed = "suppressed"
+
+	DeliveryAutomatic = "automatic"
+	DeliveryHandoff   = "handoff"
+)
 
 // AuditMeta is the small, secret-free description a mutating operation
 // supplies to the durable store. The store appends an AuditEvent in the same
@@ -856,6 +927,9 @@ func (state State) Validate() error {
 	if err := validateSubmissionForms(state); err != nil {
 		return err
 	}
+	if err := validateCommunications(state); err != nil {
+		return err
+	}
 	for _, submission := range state.Submissions {
 		if !submissionStatusKnown(submission.Status) {
 			return fmt.Errorf("submission %s has an unknown status %q", submission.ID, submission.Status)
@@ -934,6 +1008,64 @@ func validateSubmissionForms(state State) error {
 	return nil
 }
 
+func validateCommunications(state State) error {
+	templates := map[string]bool{}
+	for _, template := range state.EmailTemplates {
+		if strings.TrimSpace(template.ID) == "" || strings.TrimSpace(template.Name) == "" || strings.TrimSpace(template.Audience) == "" {
+			return fmt.Errorf("email template %s is incomplete", template.ID)
+		}
+		templates[template.ID] = true
+	}
+	keys := map[string]string{}
+	for _, item := range state.Communications {
+		if strings.TrimSpace(item.TemplateID) == "" || !templates[item.TemplateID] {
+			return fmt.Errorf("communication %s has an unknown template %s", item.ID, item.TemplateID)
+		}
+		if strings.TrimSpace(item.SpeakerID) == "" && strings.TrimSpace(item.RecipientEmail) == "" {
+			return fmt.Errorf("communication %s has no recipient", item.ID)
+		}
+		if !communicationStatusKnown(item.Status) {
+			return fmt.Errorf("communication %s has an unknown status %q", item.ID, item.Status)
+		}
+		if item.DeliveryMode != "" && item.DeliveryMode != DeliveryAutomatic && item.DeliveryMode != DeliveryHandoff {
+			return fmt.Errorf("communication %s has an unknown delivery mode %q", item.ID, item.DeliveryMode)
+		}
+		if key := strings.TrimSpace(item.IdempotencyKey); key != "" {
+			if previous, exists := keys[key]; exists {
+				return fmt.Errorf("communications %s and %s share idempotency key %s", previous, item.ID, key)
+			}
+			keys[key] = item.ID
+		}
+	}
+	for _, rule := range state.NotificationRules {
+		if strings.TrimSpace(rule.ID) == "" || strings.TrimSpace(rule.Name) == "" || strings.TrimSpace(rule.Trigger) == "" || !templates[rule.TemplateID] {
+			return fmt.Errorf("notification rule %s is incomplete or references an unknown template", rule.ID)
+		}
+		if rule.RetryLimit < 0 || rule.RetryLimit > 10 || rule.SuppressMinutes < 0 || rule.SuppressMinutes > 60*24*365 {
+			return fmt.Errorf("notification rule %s has invalid delivery limits", rule.ID)
+		}
+		if rule.Enabled && len(rule.RecipientEmails) == 0 {
+			return fmt.Errorf("enabled notification rule %s has no recipients", rule.ID)
+		}
+		for _, recipient := range rule.RecipientEmails {
+			if !strings.Contains(strings.TrimSpace(recipient), "@") {
+				return fmt.Errorf("notification rule %s has an invalid recipient", rule.ID)
+			}
+		}
+	}
+	return nil
+}
+
+func communicationStatusKnown(status string) bool {
+	switch status {
+	case CommunicationQueued, CommunicationScheduled, CommunicationSending, CommunicationRetrying,
+		CommunicationSent, CommunicationFailed, CommunicationCancelled, CommunicationSuppressed:
+		return true
+	default:
+		return false
+	}
+}
+
 func submissionStatusKnown(status string) bool {
 	for _, candidate := range SubmissionStatuses {
 		if candidate == status {
@@ -960,6 +1092,8 @@ func validateUniqueIDs(state State) error {
 		{"task completion", collectIDs(len(state.TaskCompletions), func(i int) string { return state.TaskCompletions[i].ID })},
 		{"resource", collectIDs(len(state.Resources), func(i int) string { return state.Resources[i].ID })},
 		{"email template", collectIDs(len(state.EmailTemplates), func(i int) string { return state.EmailTemplates[i].ID })},
+		{"template revision", collectIDs(len(state.TemplateRevisions), func(i int) string { return state.TemplateRevisions[i].ID })},
+		{"notification rule", collectIDs(len(state.NotificationRules), func(i int) string { return state.NotificationRules[i].ID })},
 		{"communication", collectIDs(len(state.Communications), func(i int) string { return state.Communications[i].ID })},
 		{"audit event", collectIDs(len(state.AuditEvents), func(i int) string { return state.AuditEvents[i].ID })},
 		{"sync outbox item", collectIDs(len(state.SyncOutbox), func(i int) string { return state.SyncOutbox[i].ID })},

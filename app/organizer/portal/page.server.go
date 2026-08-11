@@ -13,6 +13,7 @@ import (
 
 	"github.com/m31-labs/rostrum/internal/actionflow"
 	"github.com/m31-labs/rostrum/internal/appstate"
+	delivery "github.com/m31-labs/rostrum/internal/communications"
 	"github.com/m31-labs/rostrum/internal/domain"
 	"github.com/m31-labs/rostrum/internal/live"
 	"github.com/m31-labs/rostrum/internal/present"
@@ -101,6 +102,7 @@ func approveTask(ctx *action.Context) error {
 		}
 		completion.Status = domain.TaskApproved
 		completion.UpdatedAt = time.Now().UTC()
+		delivery.EnqueueNotificationRules(state, delivery.Trigger{Name: "task.approved", TaskID: taskID, SpeakerID: speakerID}, completion.UpdatedAt)
 		return nil
 	}); err != nil {
 		if staged != nil {

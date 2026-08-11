@@ -2,10 +2,12 @@ package present
 
 import (
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/m31-labs/rostrum/internal/domain"
+	"github.com/m31-labs/rostrum/internal/mailtemplate"
 )
 
 // Communications renders the communications workspace: the template
@@ -43,12 +45,16 @@ func Communications(state domain.State, templateID string, recipientID ...string
 			className += " active"
 		}
 		templates = append(templates, map[string]any{
-			"id":       template.ID,
-			"name":     template.Name,
-			"audience": StatusLabel(template.Audience),
-			"subject":  template.Subject,
-			"calendar": template.AttachCalendar,
-			"class":    className,
+			"id":         template.ID,
+			"name":       template.Name,
+			"audience":   StatusLabel(template.Audience),
+			"audienceID": template.Audience,
+			"subject":    template.Subject,
+			"body":       template.Body,
+			"replyTo":    template.ReplyTo,
+			"calendar":   template.AttachCalendar,
+			"system":     template.System,
+			"class":      className,
 		})
 	}
 
@@ -63,14 +69,8 @@ func Communications(state domain.State, templateID string, recipientID ...string
 	gmail := "https://mail.google.com/mail/?view=cm&fs=1&to=" + url.QueryEscape(sampleSpeaker.Email) + "&su=" + url.QueryEscape(subject) + "&body=" + url.QueryEscape(body)
 	outlook := "https://outlook.office.com/mail/deeplink/compose?to=" + url.QueryEscape(sampleSpeaker.Email) + "&subject=" + url.QueryEscape(subject) + "&body=" + url.QueryEscape(body)
 
-	// TODO(reminders): tick queued communications. A background scheduler
-	// belongs upstream of this view: promote each "queued" row past its
-	// ScheduledFor to "sent" once its window arrives (a gmail/outlook
-	// hand-off, or a reminder template's row seeded by
-	// internal/domain/seed.go). Out of scope for this change; this view
-	// only renders whatever status the store already carries.
 	outbox := make([]map[string]any, 0, len(state.Communications))
-	queued, sent := 0, 0
+	queued, sent, failed, suppressed := 0, 0, 0, 0
 	for index := len(state.Communications) - 1; index >= 0; index-- {
 		item := state.Communications[index]
 		when := item.ScheduledFor
@@ -83,17 +83,32 @@ func Communications(state domain.State, templateID string, recipientID ...string
 			// neither pill, but still shows its attempt time rather than
 			// a stale ScheduledFor.
 			when = item.SentAt
+			failed++
+		case domain.CommunicationSuppressed:
+			suppressed++
+			when = item.SuppressedAt
 		default:
 			queued++
 		}
+		recipient := strings.TrimSpace(item.RecipientEmail)
+		if recipient == "" {
+			recipient = SpeakerName(state, item.SpeakerID)
+		}
+		if recipient == "" {
+			recipient = "Unavailable recipient"
+		}
+		canCancel := item.Status == domain.CommunicationQueued || item.Status == domain.CommunicationScheduled || item.Status == domain.CommunicationRetrying
 		outbox = append(outbox, map[string]any{
-			"id":       item.ID,
-			"subject":  item.Subject,
-			"speaker":  SpeakerName(state, item.SpeakerID),
-			"status":   StatusLabel(item.Status),
-			"tone":     StatusTone(item.Status),
-			"provider": item.Provider,
-			"when":     DateTime(when),
+			"id":        item.ID,
+			"subject":   item.Subject,
+			"speaker":   recipient,
+			"status":    StatusLabel(item.Status),
+			"tone":      StatusTone(item.Status),
+			"provider":  item.Provider,
+			"when":      DateTime(when),
+			"attempts":  item.AttemptCount,
+			"trigger":   item.Trigger,
+			"canCancel": canCancel,
 		})
 	}
 
@@ -111,14 +126,19 @@ func Communications(state domain.State, templateID string, recipientID ...string
 		})
 	}
 
+	revisions := templateRevisions(state, selected.ID)
+	rules := notificationRuleRows(state)
 	return map[string]any{
-		"section":    "communications",
-		"demoMode":   DemoMode(),
-		"workspace":  WorkspaceIdentity(state),
-		"templates":  templates,
-		"recipients": recipients,
-		"outbox":     outbox,
-		"counts":     map[string]any{"sent": sent, "queued": queued, "templates": len(templates)},
+		"section":     "communications",
+		"demoMode":    DemoMode(),
+		"workspace":   WorkspaceIdentity(state),
+		"templates":   templates,
+		"recipients":  recipients,
+		"outbox":      outbox,
+		"counts":      map[string]any{"sent": sent, "queued": queued, "failed": failed, "suppressed": suppressed, "templates": len(templates)},
+		"revisions":   revisions,
+		"rules":       rules,
+		"mergeFields": mailtemplate.Fields(),
 		"preview": map[string]any{
 			"id":          selected.ID,
 			"name":        selected.Name,
@@ -132,8 +152,41 @@ func Communications(state domain.State, templateID string, recipientID ...string
 			"gmailURL":    gmail,
 			"outlookURL":  outlook,
 			"calendarURL": "/calendar/" + sampleSpeaker.ID + ".ics",
+			"audience":    selected.Audience,
+			"bodySource":  selected.Body,
+			"system":      selected.System,
 		},
 	}
+}
+
+func templateRevisions(state domain.State, templateID string) []map[string]any {
+	rows := make([]domain.EmailTemplateRevision, 0)
+	for _, revision := range state.TemplateRevisions {
+		if revision.TemplateID == templateID {
+			rows = append(rows, revision)
+		}
+	}
+	sort.Slice(rows, func(i, j int) bool { return rows[i].Revision > rows[j].Revision })
+	result := make([]map[string]any, 0, len(rows))
+	for _, revision := range rows {
+		result = append(result, map[string]any{
+			"id": revision.ID, "revision": revision.Revision, "actor": revision.Actor,
+			"when": DateTime(revision.CreatedAt), "subject": revision.Subject,
+		})
+	}
+	return result
+}
+
+func notificationRuleRows(state domain.State) []map[string]any {
+	rows := make([]map[string]any, 0, len(state.NotificationRules))
+	for _, rule := range state.NotificationRules {
+		rows = append(rows, map[string]any{
+			"id": rule.ID, "name": rule.Name, "trigger": rule.Trigger, "templateID": rule.TemplateID,
+			"recipients": strings.Join(rule.RecipientEmails, ", "), "enabled": rule.Enabled,
+			"retryLimit": rule.RetryLimit, "suppressMinutes": rule.SuppressMinutes,
+		})
+	}
+	return rows
 }
 
 // selectRecipient resolves the sample speaker for the preview pane: the
@@ -180,6 +233,14 @@ func RecipientSession(state domain.State, speakerID string) (domain.Session, boo
 // composes the exact text the preview pane already renders, instead of
 // duplicating the merge-field map at each call site.
 func RenderCommunication(state domain.State, template domain.EmailTemplate, speaker domain.Speaker, item domain.Session) (string, string) {
+	return RenderCommunicationContext(state, template, speaker, item, domain.Submission{}, domain.Task{})
+}
+
+// RenderCommunicationContext is the deterministic merge engine shared by
+// previews, manual messages, reminders, and notification-triggered outbox
+// work. Its inputs are canonical records rather than request values, so a
+// persisted Communication can be safely retried after a process restart.
+func RenderCommunicationContext(state domain.State, template domain.EmailTemplate, speaker domain.Speaker, item domain.Session, submission domain.Submission, task domain.Task) (string, string) {
 	subject := template.Subject
 	body := template.Body
 	sessionTitle, sessionStart, sessionRoom := "", "", ""
@@ -190,6 +251,21 @@ func RenderCommunication(state domain.State, template domain.EmailTemplate, spea
 			sessionStart = item.StartsAt.Format("Mon, Jan 02 at 15:04 MST")
 		}
 	}
+	submissionTitle := submission.Title
+	if submissionTitle == "" {
+		submissionTitle = sessionTitle
+	}
+	taskTitle := task.Title
+	if taskTitle == "" {
+		taskTitle = "Confirm your public profile"
+	}
+	taskDue := ""
+	if !task.DueAt.IsZero() {
+		taskDue = task.DueAt.Format("January 2")
+	}
+	if taskDue == "" {
+		taskDue = time.Date(2026, time.September, 2, 17, 0, 0, 0, time.Local).Format("January 2")
+	}
 	replacements := map[string]string{
 		"{{event.name}}":         state.Event.Name,
 		"{{speaker.first_name}}": speaker.FirstName,
@@ -197,9 +273,9 @@ func RenderCommunication(state domain.State, template domain.EmailTemplate, spea
 		"{{session.title}}":      sessionTitle,
 		"{{session.start_time}}": sessionStart,
 		"{{session.room}}":       sessionRoom,
-		"{{submission.title}}":   sessionTitle,
-		"{{task.title}}":         "Confirm your public profile",
-		"{{task.due_date}}":      time.Date(2026, time.September, 2, 17, 0, 0, 0, time.Local).Format("January 2"),
+		"{{submission.title}}":   submissionTitle,
+		"{{task.title}}":         taskTitle,
+		"{{task.due_date}}":      taskDue,
 	}
 	for key, value := range replacements {
 		subject = strings.ReplaceAll(subject, key, value)

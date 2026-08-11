@@ -11,6 +11,7 @@ import (
 
 	"github.com/m31-labs/rostrum/internal/actionflow"
 	"github.com/m31-labs/rostrum/internal/appstate"
+	delivery "github.com/m31-labs/rostrum/internal/communications"
 	"github.com/m31-labs/rostrum/internal/domain"
 	"github.com/m31-labs/rostrum/internal/identity"
 	"github.com/m31-labs/rostrum/internal/live"
@@ -161,7 +162,10 @@ func updateProfile(ctx *action.Context) error {
 	if len(urlErrors) > 0 {
 		return action.Validation("Use http:// or https:// links only.", urlErrors, ctx.FormData)
 	}
-	if err := appstate.MustGet().Update(func(state *domain.State) error {
+	if err := appstate.MustGet().UpdateAudit(domain.AuditMeta{
+		Actor: "speaker:" + speakerID, Action: "speaker.profile_updated", EntityType: "speaker", EntityID: speakerID,
+		Summary: "Speaker updated their profile details.", Origin: "speaker-portal",
+	}, func(state *domain.State) error {
 		speaker, found := state.Speaker(speakerID)
 		if !found {
 			return fmt.Errorf("speaker %s not found", speakerID)
@@ -173,8 +177,16 @@ func updateProfile(ctx *action.Context) error {
 		speaker.City = strings.TrimSpace(ctx.FormData["city"])
 		speaker.LinkedInURL = linkedin
 		speaker.WebsiteURL = website
-		speaker.UpdatedAt = time.Now().UTC()
+		now := time.Now().UTC()
+		speaker.EmailOptOut = ctx.FormData["email_opt_out"] == "on"
+		if speaker.EmailOptOut {
+			speaker.EmailOptOutAt = now
+		} else {
+			speaker.EmailOptOutAt = time.Time{}
+		}
+		speaker.UpdatedAt = now
 		upsertCompletion(state, "task_profile", speakerID, domain.TaskSubmitted, nil)
+		delivery.EnqueueNotificationRules(state, delivery.Trigger{Name: "task.submitted", TaskID: "task_profile", SpeakerID: speakerID}, now)
 		return nil
 	}); err != nil {
 		return err
@@ -197,7 +209,10 @@ func completeTask(ctx *action.Context) error {
 			values[key] = value
 		}
 	}
-	if err := appstate.MustGet().Update(func(state *domain.State) error {
+	if err := appstate.MustGet().UpdateAudit(domain.AuditMeta{
+		Actor: "speaker:" + speakerID, Action: "task.submitted", EntityType: "task_completion", EntityID: taskID + ":" + speakerID,
+		Summary: "Speaker submitted an onboarding task.", Origin: "speaker-portal",
+	}, func(state *domain.State) error {
 		if _, found := state.Speaker(speakerID); !found {
 			return fmt.Errorf("speaker %s not found", speakerID)
 		}
@@ -205,6 +220,7 @@ func completeTask(ctx *action.Context) error {
 			return fmt.Errorf("task %s not found", taskID)
 		}
 		upsertCompletion(state, taskID, speakerID, domain.TaskSubmitted, values)
+		delivery.EnqueueNotificationRules(state, delivery.Trigger{Name: "task.submitted", TaskID: taskID, SpeakerID: speakerID}, time.Now().UTC())
 		return nil
 	}); err != nil {
 		return err
@@ -260,6 +276,7 @@ func withdrawSubmission(ctx *action.Context) error {
 			state.Sessions[index].Status = "cancelled"
 			cancelledSessions++
 		}
+		delivery.EnqueueNotificationRules(state, delivery.Trigger{Name: "submission.withdrawn", SubmissionID: submissionID, SpeakerID: speakerID}, now)
 		return nil
 	}); err != nil {
 		return err

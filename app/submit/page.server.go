@@ -14,6 +14,7 @@ import (
 
 	"github.com/m31-labs/rostrum/internal/actionflow"
 	"github.com/m31-labs/rostrum/internal/appstate"
+	delivery "github.com/m31-labs/rostrum/internal/communications"
 	"github.com/m31-labs/rostrum/internal/domain"
 	"github.com/m31-labs/rostrum/internal/live"
 	"github.com/m31-labs/rostrum/internal/mail"
@@ -371,6 +372,12 @@ func submitProposal(ctx *action.Context) error {
 			applySubmittedSubmission(&submission, state.Event.ID, form.ID, speakerID, ctx.FormData, decision, visibilityTrace, now, form.Fields, visibleFields)
 			state.Submissions = append(state.Submissions, submission)
 		}
+		// Administrator notification rules enqueue only stable IDs while this
+		// same audited submission transaction commits. A later outbox runner
+		// resolves current merge data and performs the external delivery.
+		delivery.EnqueueNotificationRules(state, delivery.Trigger{
+			Name: "submission.created", SubmissionID: submissionID, SpeakerID: speakerID,
+		}, now)
 		for index := range state.Tasks {
 			if state.Tasks[index].ID == "task_profile" && !contains(state.Tasks[index].AssignedSpeakerIDs, speakerID) {
 				state.Tasks[index].AssignedSpeakerIDs = append(state.Tasks[index].AssignedSpeakerIDs, speakerID)

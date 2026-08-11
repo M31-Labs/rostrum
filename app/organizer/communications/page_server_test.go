@@ -146,3 +146,74 @@ func TestQueueMessageQueuesWithoutSendingForHandOffProviders(t *testing.T) {
 		}
 	}
 }
+
+func TestCreateTemplateStoresInitialRevisionAndAudit(t *testing.T) {
+	workspace, err := store.Open(":memory:", testWorkspaceState())
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	appstate.Set(workspace)
+	ctx := &action.Context{
+		Request: httptest.NewRequest(http.MethodPost, "/organizer/communications/__actions/createTemplate", nil),
+		FormData: map[string]string{
+			"name":     "Slides reminder",
+			"audience": "speaker",
+			"subject":  "Slides due {{task.due_date}}",
+			"body":     "Hi {{speaker.first_name}}, please complete {{task.title}}.",
+			"reply_to": "program@example.com",
+		},
+	}
+	if err := createTemplate(ctx); err != nil {
+		t.Fatalf("createTemplate: %v", err)
+	}
+	snapshot := workspace.Snapshot()
+	template, found := emailTemplate(snapshot, "tpl_slides-reminder")
+	if !found || template.System || template.Subject != "Slides due {{task.due_date}}" {
+		t.Fatalf("created template = %#v", template)
+	}
+	if len(snapshot.TemplateRevisions) != 1 || snapshot.TemplateRevisions[0].TemplateID != template.ID || snapshot.TemplateRevisions[0].Revision != 1 {
+		t.Fatalf("template revisions = %#v", snapshot.TemplateRevisions)
+	}
+	audit := snapshot.AuditEvents[len(snapshot.AuditEvents)-1]
+	if audit.Action != "communication.template_created" || audit.EntityID != template.ID {
+		t.Fatalf("template audit = %#v", audit)
+	}
+}
+
+func TestSaveNotificationRuleRequiresAdministratorTemplate(t *testing.T) {
+	state := testWorkspaceState()
+	state.EmailTemplates = append(state.EmailTemplates, domain.EmailTemplate{
+		ID: "tpl_admin", Name: "Admin", Audience: "administrator", Subject: "New {{submission.title}}", Body: "{{speaker.name}} sent a proposal.", ReplyTo: "program@example.com",
+	})
+	workspace, err := store.Open(":memory:", state)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	appstate.Set(workspace)
+	ctx := &action.Context{
+		Request: httptest.NewRequest(http.MethodPost, "/organizer/communications/__actions/saveNotificationRule", nil),
+		FormData: map[string]string{
+			"name":             "Submission alert",
+			"trigger":          "submission.created",
+			"template_id":      "tpl_admin",
+			"recipients":       "program@example.com, ops@example.com",
+			"retry_limit":      "3",
+			"suppress_minutes": "15",
+			"enabled":          "on",
+		},
+	}
+	if err := saveNotificationRule(ctx); err != nil {
+		t.Fatalf("saveNotificationRule: %v", err)
+	}
+	snapshot := workspace.Snapshot()
+	if len(snapshot.NotificationRules) != 1 {
+		t.Fatalf("notification rules = %#v", snapshot.NotificationRules)
+	}
+	rule := snapshot.NotificationRules[0]
+	if !rule.Enabled || rule.TemplateID != "tpl_admin" || len(rule.RecipientEmails) != 2 || rule.RetryLimit != 3 || rule.SuppressMinutes != 15 {
+		t.Fatalf("notification rule = %#v", rule)
+	}
+	if snapshot.AuditEvents[len(snapshot.AuditEvents)-1].Action != "communication.notification_rule_saved" {
+		t.Fatalf("rule audit = %#v", snapshot.AuditEvents[len(snapshot.AuditEvents)-1])
+	}
+}

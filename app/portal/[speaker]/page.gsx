@@ -157,6 +157,10 @@ func ProfileFields(props any) Node {
 				<input name="city" value={props.city}></input>
 			</label>
 		</div>
+		<label class="checkbox-control">
+			<input type="checkbox" name="email_opt_out" checked={props.emailOptOut}></input>
+			<span>Do not send me non-essential task and session reminders</span>
+		</label>
 		<label>
 			<span>Biography</span>
 			<textarea
@@ -340,6 +344,7 @@ func Page() Node {
 									biographyError={actions.updateProfile.fieldErrors.biography}
 									linkedin={actions.updateProfile.values.linkedin}
 									website={actions.updateProfile.values.website}
+									emailOptOut={actions.updateProfile.values.email_opt_out == "on"}
 								></ProfileFields>
 							</If>
 							<If cond={actions.updateProfile.name == ""}>
@@ -352,6 +357,7 @@ func Page() Node {
 									biographyError=""
 									linkedin={data.speaker.linkedIn}
 									website={data.speaker.website}
+									emailOptOut={data.speaker.emailOptOut}
 								></ProfileFields>
 							</If>
 							<button class="button button-primary" type="submit">Save public profile</button>

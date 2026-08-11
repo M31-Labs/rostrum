@@ -23,6 +23,7 @@ import (
 	workspacearchive "github.com/m31-labs/rostrum/internal/archive"
 	"github.com/m31-labs/rostrum/internal/audit"
 	programcalendar "github.com/m31-labs/rostrum/internal/calendar"
+	delivery "github.com/m31-labs/rostrum/internal/communications"
 	"github.com/m31-labs/rostrum/internal/domain"
 	"github.com/m31-labs/rostrum/internal/identity"
 	"github.com/m31-labs/rostrum/internal/live"
@@ -137,6 +138,7 @@ func main() {
 	// directly instead when it is false.
 	authManager := identity.New(sessions)
 	mailSender := mail.FromEnv()
+	startOutboxRunner(workspace, mailSender)
 	mailConfigured := mail.TransportConfigured()
 	magicLinks := authManager.MagicLinks(auth.MagicLinkOptions{
 		BaseURL:     publicBase,
@@ -296,6 +298,33 @@ func main() {
 
 	log.Printf("Rostrum listening on %s (data: %s)", publicBase, workspace.Path())
 	log.Fatal(app.ListenAndServe(":" + port))
+}
+
+// startOutboxRunner invokes the persisted outbox at startup and at a modest
+// cadence. The ticker is merely a wake-up source: due time, retries, leases,
+// cancellation, and idempotency all live in canonical state, so a restart or
+// another worker can safely resume work. Operators can also invoke the same
+// runner interactively from Communications; delivery never depends solely on
+// this in-process loop.
+func startOutboxRunner(workspace store.StateStore, sender mail.Sender) {
+	run := func() {
+		report, err := (delivery.Runner{Store: workspace, Sender: sender}).RunDue()
+		if err != nil {
+			log.Printf("communications outbox run: %v", err)
+			return
+		}
+		if report.Enqueued+report.Sent+report.Retried+report.Failed+report.Suppressed+report.Cancelled > 0 {
+			log.Printf("communications outbox: %d enqueued, %d sent, %d retried, %d failed, %d suppressed", report.Enqueued, report.Sent, report.Retried, report.Failed, report.Suppressed)
+		}
+	}
+	run()
+	go func() {
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			run()
+		}
+	}()
 }
 
 func configureRouteRuntime(ctx *route.RouteContext) {

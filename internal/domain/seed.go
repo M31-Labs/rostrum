@@ -156,6 +156,12 @@ func Seed(now time.Time) State {
 			{ID: "tpl_acceptance", Name: "Acceptance and next steps", Audience: "speaker", Subject: "You're joining {{event.name}}", Body: "Hi {{speaker.first_name}},\n\nWe would love to include {{session.title}} in {{event.name}}. Your portal contains the profile, agreement, AV, and slide tasks. A calendar invite is attached.\n\nProgram team", ReplyTo: "program@example.com", AttachCalendar: true, System: true},
 			{ID: "tpl_five_day", Name: "Five-day task reminder", Audience: "speaker", Subject: "A speaker task is due in five days", Body: "Hi {{speaker.first_name}},\n\n{{task.title}} is due on {{task.due_date}}. Open your portal to finish it.\n\nProgram team", ReplyTo: "program@example.com", System: true},
 			{ID: "tpl_one_day", Name: "One-day session reminder", Audience: "speaker", Subject: "Tomorrow: {{session.title}}", Body: "Hi {{speaker.first_name}},\n\nYour session begins at {{session.start_time}} in {{session.room}}. Please arrive 45 minutes early. The calendar update is attached.\n\nProgram team", ReplyTo: "program@example.com", AttachCalendar: true, System: true},
+			{ID: "tpl_admin_submission", Name: "Administrator: new proposal", Audience: "administrator", Subject: "New proposal: {{submission.title}}", Body: "{{speaker.name}} submitted {{submission.title}} for {{event.name}}. Open Rostrum to review its governed route and audit trace.", ReplyTo: "program@example.com", System: true},
+			{ID: "tpl_admin_withdrawal", Name: "Administrator: proposal withdrawn", Audience: "administrator", Subject: "Proposal withdrawn: {{submission.title}}", Body: "{{speaker.name}} withdrew {{submission.title}} from {{event.name}}. Rostrum removed it from active review plans and cancelled any linked public session.", ReplyTo: "program@example.com", System: true},
+		},
+		NotificationRules: []NotificationRule{
+			{ID: "notify_submission_created", Name: "New proposal received", Trigger: "submission.created", TemplateID: "tpl_admin_submission", RecipientEmails: []string{"program@example.com"}, Enabled: true, RetryLimit: 5, SuppressMinutes: 10},
+			{ID: "notify_submission_withdrawn", Name: "Proposal withdrawn", Trigger: "submission.withdrawn", TemplateID: "tpl_admin_withdrawal", RecipientEmails: []string{"program@example.com"}, Enabled: true, RetryLimit: 5, SuppressMinutes: 10},
 		},
 		Integrations: []Integration{
 			{ID: "integration_accelevents", Kind: "accelevents", Name: "Accelevents", Enabled: false, EventURL: "m31-systems-forum-2026", CredentialsOK: false, LastStatus: "Ready for dry run"},
