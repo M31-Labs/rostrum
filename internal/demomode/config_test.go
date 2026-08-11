@@ -4,7 +4,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/m31-labs/rostrum/internal/domain"
 )
@@ -71,7 +70,7 @@ func TestValidateRejectsDemoCredentials(t *testing.T) {
 }
 
 func TestValidateStateRequiresFictionalIdentityFreeSeed(t *testing.T) {
-	seed := domain.Seed(time.Now().UTC())
+	seed := domain.Seed(SeedTime())
 	if err := ValidateState(seed, seed); err != nil {
 		t.Fatalf("seed rejected: %v", err)
 	}
@@ -86,5 +85,18 @@ func TestValidateStateRequiresFictionalIdentityFreeSeed(t *testing.T) {
 	withPrincipal.Principals = []domain.Principal{{ID: "principal_real", Email: "owner@example.com"}}
 	if err := ValidateState(withPrincipal, seed); err == nil {
 		t.Fatal("organizer identity accepted as demo state")
+	}
+
+	withSpeaker := seed
+	withSpeaker.Speakers = append(withSpeaker.Speakers, domain.Speaker{ID: "spk_real", FirstName: "Real", LastName: "Person"})
+	if err := ValidateState(withSpeaker, seed); err == nil {
+		t.Fatal("additional speaker accepted as demo state")
+	}
+
+	withSubmission := seed
+	withSubmission.Submissions = append([]domain.Submission(nil), seed.Submissions...)
+	withSubmission.Submissions[0].Title = "Real proposal"
+	if err := ValidateState(withSubmission, seed); err == nil {
+		t.Fatal("modified proposal accepted as demo state")
 	}
 }

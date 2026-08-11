@@ -92,7 +92,11 @@ func main() {
 	}); err != nil {
 		log.Fatal(err)
 	}
-	seed := selectSeed(getenv("SEED", "demo"), now)
+	seedNow := now
+	if readOnlyDemo {
+		seedNow = demomode.SeedTime()
+	}
+	seed := selectSeed(getenv("SEED", "demo"), seedNow)
 	workspace, err := store.OpenConfigured(storeDriver, dataPath, getenv("DATABASE_URL", ""), seed)
 	if err != nil {
 		log.Fatal(err)

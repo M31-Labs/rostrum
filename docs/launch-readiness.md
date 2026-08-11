@@ -133,7 +133,10 @@ and filesystem, and the release must not claim that it is.
 
 - The demo process must set `APP_MODE=demo`, `SEED=demo`, an absolute durable
   `DATA_PATH`, `STORE_DRIVER=json` or `sqlite`, and an immutable
-  `ROSTRUM_VERSION`.
+  `ROSTRUM_VERSION`. The deterministic fixture is checked by a full state
+  fingerprint at startup; changed speakers, proposals, reviews, schedule,
+  resources, integrations, communications, audit, or sync records keep the
+  process down.
 - Keep the demo on its own subdomain, process, volume, audit path, and
   session secret. Never point it at production JSON, SQLite, Postgres,
   uploads, or identity state.

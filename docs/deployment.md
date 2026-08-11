@@ -83,11 +83,14 @@ RESET_SECRET=
 Use only fictional seeded data. The demo refuses `DATABASE_URL`, the legacy
 `DEMO_MODE=memory` setting, relative or in-memory paths, a mutable `dev`
 release identity, Resend/SMTP/Accelevents/Airtable credentials, OAuth
-credentials, and a network mail driver. It also validates the opened state
-before serving and refuses a workspace containing a non-demo event or stored
-organizer identity. Keep the demo volume and audit path separate from the
-live volume; never reuse a production `DATA_PATH`, upload directory, or
-session secret.
+credentials, and a network mail driver. The demo seed is built with a
+deterministic fixture timestamp, and startup compares a full state fingerprint
+before serving: any changed speaker, proposal, review record, schedule,
+resource, integration, communication, audit, or sync record fails closed.
+Keep the demo volume and audit path separate from the live volume; never reuse
+a production `DATA_PATH`, upload directory, or session secret. If a demo
+volume is ever changed or copied from live, redeploy it as a fresh canonical
+fixture instead of repairing it in place.
 
 The demo exposes public pages, signed-link read surfaces, `/organizer/*`, and
 `/live` for inspection without an organizer session. Every unsafe HTTP method,

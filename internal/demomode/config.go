@@ -5,10 +5,14 @@
 package demomode
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/m31-labs/rostrum/internal/domain"
 )
@@ -17,6 +21,13 @@ const (
 	ModeLive = "live"
 	ModeDemo = "demo"
 )
+
+// SeedTime is the fixed timestamp used to build the hosted demo fixture.
+// Keeping the fixture deterministic lets startup compare the complete
+// persisted document, rather than trusting a mutable event identity alone.
+func SeedTime() time.Time {
+	return time.Date(2026, time.August, 11, 0, 0, 0, 0, time.UTC)
+}
 
 // Config contains the startup values that must be checked before a demo
 // process opens its workspace. Paths are passed in after the main program has
@@ -112,10 +123,11 @@ var forbiddenCredentialEnv = []string{
 	"GOSX_STATIC_EXPORT",
 }
 
-// ValidateState prevents APP_MODE=demo from being pointed at a real workspace
-// that happens to use the same storage driver. The event identity is the
-// seeded demo's stable fingerprint; organizer principals, magic links, and
-// passkeys must also be absent so no real identity can cross the boundary.
+// ValidateState prevents APP_MODE=demo from being pointed at a real or
+// previously modified workspace that happens to use the same storage driver.
+// The complete state fingerprint must match the canonical fictional fixture;
+// the explicit identity checks below keep the most important failure modes
+// easy to diagnose and ensure no real identity can cross the boundary.
 func ValidateState(state, seed domain.State) error {
 	if state.Event.ID != seed.Event.ID || state.Event.Slug != seed.Event.Slug || state.Event.Name != seed.Event.Name {
 		return fmt.Errorf("APP_MODE=demo requires the fictional seeded workspace")
@@ -123,5 +135,30 @@ func ValidateState(state, seed domain.State) error {
 	if len(state.Principals) != 0 || len(state.AuthMagicLinks) != 0 || len(state.AuthPasskeys) != 0 {
 		return fmt.Errorf("APP_MODE=demo workspace contains organizer identity state")
 	}
+	actual, err := StateFingerprint(state)
+	if err != nil {
+		return fmt.Errorf("fingerprint demo workspace: %w", err)
+	}
+	expected, err := StateFingerprint(seed)
+	if err != nil {
+		return fmt.Errorf("fingerprint demo seed: %w", err)
+	}
+	if actual != expected {
+		return fmt.Errorf("APP_MODE=demo requires the canonical fictional fixture (fingerprint mismatch)")
+	}
 	return nil
+}
+
+// StateFingerprint returns a stable content hash for a workspace document.
+// encoding/json sorts map keys, and SeedTime makes every canonical demo
+// timestamp deterministic, so this covers all anonymously exposed records:
+// event metadata, proposals, speakers, review data, schedule, resources,
+// integrations, communications, audit history, and sync state.
+func StateFingerprint(state domain.State) (string, error) {
+	data, err := json.Marshal(state)
+	if err != nil {
+		return "", err
+	}
+	digest := sha256.Sum256(data)
+	return hex.EncodeToString(digest[:]), nil
 }
