@@ -1297,6 +1297,7 @@ func portalUpload(root string) http.HandlerFunc {
 			contentType = "application/octet-stream"
 		}
 		completionID := ""
+		supersededPath := ""
 		if err := appstate.MustGet().UpdateAudit(domain.AuditMeta{
 			Actor:      uploadActor(r, speakerID),
 			Action:     "portal.file_uploaded",
@@ -1327,6 +1328,7 @@ func portalUpload(root string) http.HandlerFunc {
 				return nil
 			}
 			completionID = completion.ID
+			supersededPath = completion.StoredPath
 			completion.Status = domain.TaskSubmitted
 			completion.FileName = originalName
 			completion.ContentType = contentType
@@ -1343,6 +1345,11 @@ func portalUpload(root string) http.HandlerFunc {
 			writeMutationError(w, r, http.StatusBadRequest, err.Error())
 			return
 		}
+		// The state commit is durable before cleanup begins. Remove the old
+		// private upload only when it is a safe, unreferenced file inside this
+		// workspace's upload directory; a failed cleanup must not turn a
+		// successful submission into an error.
+		removeSupersededUpload(root, supersededPath, filepath.ToSlash(storedPath))
 		if present.IsHeadshotTask(*task) {
 			// A re-upload returns the completion to submitted. Remove any
 			// previously published image immediately so an old approved
@@ -1353,6 +1360,81 @@ func portalUpload(root string) http.HandlerFunc {
 		live.Broadcast("task:uploaded", map[string]string{"speaker": speakerID, "task": taskID})
 		writeMutationSuccess(w, r, "File uploaded and submitted for review.", "/portal/"+speakerID+"#tasks")
 	}
+}
+
+// removeSupersededUpload removes a prior private upload after a successful
+// replacement. Imported or hand-edited state may contain arbitrary paths, so
+// both paths are normalized and constrained to the direct children of the
+// real data/uploads directory. The current state is checked first so a file
+// shared by another completion is retained. Filesystem cleanup is deliberately
+// best effort: the state transaction is already committed and must remain
+// successful even if a file is locked or disappears concurrently.
+func removeSupersededUpload(root, previousPath, replacementPath string) {
+	previous, ok := privateUploadPath(root, previousPath)
+	if !ok {
+		return
+	}
+	replacement, ok := privateUploadPath(root, replacementPath)
+	if !ok || filepath.Clean(previous) == filepath.Clean(replacement) {
+		return
+	}
+	for _, completion := range appstate.MustGet().Snapshot().TaskCompletions {
+		path, referenced := privateUploadPath(root, completion.StoredPath)
+		if referenced && filepath.Clean(path) == filepath.Clean(previous) {
+			return
+		}
+	}
+	info, err := os.Lstat(previous)
+	if errors.Is(err, os.ErrNotExist) {
+		return
+	}
+	if err != nil {
+		log.Printf("portal upload: inspect superseded private upload %s: %v", previous, err)
+		return
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		log.Printf("portal upload: refusing to remove non-regular superseded upload %s", previous)
+		return
+	}
+	if err := os.Remove(previous); err != nil && !errors.Is(err, os.ErrNotExist) {
+		log.Printf("portal upload: remove superseded private upload %s: %v", previous, err)
+	}
+}
+
+// privateUploadPath accepts only an absolute path to a direct file beneath
+// data/uploads. Resolving the directory and its parent prevents a symlinked
+// uploads directory or nested symlink path from turning cleanup into an
+// arbitrary filesystem delete. Current portal uploads are absolute paths, so
+// relative legacy/import paths are intentionally rejected rather than guessed.
+func privateUploadPath(root, storedPath string) (string, bool) {
+	if strings.TrimSpace(storedPath) == "" {
+		return "", false
+	}
+	uploadDir, err := filepath.Abs(filepath.Join(root, "data", "uploads"))
+	if err != nil {
+		return "", false
+	}
+	realUploadDir, err := filepath.EvalSymlinks(uploadDir)
+	if err != nil {
+		return "", false
+	}
+	candidate := filepath.FromSlash(strings.TrimSpace(storedPath))
+	if !filepath.IsAbs(candidate) {
+		return "", false
+	}
+	candidate, err = filepath.Abs(candidate)
+	if err != nil {
+		return "", false
+	}
+	relative, err := filepath.Rel(uploadDir, candidate)
+	if err != nil || relative == "." || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) || filepath.IsAbs(relative) || strings.Contains(relative, string(filepath.Separator)) {
+		return "", false
+	}
+	parent, err := filepath.EvalSymlinks(filepath.Dir(candidate))
+	if err != nil || filepath.Clean(parent) != filepath.Clean(realUploadDir) {
+		return "", false
+	}
+	return filepath.Join(parent, filepath.Base(candidate)), true
 }
 
 func uploadActor(r *http.Request, speakerID string) string {

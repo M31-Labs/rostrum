@@ -302,6 +302,94 @@ func TestPortalUploadStoresAuthorizedHeadshotAndBindsProfileURL(t *testing.T) {
 	}
 }
 
+func TestPortalUploadReplacesAndCleansSupersededPrivateFile(t *testing.T) {
+	_, workspace := testPortalWorkspace(t)
+	root := t.TempDir()
+	manager := testSessionManager(t)
+	handler := manager.Middleware(bindPortalSpeaker("spk_owner")(http.HandlerFunc(portalUpload(root))))
+	firstPayload := []byte{0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 'J', 'F', 'I', 'F', '1'}
+	secondPayload := []byte{0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 'J', 'F', 'I', 'F', '2'}
+
+	first := httptest.NewRecorder()
+	handler.ServeHTTP(first, portalUploadRequest(t, "/portal-upload/spk_owner/task_headshot", "portrait.jpg", firstPayload))
+	if first.Code != http.StatusSeeOther {
+		t.Fatalf("first upload status = %d, want 303; body=%s", first.Code, first.Body.String())
+	}
+	snapshot := workspace.Snapshot()
+	oldCompletion, found := snapshot.Completion("task_headshot", "spk_owner")
+	if !found || oldCompletion.StoredPath == "" {
+		t.Fatalf("first completion = %+v, found=%v; want stored path", oldCompletion, found)
+	}
+	oldPath := oldCompletion.StoredPath
+	if _, err := os.Stat(oldPath); err != nil {
+		t.Fatalf("first upload missing at %s: %v", oldPath, err)
+	}
+
+	second := httptest.NewRecorder()
+	handler.ServeHTTP(second, portalUploadRequest(t, "/portal-upload/spk_owner/task_headshot", "portrait-revised.jpg", secondPayload))
+	if second.Code != http.StatusSeeOther {
+		t.Fatalf("replacement upload status = %d, want 303; body=%s", second.Code, second.Body.String())
+	}
+	snapshot = workspace.Snapshot()
+	newCompletion, found := snapshot.Completion("task_headshot", "spk_owner")
+	if !found || newCompletion.StoredPath == "" || newCompletion.StoredPath == oldPath {
+		t.Fatalf("replacement completion = %+v, found=%v; want a new stored path", newCompletion, found)
+	}
+	if _, err := os.Stat(oldPath); !os.IsNotExist(err) {
+		t.Fatalf("superseded private upload still exists, stat err = %v", err)
+	}
+	if _, err := os.Stat(newCompletion.StoredPath); err != nil {
+		t.Fatalf("replacement upload missing at %s: %v", newCompletion.StoredPath, err)
+	}
+}
+
+func TestRemoveSupersededUploadProtectsSharedAndOutsidePaths(t *testing.T) {
+	_, workspace := testPortalWorkspace(t)
+	root := t.TempDir()
+	uploadDir := filepath.Join(root, "data", "uploads")
+	if err := os.MkdirAll(uploadDir, 0o750); err != nil {
+		t.Fatalf("create upload dir: %v", err)
+	}
+	oldPath := filepath.Join(uploadDir, "old.pdf")
+	replacementPath := filepath.Join(uploadDir, "replacement.pdf")
+	outsidePath := filepath.Join(root, "outside.pdf")
+	for _, path := range []string{oldPath, replacementPath, outsidePath} {
+		if err := os.WriteFile(path, []byte("upload"), 0o600); err != nil {
+			t.Fatalf("write fixture %s: %v", path, err)
+		}
+	}
+	now := time.Now().UTC()
+	if err := workspace.Update(func(state *domain.State) error {
+		state.TaskCompletions = append(state.TaskCompletions, domain.TaskCompletion{
+			ID: "done_shared", TaskID: "task_slides", SpeakerID: "spk_owner", Status: domain.TaskSubmitted,
+			FileName: "old.pdf", ContentType: "application/pdf", StoredPath: filepath.ToSlash(oldPath), CompletedAt: now, UpdatedAt: now,
+		})
+		return nil
+	}); err != nil {
+		t.Fatalf("seed shared completion: %v", err)
+	}
+
+	removeSupersededUpload(root, filepath.ToSlash(oldPath), filepath.ToSlash(replacementPath))
+	if _, err := os.Stat(oldPath); err != nil {
+		t.Fatalf("shared upload removed despite a current reference: %v", err)
+	}
+	removeSupersededUpload(root, filepath.ToSlash(outsidePath), filepath.ToSlash(replacementPath))
+	if _, err := os.Stat(outsidePath); err != nil {
+		t.Fatalf("outside path changed during cleanup: %v", err)
+	}
+
+	if err := workspace.Update(func(state *domain.State) error {
+		state.TaskCompletions[0].StoredPath = ""
+		return nil
+	}); err != nil {
+		t.Fatalf("clear shared completion: %v", err)
+	}
+	removeSupersededUpload(root, filepath.ToSlash(oldPath), filepath.ToSlash(replacementPath))
+	if _, err := os.Stat(oldPath); !os.IsNotExist(err) {
+		t.Fatalf("unreferenced upload was not removed, stat err = %v", err)
+	}
+}
+
 func TestSecurityHeadersAuthorizeOnlyTheGoSXInlineRuntime(t *testing.T) {
 	hash := navigationScriptCSPHash()
 	if !strings.HasPrefix(hash, "'sha256-") {
