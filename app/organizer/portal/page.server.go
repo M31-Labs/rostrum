@@ -1,6 +1,7 @@
 package portal
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -43,13 +44,34 @@ func approveTask(ctx *action.Context) error {
 	}
 	name := ""
 	taskTitle := ""
-	// publish, when set, copies the just-approved headshot upload into
-	// public/headshots/ so the public gallery (internal/present/public_event.go)
-	// can link an unauthenticated <img> to it. It runs after Update returns,
-	// not inside the closure, so the store's write lock never waits on disk
-	// I/O for the copy.
-	var publish func() error
-	if err := appstate.MustGet().Update(func(state *domain.State) error {
+
+	// Stage the bytes before the state mutation. The final rename happens
+	// inside the mutation closure and a failed staging/rename aborts approval,
+	// so a completion can never claim "approved" while its public headshot is
+	// missing. The copy itself is outside the store lock; only the atomic
+	// rename is performed while the private state copy is being finalized.
+	var staged *stagedHeadshot
+	snapshot := appstate.MustGet().Snapshot()
+	if task, taskFound := snapshot.Task(taskID); taskFound && present.IsHeadshotTask(*task) {
+		completion, completionFound := snapshot.Completion(taskID, speakerID)
+		if !completionFound || completion.StoredPath == "" {
+			return action.Validation("A headshot file must be uploaded before approval.", nil, ctx.FormData)
+		}
+		var stageErr error
+		staged, stageErr = stageHeadshotCopy(speakerID, completion.StoredPath, completion.FileName)
+		if stageErr != nil {
+			return action.Error(500, "Could not prepare the public headshot. The task remains awaiting approval.")
+		}
+	}
+	committedPublicCopy := false
+	if err := appstate.MustGet().UpdateAudit(domain.AuditMeta{
+		Actor:      "organizer",
+		Action:     "portal.task_approved",
+		EntityType: "task_completion",
+		EntityID:   taskID + ":" + speakerID,
+		Summary:    "Speaker task approved by program operations.",
+		Origin:     "organizer-portal",
+	}, func(state *domain.State) error {
 		speaker, found := state.Speaker(speakerID)
 		if !found {
 			return fmt.Errorf("speaker %s not found", speakerID)
@@ -67,23 +89,24 @@ func approveTask(ctx *action.Context) error {
 			return fmt.Errorf("task %s not found", taskID)
 		}
 		taskTitle = task.Title
+		if present.IsHeadshotTask(*task) {
+			if staged == nil {
+				return action.Validation("A headshot file must be uploaded before approval.", nil, ctx.FormData)
+			}
+			if err := staged.Commit(); err != nil {
+				return fmt.Errorf("publish public headshot: %w", err)
+			}
+			committedPublicCopy = true
+			speaker.HeadshotURL = "/portal-file/" + completion.ID
+		}
 		completion.Status = domain.TaskApproved
 		completion.UpdatedAt = time.Now().UTC()
-		if present.IsHeadshotTask(*task) && completion.StoredPath != "" {
-			publish = publishHeadshotCopy(speakerID, completion.StoredPath, completion.FileName)
-		}
 		return nil
 	}); err != nil {
-		return err
-	}
-	if publish != nil {
-		if err := publish(); err != nil {
-			// A failed publish must not fail the approval itself: the
-			// completion is already approved and the organizer's action
-			// succeeded. Log so the gap is visible without turning a
-			// filesystem hiccup into a lost approval.
-			log.Printf("approve task: publish public headshot for speaker %s: %v", speakerID, err)
+		if staged != nil {
+			staged.Discard(committedPublicCopy)
 		}
+		return err
 	}
 	session.AddFlash(ctx.Request, "notice", "Approved “"+taskTitle+"” from "+name+".")
 	live.Broadcast("task:approved", map[string]string{"task": taskID, "speaker": speakerID})
@@ -91,51 +114,92 @@ func approveTask(ctx *action.Context) error {
 	return nil
 }
 
-// publishHeadshotCopy returns a closure that copies the approved upload at
-// storedPath into public/headshots/<speakerID><ext>, the path
-// internal/present/public_event.go's publicHeadshotURL derives for the
-// public gallery. Approval is the publication consent gate (PT-3): nothing
-// copies into public/ before an organizer approves the task, and
-// /portal-file/ itself — storedPath's origin — stays authenticated.
-func publishHeadshotCopy(speakerID, storedPath, fileName string) func() error {
-	return func() error {
-		source, err := os.Open(storedPath)
-		if err != nil {
-			return fmt.Errorf("open approved headshot upload: %w", err)
-		}
-		defer source.Close()
+// stagedHeadshot keeps an inaccessible temporary file until the state update
+// confirms the task is still eligible for approval. Commit swaps it into the
+// deterministic static location that publicHeadshotURL derives.
+type stagedHeadshot struct {
+	temporary   string
+	destination string
+	speakerID   string
+}
 
-		dir := publicHeadshotDir()
-		if err := os.MkdirAll(dir, 0o750); err != nil {
-			return fmt.Errorf("prepare public headshot directory: %w", err)
+// resolvePublicHeadshotDir is a seam for the file-publication test; production
+// always uses publicHeadshotDir below.
+var resolvePublicHeadshotDir = publicHeadshotDir
+
+func stageHeadshotCopy(speakerID, storedPath, fileName string) (*stagedHeadshot, error) {
+	source, err := os.Open(storedPath)
+	if err != nil {
+		return nil, fmt.Errorf("open approved headshot upload: %w", err)
+	}
+	defer source.Close()
+
+	dir := resolvePublicHeadshotDir()
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return nil, fmt.Errorf("prepare public headshot directory: %w", err)
+	}
+	temporary, err := os.CreateTemp(dir, ".headshot-*.tmp")
+	if err != nil {
+		return nil, fmt.Errorf("create temporary public headshot: %w", err)
+	}
+	temporaryPath := temporary.Name()
+	cleanup := func() {
+		_ = temporary.Close()
+		_ = os.Remove(temporaryPath)
+	}
+	if _, err := io.Copy(temporary, source); err != nil {
+		cleanup()
+		return nil, fmt.Errorf("copy public headshot: %w", err)
+	}
+	if err := temporary.Close(); err != nil {
+		cleanup()
+		return nil, fmt.Errorf("close temporary public headshot: %w", err)
+	}
+	if err := os.Chmod(temporaryPath, 0o644); err != nil {
+		cleanup()
+		return nil, fmt.Errorf("set public headshot permissions: %w", err)
+	}
+	return &stagedHeadshot{
+		temporary:   temporaryPath,
+		destination: filepath.Join(dir, speakerID+headshotExtension(fileName)),
+		speakerID:   speakerID,
+	}, nil
+}
+
+func (stage *stagedHeadshot) Commit() error {
+	if stage == nil {
+		return errors.New("headshot stage is missing")
+	}
+	// Remove every supported older extension before the rename: otherwise a
+	// replaced .jpg can remain directly reachable after a new .webp wins.
+	removePublishedHeadshots(filepath.Dir(stage.destination), stage.speakerID)
+	if err := os.Rename(stage.temporary, stage.destination); err != nil {
+		return err
+	}
+	stage.temporary = ""
+	return nil
+}
+
+// Discard removes a staged file, and optionally a file that was committed
+// immediately before the durable state write failed. It makes the failure
+// path fail closed: no public byte survives a rejected approval.
+func (stage *stagedHeadshot) Discard(removePublished bool) {
+	if stage == nil {
+		return
+	}
+	if stage.temporary != "" {
+		_ = os.Remove(stage.temporary)
+	}
+	if removePublished {
+		removePublishedHeadshots(filepath.Dir(stage.destination), stage.speakerID)
+	}
+}
+
+func removePublishedHeadshots(dir, speakerID string) {
+	for _, extension := range []string{".png", ".jpg", ".jpeg", ".webp"} {
+		if err := os.Remove(filepath.Join(dir, speakerID+extension)); err != nil && !os.IsNotExist(err) {
+			log.Printf("headshot publication: remove stale image for %s: %v", speakerID, err)
 		}
-		destination := filepath.Join(dir, speakerID+headshotExtension(fileName))
-		temporary, err := os.CreateTemp(dir, ".headshot-*.tmp")
-		if err != nil {
-			return fmt.Errorf("create temporary public headshot: %w", err)
-		}
-		temporaryPath := temporary.Name()
-		cleanup := func() {
-			_ = temporary.Close()
-			_ = os.Remove(temporaryPath)
-		}
-		if _, err := io.Copy(temporary, source); err != nil {
-			cleanup()
-			return fmt.Errorf("copy public headshot: %w", err)
-		}
-		if err := temporary.Close(); err != nil {
-			cleanup()
-			return fmt.Errorf("close temporary public headshot: %w", err)
-		}
-		if err := os.Chmod(temporaryPath, 0o644); err != nil {
-			cleanup()
-			return fmt.Errorf("set public headshot permissions: %w", err)
-		}
-		if err := os.Rename(temporaryPath, destination); err != nil {
-			cleanup()
-			return fmt.Errorf("publish public headshot: %w", err)
-		}
-		return nil
 	}
 }
 

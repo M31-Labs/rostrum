@@ -1,6 +1,8 @@
 package domain
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"sort"
@@ -30,6 +32,8 @@ type State struct {
 	Principals      []Principal      `json:"principals"`
 	AuthMagicLinks  []AuthMagicLink  `json:"authMagicLinks"`
 	AuthPasskeys    []AuthPasskey    `json:"authPasskeys"`
+	AuditEvents     []AuditEvent     `json:"auditEvents"`
+	SyncOutbox      []SyncOutboxItem `json:"syncOutbox"`
 	UpdatedAt       time.Time        `json:"updatedAt"`
 }
 
@@ -471,6 +475,137 @@ type Communication struct {
 	Error        string    `json:"error"`
 }
 
+// AuditMeta is the small, secret-free description a mutating operation
+// supplies to the durable store. The store appends an AuditEvent in the same
+// transaction as the state mutation, so an audit row can never claim a
+// change that failed to persist (or omit a change that succeeded).
+//
+// Values intentionally describe an action rather than retain request bodies,
+// tokens, message contents, or uploaded bytes. Archives may be kept for a
+// long time and must never become a second source of credentials or PII.
+type AuditMeta struct {
+	Actor      string
+	Action     string
+	EntityType string
+	EntityID   string
+	Summary    string
+	Origin     string
+	At         time.Time
+}
+
+// AuditEvent is an append-only, hash-chained mutation record. PreviousHash
+// and Hash make accidental or manual edits to a restored archive detectable;
+// they are an integrity aid, not a substitute for a signed external ledger.
+type AuditEvent struct {
+	ID           string    `json:"id"`
+	At           time.Time `json:"at"`
+	Actor        string    `json:"actor"`
+	Action       string    `json:"action"`
+	EntityType   string    `json:"entityType"`
+	EntityID     string    `json:"entityId"`
+	Summary      string    `json:"summary"`
+	Origin       string    `json:"origin"`
+	PreviousHash string    `json:"previousHash"`
+	Hash         string    `json:"hash"`
+}
+
+// SyncOutboxItem is a durable, idempotent external-projection request. The
+// payload stays in the canonical state and is delivered only by an explicit
+// connector run; an integration can therefore fail or be disabled without
+// making Airtable (or any future projection) the source of truth.
+type SyncOutboxItem struct {
+	ID          string    `json:"id"`
+	Integration string    `json:"integration"`
+	Kind        string    `json:"kind"`
+	EntityID    string    `json:"entityId"`
+	Payload     string    `json:"payload"`
+	Attempts    int       `json:"attempts"`
+	AvailableAt time.Time `json:"availableAt"`
+	DeliveredAt time.Time `json:"deliveredAt"`
+	LastError   string    `json:"lastError"`
+	CreatedAt   time.Time `json:"createdAt"`
+}
+
+// AppendAudit appends one hash-chained record. It is called only by a
+// StateStore after a mutation closure succeeds, while the same state copy is
+// still private to that transaction.
+func (state *State) AppendAudit(meta AuditMeta) {
+	at := meta.At.UTC()
+	if at.IsZero() {
+		at = time.Now().UTC()
+	}
+	if strings.TrimSpace(meta.Action) == "" {
+		meta.Action = "state.updated"
+	}
+	previous := ""
+	if count := len(state.AuditEvents); count > 0 {
+		previous = state.AuditEvents[count-1].Hash
+	}
+	event := AuditEvent{
+		ID:           NewID("audit"),
+		At:           at,
+		Actor:        auditText(meta.Actor, 160),
+		Action:       auditText(meta.Action, 120),
+		EntityType:   auditText(meta.EntityType, 120),
+		EntityID:     auditText(meta.EntityID, 160),
+		Summary:      auditText(meta.Summary, 500),
+		Origin:       auditText(meta.Origin, 120),
+		PreviousHash: previous,
+	}
+	event.Hash = event.chainHash()
+	state.AuditEvents = append(state.AuditEvents, event)
+}
+
+// VerifyAuditTrail validates the hash chain stored in the snapshot. An empty
+// trail is valid for pre-audit workspaces and is upgraded on their first
+// mutation; this keeps the schema migration backward-compatible.
+func (state State) VerifyAuditTrail() error {
+	previous := ""
+	for index, event := range state.AuditEvents {
+		if strings.TrimSpace(event.ID) == "" || strings.TrimSpace(event.Action) == "" || event.At.IsZero() {
+			return fmt.Errorf("audit event %d is incomplete", index)
+		}
+		if event.PreviousHash != previous {
+			return fmt.Errorf("audit event %s has an invalid previous hash", event.ID)
+		}
+		if event.Hash != event.chainHash() {
+			return fmt.Errorf("audit event %s has an invalid hash", event.ID)
+		}
+		previous = event.Hash
+	}
+	return nil
+}
+
+func (event AuditEvent) chainHash() string {
+	payload := strings.Join([]string{
+		event.ID,
+		event.At.UTC().Format(time.RFC3339Nano),
+		event.Actor,
+		event.Action,
+		event.EntityType,
+		event.EntityID,
+		event.Summary,
+		event.Origin,
+		event.PreviousHash,
+	}, "\x1f")
+	sum := sha256.Sum256([]byte(payload))
+	return hex.EncodeToString(sum[:])
+}
+
+func auditText(value string, limit int) string {
+	value = strings.TrimSpace(value)
+	value = strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, value)
+	if len([]rune(value)) <= limit {
+		return value
+	}
+	return string([]rune(value)[:limit])
+}
+
 // AcceptanceTemplateID names the seeded EmailTemplate ("tpl_acceptance",
 // internal/domain/seed.go) that QueueAcceptanceCommunication and the
 // accept-time transition in app/organizer/submissions/page.server.go send
@@ -644,6 +779,9 @@ func (state State) Validate() error {
 	if err := validateUniqueIDs(state); err != nil {
 		return err
 	}
+	if err := state.VerifyAuditTrail(); err != nil {
+		return err
+	}
 	for _, session := range state.Sessions {
 		if session.Scheduled() && !session.EndsAt.After(session.StartsAt) {
 			return fmt.Errorf("session %s ends before it starts", session.ID)
@@ -682,6 +820,8 @@ func validateUniqueIDs(state State) error {
 		{"resource", collectIDs(len(state.Resources), func(i int) string { return state.Resources[i].ID })},
 		{"email template", collectIDs(len(state.EmailTemplates), func(i int) string { return state.EmailTemplates[i].ID })},
 		{"communication", collectIDs(len(state.Communications), func(i int) string { return state.Communications[i].ID })},
+		{"audit event", collectIDs(len(state.AuditEvents), func(i int) string { return state.AuditEvents[i].ID })},
+		{"sync outbox item", collectIDs(len(state.SyncOutbox), func(i int) string { return state.SyncOutbox[i].ID })},
 	}
 	for _, group := range groups {
 		for _, id := range group.ids {

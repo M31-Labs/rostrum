@@ -90,6 +90,13 @@ func (store *JSONStore) Snapshot() domain.State {
 }
 
 func (store *JSONStore) Update(change func(*domain.State) error) error {
+	return store.UpdateAudit(GenericAudit, change)
+}
+
+// UpdateAudit applies change and appends its secret-free audit metadata in
+// the same copy-on-write transaction. A failed mutation, validation error,
+// or disk replacement produces neither a new snapshot nor an audit event.
+func (store *JSONStore) UpdateAudit(meta domain.AuditMeta, change func(*domain.State) error) error {
 	if change == nil {
 		return errors.New("store update requires a mutation")
 	}
@@ -100,6 +107,7 @@ func (store *JSONStore) Update(change func(*domain.State) error) error {
 	if err := change(&next); err != nil {
 		return err
 	}
+	next.AppendAudit(meta)
 	next.SchemaVersion = domain.CurrentSchemaVersion
 	next.UpdatedAt = time.Now().UTC()
 	if err := next.Validate(); err != nil {
@@ -113,6 +121,31 @@ func (store *JSONStore) Update(change func(*domain.State) error) error {
 	}
 	// One clone per write, taken only after persistLocked succeeds, so
 	// readers never observe a snapshot for state that failed to persist.
+	store.snapshot = clone(store.state)
+	return nil
+}
+
+// Replace atomically replaces the workspace with a state produced by the
+// archive importer. The importer validates the incoming audit chain before
+// this method is called; Replace records the local restore as the next link
+// so its provenance is visible after the operation completes.
+func (store *JSONStore) Replace(next domain.State, meta domain.AuditMeta) error {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	next = clone(next)
+	next.SchemaVersion = domain.CurrentSchemaVersion
+	next.UpdatedAt = time.Now().UTC()
+	next.AppendAudit(meta)
+	if err := next.Validate(); err != nil {
+		return fmt.Errorf("validate replacement: %w", err)
+	}
+	previous := store.state
+	store.state = next
+	if err := store.persistLocked(); err != nil {
+		store.state = previous
+		return err
+	}
 	store.snapshot = clone(store.state)
 	return nil
 }
@@ -134,6 +167,9 @@ func (store *JSONStore) Reset() error {
 func (store *JSONStore) Path() string {
 	return store.path
 }
+
+// Close implements StateStore. JSONStore owns no long-lived external handle.
+func (store *JSONStore) Close() error { return nil }
 
 func (store *JSONStore) persistLocked() error {
 	if store.path == "" {

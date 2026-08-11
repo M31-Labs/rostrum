@@ -226,6 +226,41 @@ func TestJSONStoreSnapshotConcurrentReadsAndWriteRaceClean(t *testing.T) {
 	}
 }
 
+func TestJSONStoreAuditIsCommittedWithTheMutation(t *testing.T) {
+	store, err := Open(":memory:", domain.Seed(time.Now().UTC()))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if err := store.UpdateAudit(domain.AuditMeta{
+		Actor:      "organizer:test",
+		Action:     "event.updated",
+		EntityType: "event",
+		EntityID:   "evt_rostrum",
+		Summary:    "Updated event title.",
+		Origin:     "test",
+	}, func(state *domain.State) error {
+		state.Event.Name = "Audited Rostrum"
+		return nil
+	}); err != nil {
+		t.Fatalf("UpdateAudit: %v", err)
+	}
+
+	snapshot := store.Snapshot()
+	if snapshot.Event.Name != "Audited Rostrum" {
+		t.Fatalf("event name = %q, want mutation to persist", snapshot.Event.Name)
+	}
+	if len(snapshot.AuditEvents) != 1 {
+		t.Fatalf("audit event count = %d, want 1", len(snapshot.AuditEvents))
+	}
+	event := snapshot.AuditEvents[0]
+	if event.Action != "event.updated" || event.Actor != "organizer:test" || event.Hash == "" {
+		t.Fatalf("audit event = %+v, want recorded metadata and hash", event)
+	}
+	if err := snapshot.VerifyAuditTrail(); err != nil {
+		t.Fatalf("VerifyAuditTrail: %v", err)
+	}
+}
+
 func nameFor(i int) string {
 	return "Renamed forum " + string(rune('A'+i%26))
 }

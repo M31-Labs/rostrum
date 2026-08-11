@@ -1,0 +1,4 @@
+models:
+  utility:
+    # Keep local Buckley-authored commits consistent and inexpensive.
+    commit: qwen/qwen3.7-flash

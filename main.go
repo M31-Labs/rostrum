@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
@@ -59,14 +60,24 @@ func main() {
 	}
 
 	now := time.Now().UTC()
-	dataPath := getenv("DATA_PATH", filepath.Join(root, "data", "rostrum.json"))
+	storeDriver := strings.ToLower(strings.TrimSpace(getenv("STORE_DRIVER", "json")))
+	defaultDataPath := filepath.Join(root, "data", "rostrum.json")
+	if storeDriver == "sqlite" {
+		defaultDataPath = filepath.Join(root, "data", "rostrum.sqlite")
+	}
+	dataPath := getenv("DATA_PATH", defaultDataPath)
 	if strings.EqualFold(getenv("DEMO_MODE", "true"), "memory") {
 		dataPath = ":memory:"
 	}
-	workspace, err := store.Open(dataPath, selectSeed(getenv("SEED", "demo"), now))
+	workspace, err := store.OpenConfigured(storeDriver, dataPath, getenv("DATABASE_URL", ""), selectSeed(getenv("SEED", "demo"), now))
 	if err != nil {
 		log.Fatal(err)
 	}
+	defer func() {
+		if err := workspace.Close(); err != nil {
+			log.Printf("close workspace store: %v", err)
+		}
+	}()
 	appstate.Set(workspace)
 
 	port := getenv("PORT", "8080")
@@ -574,11 +585,28 @@ func organizerGate() server.Middleware {
 		guarded := gate(next)
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if isOrganizerGatedPath(r.URL.Path) {
+				// Observers are intentionally read-only. File-route actions and
+				// custom organizer endpoints are POSTs, so enforce the narrower
+				// role here instead of trusting every individual action to repeat
+				// the same guard.
+				if isMutationMethod(r.Method) && !canMutateWorkspace(r) {
+					http.Error(w, "forbidden", http.StatusForbidden)
+					return
+				}
 				guarded.ServeHTTP(w, r)
 				return
 			}
 			next.ServeHTTP(w, r)
 		})
+	}
+}
+
+func isMutationMethod(method string) bool {
+	switch method {
+	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -602,6 +630,22 @@ func isOrganizerSession(r *http.Request) bool {
 	for _, role := range user.Roles {
 		switch role {
 		case identity.RoleOrganizer, identity.RoleChair, identity.RoleObserver:
+			return true
+		}
+	}
+	return false
+}
+
+// canMutateWorkspace is intentionally narrower than isOrganizerSession:
+// observers may inspect the organizer surface but may never change data,
+// upload on behalf of a speaker, export archives, or restore a backup.
+func canMutateWorkspace(r *http.Request) bool {
+	user, ok := auth.Current(r)
+	if !ok {
+		return false
+	}
+	for _, role := range user.Roles {
+		if role == identity.RoleOrganizer || role == identity.RoleChair {
 			return true
 		}
 	}
@@ -699,16 +743,7 @@ func selectSeed(mode string, now time.Time) domain.State {
 // chair session. Observers reach the rest of /organizer but never this
 // export: it carries speaker PII the read-only role must not receive.
 func canExportSubmissions(r *http.Request) bool {
-	user, ok := auth.Current(r)
-	if !ok {
-		return false
-	}
-	for _, role := range user.Roles {
-		if role == identity.RoleOrganizer || role == identity.RoleChair {
-			return true
-		}
-	}
-	return false
+	return canMutateWorkspace(r)
 }
 
 // submissionsCSV serves GET /organizer/export/submissions.csv.
@@ -810,12 +845,36 @@ func portalUpload(root string) http.HandlerFunc {
 			return
 		}
 		speakerID, taskID := parts[0], parts[1]
+		// Authorize before multipart parsing or creating a file. A portal
+		// session is bound to exactly one speaker; organizers and chairs may
+		// assist an assigned speaker, while observers remain read-only.
+		// Return the same 404 for a missing speaker/task, an unassigned task,
+		// or an unauthorized visitor so this endpoint cannot enumerate portal
+		// identifiers or task assignments.
+		state := appstate.MustGet().Snapshot()
+		visitor := session.Current(r)
+		if visitor.String(portalSpeakerSessionKey) != speakerID && !canMutateWorkspace(r) {
+			http.NotFound(w, r)
+			return
+		}
+		if _, found := state.Speaker(speakerID); !found {
+			http.NotFound(w, r)
+			return
+		}
+		task, found := state.Task(taskID)
+		if !found || !taskAssignedToSpeaker(*task, speakerID) {
+			http.NotFound(w, r)
+			return
+		}
 		// bodyLimit (registered ahead of sessions.Protect) has already wrapped
 		// r.Body in a MaxBytesReader sized to uploadBodyEnvelope, so the CSRF
 		// check's ParseMultipartForm call and this one are both bounded.
 		if err := r.ParseMultipartForm(maxUploadBytes); err != nil {
 			writeMutationError(w, r, http.StatusRequestEntityTooLarge, "Upload must be smaller than 10 MB.")
 			return
+		}
+		if r.MultipartForm != nil {
+			defer r.MultipartForm.RemoveAll()
 		}
 		file, header, err := r.FormFile("file")
 		if err != nil {
@@ -827,6 +886,27 @@ func portalUpload(root string) http.HandlerFunc {
 		if !allowedUpload(originalName) {
 			writeMutationError(w, r, http.StatusUnsupportedMediaType, "Use PDF, PowerPoint, Keynote, PNG, JPEG, or WebP.")
 			return
+		}
+		// A headshot is a public-facing image once an organizer approves it.
+		// Enforce both its extension and its sniffed bytes here, before the
+		// payload reaches disk, rather than trusting multipart Content-Type.
+		var source io.Reader = file
+		if present.IsHeadshotTask(*task) {
+			if !allowedHeadshot(originalName) {
+				writeMutationError(w, r, http.StatusUnsupportedMediaType, "Headshots must be PNG, JPEG, or WebP images.")
+				return
+			}
+			prefix := make([]byte, 512)
+			count, readErr := io.ReadFull(file, prefix)
+			if readErr != nil && !errors.Is(readErr, io.ErrUnexpectedEOF) && !errors.Is(readErr, io.EOF) {
+				writeMutationError(w, r, http.StatusBadRequest, "Could not read the headshot image.")
+				return
+			}
+			if !allowedHeadshotContentType(http.DetectContentType(prefix[:count])) {
+				writeMutationError(w, r, http.StatusUnsupportedMediaType, "Headshots must contain a PNG, JPEG, or WebP image.")
+				return
+			}
+			source = io.MultiReader(bytes.NewReader(prefix[:count]), file)
 		}
 		uploadDir := filepath.Join(root, "data", "uploads")
 		if err := os.MkdirAll(uploadDir, 0o750); err != nil {
@@ -843,7 +923,7 @@ func portalUpload(root string) http.HandlerFunc {
 		// Copy one byte past the cap: reading exactly maxUploadBytes+1 without
 		// error means the source held more than the cap, so treat it as
 		// oversized rather than silently truncating and reporting success.
-		written, copyErr := io.CopyN(destination, file, maxUploadBytes+1)
+		written, copyErr := io.CopyN(destination, source, maxUploadBytes+1)
 		closeErr := destination.Close()
 		var maxBytesErr *http.MaxBytesError
 		switch {
@@ -868,33 +948,58 @@ func portalUpload(root string) http.HandlerFunc {
 		if contentType == "" {
 			contentType = "application/octet-stream"
 		}
-		if err := appstate.MustGet().Update(func(state *domain.State) error {
+		completionID := ""
+		if err := appstate.MustGet().UpdateAudit(domain.AuditMeta{
+			Actor:      uploadActor(r, speakerID),
+			Action:     "portal.file_uploaded",
+			EntityType: "task_completion",
+			EntityID:   taskID + ":" + speakerID,
+			Summary:    "Speaker task file submitted for review.",
+			Origin:     "portal-upload",
+		}, func(state *domain.State) error {
 			if _, found := state.Speaker(speakerID); !found {
 				return fmt.Errorf("speaker %s not found", speakerID)
 			}
-			if _, found := state.Task(taskID); !found {
+			task, found := state.Task(taskID)
+			if !found || !taskAssignedToSpeaker(*task, speakerID) {
 				return fmt.Errorf("task %s not found", taskID)
 			}
 			now := time.Now().UTC()
 			completion, found := state.Completion(taskID, speakerID)
 			if !found {
+				completionID = domain.NewID("done")
 				state.TaskCompletions = append(state.TaskCompletions, domain.TaskCompletion{
-					ID: domain.NewID("done"), TaskID: taskID, SpeakerID: speakerID, Status: domain.TaskSubmitted,
+					ID: completionID, TaskID: taskID, SpeakerID: speakerID, Status: domain.TaskSubmitted,
 					FileName: originalName, ContentType: contentType, StoredPath: filepath.ToSlash(storedPath), CompletedAt: now, UpdatedAt: now,
 				})
+				if present.IsHeadshotTask(*task) {
+					speaker, _ := state.Speaker(speakerID)
+					speaker.HeadshotURL = "/portal-file/" + completionID
+				}
 				return nil
 			}
+			completionID = completion.ID
 			completion.Status = domain.TaskSubmitted
 			completion.FileName = originalName
 			completion.ContentType = contentType
 			completion.StoredPath = filepath.ToSlash(storedPath)
 			completion.CompletedAt = now
 			completion.UpdatedAt = now
+			if present.IsHeadshotTask(*task) {
+				speaker, _ := state.Speaker(speakerID)
+				speaker.HeadshotURL = "/portal-file/" + completionID
+			}
 			return nil
 		}); err != nil {
 			_ = os.Remove(storedPath)
 			writeMutationError(w, r, http.StatusBadRequest, err.Error())
 			return
+		}
+		if present.IsHeadshotTask(*task) {
+			// A re-upload returns the completion to submitted. Remove any
+			// previously published image immediately so an old approved
+			// headshot cannot remain directly reachable while review is pending.
+			removePublicHeadshots(root, speakerID)
 		}
 		session.AddFlash(r, "notice", "File uploaded and submitted for review.")
 		live.Broadcast("task:uploaded", map[string]string{"speaker": speakerID, "task": taskID})
@@ -902,9 +1007,46 @@ func portalUpload(root string) http.HandlerFunc {
 	}
 }
 
+func taskAssignedToSpeaker(task domain.Task, speakerID string) bool {
+	for _, assigned := range task.AssignedSpeakerIDs {
+		if assigned == speakerID {
+			return true
+		}
+	}
+	return false
+}
+
+func uploadActor(r *http.Request, speakerID string) string {
+	if canMutateWorkspace(r) {
+		if user, ok := auth.Current(r); ok && user.ID != "" {
+			return "organizer:" + user.ID
+		}
+		return "organizer"
+	}
+	return "speaker:" + speakerID
+}
+
 func allowedUpload(name string) bool {
 	switch strings.ToLower(filepath.Ext(name)) {
 	case ".pdf", ".ppt", ".pptx", ".key", ".png", ".jpg", ".jpeg", ".webp":
+		return true
+	default:
+		return false
+	}
+}
+
+func allowedHeadshot(name string) bool {
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".png", ".jpg", ".jpeg", ".webp":
+		return true
+	default:
+		return false
+	}
+}
+
+func allowedHeadshotContentType(contentType string) bool {
+	switch strings.ToLower(strings.TrimSpace(contentType)) {
+	case "image/png", "image/jpeg", "image/webp":
 		return true
 	default:
 		return false
@@ -1100,6 +1242,23 @@ func clearUploads(root string) {
 		}
 		if err := os.Remove(filepath.Join(uploadDir, entry.Name())); err != nil {
 			log.Printf("reset: could not remove upload %s: %v", entry.Name(), err)
+		}
+	}
+}
+
+// removePublicHeadshots removes every supported public variant for a speaker.
+// It is used when a speaker replaces an already-approved headshot: the new
+// completion must wait for approval, so the old image may not remain publicly
+// reachable merely because its deterministic static path is still on disk.
+func removePublicHeadshots(root, speakerID string) {
+	if speakerID == "" {
+		return
+	}
+	dir := filepath.Join(root, "public", "headshots")
+	for _, extension := range []string{".png", ".jpg", ".jpeg", ".webp"} {
+		path := filepath.Join(dir, speakerID+extension)
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			log.Printf("portal upload: remove stale public headshot %s: %v", path, err)
 		}
 	}
 }

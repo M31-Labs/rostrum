@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -52,6 +54,155 @@ func signInAs(authManager *auth.Manager, role string) func(http.Handler) http.Ha
 			authManager.SignIn(r, auth.User{ID: "test-" + role, Email: "test-" + role + "@example.com", Roles: []string{role}})
 			next.ServeHTTP(w, r)
 		})
+	}
+}
+
+func bindPortalSpeaker(speakerID string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			session.Current(r).Set(portalSpeakerSessionKey, speakerID)
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+func testPortalWorkspace(t *testing.T) (domain.State, *store.JSONStore) {
+	t.Helper()
+	state := domain.FreshState(time.Now().UTC())
+	state.Speakers = append(state.Speakers,
+		domain.Speaker{ID: "spk_owner", FirstName: "Owner", LastName: "Speaker", Email: "owner@example.com"},
+		domain.Speaker{ID: "spk_other", FirstName: "Other", LastName: "Speaker", Email: "other@example.com"},
+	)
+	state.Tasks = append(state.Tasks,
+		domain.Task{ID: "task_headshot", Title: "Headshot", Type: "headshot", AssignedSpeakerIDs: []string{"spk_owner"}},
+		domain.Task{ID: "task_slides", Title: "Slides", Type: "file", AssignedSpeakerIDs: []string{"spk_owner"}},
+		domain.Task{ID: "task_other", Title: "Other task", Type: "file", AssignedSpeakerIDs: []string{"spk_other"}},
+	)
+	workspace, err := store.Open(":memory:", state)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	appstate.Set(workspace)
+	return state, workspace
+}
+
+func portalUploadRequest(t *testing.T, path, name string, contents []byte) *http.Request {
+	t.Helper()
+	body := new(bytes.Buffer)
+	writer := multipart.NewWriter(body)
+	part, err := writer.CreateFormFile("file", name)
+	if err != nil {
+		t.Fatalf("CreateFormFile: %v", err)
+	}
+	if _, err := part.Write(contents); err != nil {
+		t.Fatalf("write upload fixture: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close multipart body: %v", err)
+	}
+	request := httptest.NewRequest(http.MethodPost, path, body)
+	request.Header.Set("Content-Type", writer.FormDataContentType())
+	return request
+}
+
+func TestPortalUploadRequiresBoundOwnerOrMutatingOrganizer(t *testing.T) {
+	testPortalWorkspace(t)
+	root := t.TempDir()
+	path := "/portal-upload/spk_owner/task_headshot"
+	payload := []byte{0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 'J', 'F', 'I', 'F'}
+	manager := testSessionManager(t)
+	authManager := identity.New(manager)
+	handler := http.HandlerFunc(portalUpload(root))
+
+	for _, test := range []struct {
+		name string
+		wrap func(http.Handler) http.Handler
+	}{
+		{name: "anonymous", wrap: func(next http.Handler) http.Handler { return next }},
+		{name: "foreign speaker", wrap: bindPortalSpeaker("spk_other")},
+		{name: "observer", wrap: signInAs(authManager, identity.RoleObserver)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			wrapped := manager.Middleware(test.wrap(authManager.Middleware(handler)))
+			wrapped.ServeHTTP(recorder, portalUploadRequest(t, path, "portrait.jpg", payload))
+			if recorder.Code != http.StatusNotFound {
+				t.Fatalf("status = %d, want non-enumerating 404; body=%s", recorder.Code, recorder.Body.String())
+			}
+		})
+	}
+	if _, err := os.Stat(filepath.Join(root, "data", "uploads")); !os.IsNotExist(err) {
+		t.Fatalf("unauthorized upload prepared storage, stat err = %v", err)
+	}
+}
+
+func TestPortalUploadChecksAssignmentImageBytesAndLimit(t *testing.T) {
+	_, workspace := testPortalWorkspace(t)
+	root := t.TempDir()
+	manager := testSessionManager(t)
+	handler := manager.Middleware(bindPortalSpeaker("spk_owner")(http.HandlerFunc(portalUpload(root))))
+
+	// An assigned speaker cannot submit an unassigned task even with a valid
+	// portal session. The response is intentionally indistinguishable from a
+	// missing task and no disk write happens first.
+	unauthorized := httptest.NewRecorder()
+	handler.ServeHTTP(unauthorized, portalUploadRequest(t, "/portal-upload/spk_owner/task_other", "slides.pdf", []byte("%PDF-1.7")))
+	if unauthorized.Code != http.StatusNotFound {
+		t.Fatalf("unassigned task status = %d, want 404", unauthorized.Code)
+	}
+
+	// A file named .jpg but containing text cannot enter the public-headshot
+	// review pipeline.
+	notImage := httptest.NewRecorder()
+	handler.ServeHTTP(notImage, portalUploadRequest(t, "/portal-upload/spk_owner/task_headshot", "portrait.jpg", []byte("not an image")))
+	if notImage.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("fake headshot status = %d, want 415", notImage.Code)
+	}
+
+	// The 10 MiB byte cap removes the partial destination before responding.
+	overLimit := httptest.NewRecorder()
+	handler.ServeHTTP(overLimit, portalUploadRequest(t, "/portal-upload/spk_owner/task_slides", "deck.pdf", bytes.Repeat([]byte("a"), maxUploadBytes+1)))
+	if overLimit.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("over-limit status = %d, want 413; body=%s", overLimit.Code, overLimit.Body.String())
+	}
+	entries, err := os.ReadDir(filepath.Join(root, "data", "uploads"))
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatalf("read upload dir: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("rejected uploads left %d files on disk", len(entries))
+	}
+	if len(workspace.Snapshot().TaskCompletions) != 0 {
+		t.Fatalf("rejected uploads created task completions: %+v", workspace.Snapshot().TaskCompletions)
+	}
+}
+
+func TestPortalUploadStoresAuthorizedHeadshotAndBindsProfileURL(t *testing.T) {
+	_, workspace := testPortalWorkspace(t)
+	root := t.TempDir()
+	manager := testSessionManager(t)
+	handler := manager.Middleware(bindPortalSpeaker("spk_owner")(http.HandlerFunc(portalUpload(root))))
+	recorder := httptest.NewRecorder()
+	payload := []byte{0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 'J', 'F', 'I', 'F'}
+	handler.ServeHTTP(recorder, portalUploadRequest(t, "/portal-upload/spk_owner/task_headshot", "portrait.jpg", payload))
+	if recorder.Code != http.StatusSeeOther {
+		t.Fatalf("authorized upload status = %d, want 303; body=%s", recorder.Code, recorder.Body.String())
+	}
+	snapshot := workspace.Snapshot()
+	completion, found := snapshot.Completion("task_headshot", "spk_owner")
+	if !found || completion.Status != domain.TaskSubmitted || completion.StoredPath == "" {
+		t.Fatalf("completion = %+v, found=%v; want submitted stored headshot", completion, found)
+	}
+	speaker, found := snapshot.Speaker("spk_owner")
+	if !found || speaker.HeadshotURL != "/portal-file/"+completion.ID {
+		t.Fatalf("speaker headshot URL = %q, want completion portal URL", speaker.HeadshotURL)
+	}
+	stored, err := os.ReadFile(completion.StoredPath)
+	if err != nil {
+		t.Fatalf("read stored headshot: %v", err)
+	}
+	if !bytes.Equal(stored, payload) {
+		t.Fatalf("stored headshot bytes = %x, want %x", stored, payload)
 	}
 }
 

@@ -8,6 +8,7 @@
 /.playwright
 /.DS_Store
 /.analyses
+/.canopy
 
 /.gts
 /rostrum

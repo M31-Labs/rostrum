@@ -9,16 +9,19 @@ import (
 
 var (
 	mu      sync.RWMutex
-	current *store.JSONStore
+	current store.StateStore
 )
 
-func Set(value *store.JSONStore) {
+// Set installs the process-wide workspace store. Application packages only
+// see store.StateStore, so changing DATA_STORE from JSON to SQLite or
+// Postgres does not require a second set of handlers or identity adapters.
+func Set(value store.StateStore) {
 	mu.Lock()
 	defer mu.Unlock()
 	current = value
 }
 
-func Get() (*store.JSONStore, error) {
+func Get() (store.StateStore, error) {
 	mu.RLock()
 	defer mu.RUnlock()
 	if current == nil {
@@ -27,7 +30,7 @@ func Get() (*store.JSONStore, error) {
 	return current, nil
 }
 
-func MustGet() *store.JSONStore {
+func MustGet() store.StateStore {
 	value, err := Get()
 	if err != nil {
 		panic(err)
