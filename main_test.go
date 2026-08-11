@@ -1,7 +1,10 @@
 package main
 
 import (
+	"archive/tar"
 	"bytes"
+	"compress/gzip"
+	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +16,8 @@ import (
 	"time"
 
 	"github.com/m31-labs/rostrum/internal/appstate"
+	workspacearchive "github.com/m31-labs/rostrum/internal/archive"
+	internalaudit "github.com/m31-labs/rostrum/internal/audit"
 	"github.com/m31-labs/rostrum/internal/domain"
 	"github.com/m31-labs/rostrum/internal/identity"
 	"github.com/m31-labs/rostrum/internal/store"
@@ -102,6 +107,26 @@ func portalUploadRequest(t *testing.T, path, name string, contents []byte) *http
 	}
 	request := httptest.NewRequest(http.MethodPost, path, body)
 	request.Header.Set("Content-Type", writer.FormDataContentType())
+	return request
+}
+
+func workspaceImportRequest(t *testing.T, contents []byte) *http.Request {
+	t.Helper()
+	body := new(bytes.Buffer)
+	writer := multipart.NewWriter(body)
+	part, err := writer.CreateFormFile("workspace", "rostrum-workspace.json")
+	if err != nil {
+		t.Fatalf("CreateFormFile: %v", err)
+	}
+	if _, err := part.Write(contents); err != nil {
+		t.Fatalf("write workspace fixture: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close workspace multipart body: %v", err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/organizer/import/workspace", body)
+	request.Header.Set("Content-Type", writer.FormDataContentType())
+	request.Header.Set("Accept", "application/json")
 	return request
 }
 
@@ -315,6 +340,203 @@ func TestSubmissionsCSVRequiresOrganizerSessionAndEscapesFormulas(t *testing.T) 
 	if !strings.Contains(body, `'=HYPERLINK`) {
 		t.Fatalf("export did not neutralize a formula-looking title: %s", body)
 	}
+}
+
+func TestWorkspaceExportRequiresMutatingRoleAndRecordsAccess(t *testing.T) {
+	state := domain.Seed(time.Now().UTC())
+	state.AuthMagicLinks = []domain.AuthMagicLink{{Token: "transient-token", Email: "owner@example.com", ExpiresAt: time.Now().Add(time.Hour)}}
+	workspace, err := store.Open(":memory:", state)
+	if err != nil {
+		t.Fatalf("open workspace: %v", err)
+	}
+	appstate.Set(workspace)
+
+	manager := testSessionManager(t)
+	authManager := identity.New(manager)
+	handler := http.HandlerFunc(workspaceExport)
+
+	for _, test := range []struct {
+		name string
+		wrap func(http.Handler) http.Handler
+	}{
+		{name: "anonymous", wrap: func(next http.Handler) http.Handler { return next }},
+		{name: "observer", wrap: signInAs(authManager, identity.RoleObserver)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			wrapped := manager.Middleware(test.wrap(authManager.Middleware(handler)))
+			wrapped.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/organizer/export/workspace.json", nil))
+			if recorder.Code != http.StatusForbidden {
+				t.Fatalf("status = %d, want 403; body=%s", recorder.Code, recorder.Body.String())
+			}
+		})
+	}
+
+	recorder := httptest.NewRecorder()
+	wrapped := manager.Middleware(signInAs(authManager, identity.RoleOrganizer)(authManager.Middleware(handler)))
+	wrapped.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/organizer/export/workspace.json", nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("authorized status = %d, want 200; body=%s", recorder.Code, recorder.Body.String())
+	}
+	if got := recorder.Header().Get("Cache-Control"); got != "private, no-store" {
+		t.Fatalf("Cache-Control = %q, want private no-store", got)
+	}
+	exported, err := workspacearchive.Decode(recorder.Body.Bytes())
+	if err != nil {
+		t.Fatalf("decode authorized export: %v", err)
+	}
+	if exported.Event.ID != state.Event.ID || len(exported.AuthMagicLinks) != 0 {
+		t.Fatalf("exported state = %#v, want original event with transient links stripped", exported)
+	}
+
+	snapshot := workspace.Snapshot()
+	if count := len(snapshot.AuditEvents); count != 1 || snapshot.AuditEvents[0].Action != "export.workspace" {
+		t.Fatalf("audit events = %#v, want one workspace export", snapshot.AuditEvents)
+	}
+}
+
+func TestWorkspaceImportValidatesBeforeBackupAndRetainsLocalIdentity(t *testing.T) {
+	source := domain.Seed(time.Now().UTC())
+	source.Event.Name = "Imported program"
+	exportData, err := workspacearchive.Marshal(source)
+	if err != nil {
+		t.Fatalf("marshal source export: %v", err)
+	}
+
+	current := domain.Seed(time.Now().UTC())
+	current.Event.Name = "Current program"
+	current.Principals = []domain.Principal{{ID: "principal_current", Email: "current@example.com"}}
+	current.AuthPasskeys = []domain.AuthPasskey{{ID: "passkey_current"}}
+	workspace, err := store.Open(":memory:", current)
+	if err != nil {
+		t.Fatalf("open current workspace: %v", err)
+	}
+	appstate.Set(workspace)
+
+	manager := testSessionManager(t)
+	authManager := identity.New(manager)
+	backups := filepath.Join(t.TempDir(), "backups")
+	handler := manager.Middleware(signInAs(authManager, identity.RoleOrganizer)(authManager.Middleware(workspaceImport(t.TempDir(), backups))))
+
+	// A stale checksum is rejected before the backup directory is created or
+	// the in-memory workspace is touched.
+	tampered := bytes.Replace(exportData, []byte("Imported program"), []byte("Tampered program"), 1)
+	rejected := httptest.NewRecorder()
+	handler.ServeHTTP(rejected, workspaceImportRequest(t, tampered))
+	if rejected.Code != http.StatusBadRequest {
+		t.Fatalf("tampered import status = %d, want 400; body=%s", rejected.Code, rejected.Body.String())
+	}
+	if _, err := os.Stat(backups); !os.IsNotExist(err) {
+		t.Fatalf("rejected import created backup path, stat err = %v", err)
+	}
+	if got := workspace.Snapshot().Event.Name; got != "Current program" {
+		t.Fatalf("rejected import changed event name to %q", got)
+	}
+
+	accepted := httptest.NewRecorder()
+	handler.ServeHTTP(accepted, workspaceImportRequest(t, exportData))
+	if accepted.Code != http.StatusOK {
+		t.Fatalf("valid import status = %d, want 200; body=%s", accepted.Code, accepted.Body.String())
+	}
+	snapshot := workspace.Snapshot()
+	if snapshot.Event.Name != "Imported program" {
+		t.Fatalf("restored event name = %q, want imported program", snapshot.Event.Name)
+	}
+	if len(snapshot.Principals) != 1 || snapshot.Principals[0].ID != "principal_current" || len(snapshot.AuthPasskeys) != 1 || snapshot.AuthPasskeys[0].ID != "passkey_current" {
+		t.Fatalf("restored identity = principals=%#v passkeys=%#v, want local identity", snapshot.Principals, snapshot.AuthPasskeys)
+	}
+	if count := len(snapshot.AuditEvents); count == 0 || snapshot.AuditEvents[count-1].Action != "import.workspace" {
+		t.Fatalf("restored audit trail = %#v, want final import.workspace record", snapshot.AuditEvents)
+	}
+
+	paths, err := filepath.Glob(filepath.Join(backups, "rostrum-*.json"))
+	if err != nil || len(paths) != 1 {
+		t.Fatalf("backups = %v, err = %v; want one pre-import backup", paths, err)
+	}
+	backupState, err := workspacearchive.Decode(mustReadFile(t, paths[0]))
+	if err != nil {
+		t.Fatalf("decode pre-import backup: %v", err)
+	}
+	if backupState.Event.Name != "Current program" || len(backupState.Principals) != 1 || backupState.Principals[0].ID != "principal_current" {
+		t.Fatalf("pre-import backup = %#v, want exact current workspace", backupState)
+	}
+}
+
+func TestWorkspaceArchiveRequiresMutatingRoleAndIncludesAssets(t *testing.T) {
+	state := domain.Seed(time.Now().UTC())
+	workspace, err := store.Open(":memory:", state)
+	if err != nil {
+		t.Fatalf("open workspace: %v", err)
+	}
+	appstate.Set(workspace)
+	root := t.TempDir()
+	uploads := filepath.Join(root, "data", "uploads")
+	if err := os.MkdirAll(uploads, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(uploads, "upload_example.pdf"), []byte("slides"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	auditPath := filepath.Join(root, "data", "audit.log")
+	ledger, err := internalaudit.Open(auditPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ledger.Append(internalaudit.Event{Kind: "test.archive", Subject: "workspace"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ledger.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	manager := testSessionManager(t)
+	authManager := identity.New(manager)
+	handler := workspaceArchive(root, auditPath)
+	unauthorized := httptest.NewRecorder()
+	manager.Middleware(authManager.Middleware(handler)).ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/organizer/export/archive.tar.gz", nil))
+	if unauthorized.Code != http.StatusForbidden {
+		t.Fatalf("unauthorized archive status = %d, want 403", unauthorized.Code)
+	}
+
+	archiveResponse := httptest.NewRecorder()
+	wrapped := manager.Middleware(signInAs(authManager, identity.RoleOrganizer)(authManager.Middleware(handler)))
+	wrapped.ServeHTTP(archiveResponse, httptest.NewRequest(http.MethodGet, "/organizer/export/archive.tar.gz", nil))
+	if archiveResponse.Code != http.StatusOK {
+		t.Fatalf("authorized archive status = %d, want 200; body=%s", archiveResponse.Code, archiveResponse.Body.String())
+	}
+	reader, err := gzip.NewReader(bytes.NewReader(archiveResponse.Body.Bytes()))
+	if err != nil {
+		t.Fatalf("open archive gzip: %v", err)
+	}
+	defer reader.Close()
+	tarReader := tar.NewReader(reader)
+	files := map[string]string{}
+	for {
+		header, err := tarReader.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("read archive: %v", err)
+		}
+		contents, err := io.ReadAll(tarReader)
+		if err != nil {
+			t.Fatalf("read %s: %v", header.Name, err)
+		}
+		files[header.Name] = string(contents)
+	}
+	if files["workspace.json"] == "" || files["uploads/upload_example.pdf"] != "slides" || files["audit/audit.log"] == "" {
+		t.Fatalf("archive files = %#v, want workspace, uploads, and audit ledger", files)
+	}
+}
+
+func mustReadFile(t *testing.T, path string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return data
 }
 
 func TestCalendarDownloadRequiresKeyOrSession(t *testing.T) {

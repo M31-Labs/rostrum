@@ -144,6 +144,8 @@ press `G` plus a route key to jump to any surface.
 | `GET /api/v1/speakers` | Speakers on published sessions only | 60 seconds |
 | `GET /calendar/{speaker}.ics` | Private per-speaker calendar file | private, 60 seconds |
 | `GET /organizer/export/submissions.csv` | Organizer CSV export | private, no-store |
+| `GET /organizer/export/workspace.json` | Checksummed organizer workspace export | private, no-store |
+| `GET /organizer/export/archive.tar.gz` | Workspace, uploads, and audit archive | private, no-store |
 
 ## Optional integrations
 
@@ -158,22 +160,23 @@ Rostrum runs complete with zero credentials. Add these when you want them:
 - **Storage.** Set `STORE_DRIVER=sqlite` for a local WAL-backed database, or
   `STORE_DRIVER=postgres` with `DATABASE_URL` for Postgres. Set
   `AUDIT_LOG_PATH` when the independent audit ledger should live outside the
-  default `data/` directory.
+  default `data/` directory, and `BACKUP_DIR` to locate the newest-ten
+  pre-import backups.
 
 See [.env.example](.env.example) for every setting.
 
 ## Scope today
 
-One Rostrum instance runs one organization's program: one event workspace,
-one process, one JSON data file. This release has no tenant accounts and no
-role system.
+One Rostrum instance runs one organization's program: one event workspace and
+one process. Organizer, chair, and observer roles are scoped to that single
+workspace; this release has no multi-tenant account model.
 
 ## Development
 
 Install the GoSX CLI and Arbiter for the full check suite:
 
 ```bash
-go install m31labs.dev/gosx/cmd/gosx@v0.38.0
+go install m31labs.dev/gosx/cmd/gosx@v0.38.1
 go install m31labs.dev/arbiter/cmd/arbiter@v1.9.0
 ```
 

@@ -179,6 +179,37 @@ func Page() Node {
 						</Each>
 					</div>
 				</section>
+				<section class="panel">
+					<header class="panel-header">
+						<div>
+							<p class="panel-kicker">Ownership</p>
+							<h2>Export and restore</h2>
+						</div>
+					</header>
+					<p>
+						Download a checksummed workspace for a guided restore, or a full archive with uploads and the independent audit ledger.
+					</p>
+					<p class="settings-actions">
+						<a class="button" href="/organizer/export/workspace.json">Download workspace</a>
+						<a class="button" href="/organizer/export/archive.tar.gz">Download full archive</a>
+					</p>
+					<form
+						class="settings-form workspace-import-form"
+						method="post"
+						action="/organizer/import/workspace"
+						enctype="multipart/form-data"
+					>
+						<input type="hidden" name="csrf_token" value={csrf.token}></input>
+						<label>
+							<span>Restore workspace export</span>
+							<input type="file" name="workspace" accept="application/json,.json" required></input>
+						</label>
+						<p class="form-note">
+							A validated restore first creates a local backup. This host’s organizer principals, passkeys, and pending sign-in links stay in place.
+						</p>
+						<button class="button button-primary" type="submit">Restore workspace</button>
+					</form>
+				</section>
 			</aside>
 		</div>
 	</main>

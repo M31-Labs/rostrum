@@ -1,6 +1,7 @@
-.PHONY: dev check test build size-budget perf-budget release-check
+.PHONY: dev check test build size-budget perf-budget release-check check-gosx
 
 GOSX ?= gosx
+GOSX_VERSION ?= 0.38.1
 PERF_URLS ?= http://localhost:8080/ http://localhost:8080/organizer http://localhost:8080/organizer/agenda http://localhost:8080/organizer/portal http://localhost:8080/public/m31-systems-forum-2026/agenda
 
 dev:
@@ -10,7 +11,15 @@ test:
 	go list ./... | grep -v '/dist' | xargs go test
 	go list ./... | grep -v '/dist' | xargs go test -race
 
-check:
+check-gosx:
+	@actual="$$($(GOSX) version 2>/dev/null || true)"; \
+	if [ "$$actual" != "gosx v$(GOSX_VERSION)" ]; then \
+		echo "Rostrum requires gosx v$(GOSX_VERSION); found '$$actual'."; \
+		echo "Install it with: go install m31labs.dev/gosx/cmd/gosx@v$(GOSX_VERSION)"; \
+		exit 1; \
+	fi
+
+check: check-gosx
 	test -z "$$(gofmt -l $$(find . -name '*.go' -not -path './dist/*' -not -path './build/*'))"
 	$(GOSX) fmt --check app
 	for policy_file in rules/*.arb; do arbiter check "$$policy_file"; done
@@ -18,7 +27,7 @@ check:
 	go list ./... | grep -v '/dist' | xargs go test
 	go list ./... | grep -v '/dist' | xargs go test -race
 
-build:
+build: check-gosx
 	rm -rf -- dist
 	CGO_ENABLED=0 $(GOSX) build --prod .
 	find dist/assets/runtime -type f -name '*.map' -delete

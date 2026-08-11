@@ -9,7 +9,7 @@ instance.
 Requirements:
 
 - Go 1.26 or newer.
-- The GoSX CLI: `go install m31labs.dev/gosx/cmd/gosx@v0.38.0`
+- The GoSX CLI: `go install m31labs.dev/gosx/cmd/gosx@v0.38.1`
 - The Arbiter CLI (used by `make check`): `go install m31labs.dev/arbiter/cmd/arbiter@v1.9.0`
 
 ```bash
@@ -132,8 +132,43 @@ disabled entirely.
 ## Storage and replicas
 
 The JSON store validates a cloned next state, then replaces the data file
-with an atomic rename. Run exactly one application replica against one data
-volume. Back up the volume, including `data/uploads`, and test restoration.
+with an atomic rename. SQLite uses the same aggregate contract with WAL;
+Postgres uses the configured `DATABASE_URL`. Run exactly one application
+replica against one workspace volume until a deployment is deliberately
+configured around a shared Postgres backend.
+
+Keep `DATA_PATH`, `data/uploads`, and `AUDIT_LOG_PATH` on durable
+operator-owned storage. The independent audit ledger is intentionally outside
+the mutable workspace state: a workspace restore never rewrites the active
+operational history.
+
+## Export, backup, and restore
+
+Organizers and chairs (never observers) can use **Settings → Export and
+restore**. Every export writes an audit event and returns `Cache-Control:
+private, no-store`.
+
+- **Workspace export** is a checksummed JSON envelope containing the complete
+  structured program state. Transient magic-link records are excluded.
+- **Workspace restore** validates the export version, schema version,
+  checksum, and domain invariants before changing state. It writes an exact
+  pre-import backup to `BACKUP_DIR` (default `data/backups`) and retains the
+  newest ten. The receiving host keeps its own organizer principals,
+  passkeys, and pending magic links, so an import cannot lock out its local
+  operator. Imported upload references are rebased to that host’s
+  `data/uploads` directory.
+- **Full archive** is a streaming `.tar.gz` containing `workspace.json`, all
+  regular files from `data/uploads`, and every active or rotated audit-log
+  segment. It is the cold-storage and file-recovery artifact.
+
+Full-archive file recovery is deliberately a stopped-process operation in
+this release. Extract an archive only into a new, private staging directory;
+first restore its `workspace.json` through the validated Settings flow, then
+stop Rostrum and copy the staged `uploads/` files into the receiving
+`data/uploads` directory. Restart and verify portal downloads byte-for-byte.
+Keep the staged `audit/` directory with the recovery record; do not splice it
+into a live audit log, whose hash chain belongs to the receiving instance.
+This preserves both the source evidence and the destination’s audit history.
 
 ## Operational configuration
 

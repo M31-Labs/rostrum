@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/m31-labs/rostrum/internal/appstate"
+	workspacearchive "github.com/m31-labs/rostrum/internal/archive"
 	"github.com/m31-labs/rostrum/internal/audit"
 	programcalendar "github.com/m31-labs/rostrum/internal/calendar"
 	"github.com/m31-labs/rostrum/internal/domain"
@@ -75,6 +76,7 @@ func main() {
 		log.Fatal(err)
 	}
 	auditPath := getenv("AUDIT_LOG_PATH", filepath.Join(root, "data", "audit.log"))
+	backupDirectory := getenv("BACKUP_DIR", filepath.Join(root, "data", "backups"))
 	ledger, err := audit.Open(auditPath)
 	if err != nil {
 		_ = workspace.Close()
@@ -252,6 +254,9 @@ func main() {
 	app.Mount("/portal-upload/", http.HandlerFunc(portalUpload(root)))
 	app.Mount("/portal-file/", http.HandlerFunc(portalFile(root)))
 	app.Mount("/organizer/export/submissions.csv", http.HandlerFunc(submissionsCSV))
+	app.Mount("/organizer/export/workspace.json", http.HandlerFunc(workspaceExport))
+	app.Mount("/organizer/export/archive.tar.gz", http.HandlerFunc(workspaceArchive(root, auditPath)))
+	app.Mount("/organizer/import/workspace", http.HandlerFunc(workspaceImport(root, backupDirectory)))
 	app.Mount("/favicon.ico", http.RedirectHandler("/favicon.svg", http.StatusTemporaryRedirect))
 	app.Mount("/demo/reset", resetDemo(root))
 
@@ -536,9 +541,11 @@ func (w noCacheResponseWriter) Write(b []byte) (int, error) {
 // bounds the stored file payload itself. defaultBodyLimit bounds every other
 // route so no form endpoint spools an unbounded body to memory or disk.
 const (
-	uploadBodyEnvelope = 12 << 20
-	maxUploadBytes     = 10 << 20
-	defaultBodyLimit   = 1 << 20
+	uploadBodyEnvelope      = 12 << 20
+	maxUploadBytes          = 10 << 20
+	workspaceImportEnvelope = 34 << 20
+	maxWorkspaceImportBytes = 32 << 20
+	defaultBodyLimit        = 1 << 20
 )
 
 // bodyLimit caps the request body via http.MaxBytesReader before any
@@ -550,8 +557,13 @@ func bodyLimit() server.Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			limit := int64(defaultBodyLimit)
-			if r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/portal-upload/") {
-				limit = uploadBodyEnvelope
+			if r.Method == http.MethodPost {
+				switch {
+				case strings.HasPrefix(r.URL.Path, "/portal-upload/"):
+					limit = uploadBodyEnvelope
+				case r.URL.Path == "/organizer/import/workspace":
+					limit = workspaceImportEnvelope
+				}
 			}
 			r.Body = http.MaxBytesReader(w, r.Body, limit)
 			next.ServeHTTP(w, r)
@@ -567,11 +579,10 @@ func bodyLimit() server.Middleware {
 // whoever a reverse proxy already let reach `/organizer` -- the leak this
 // gate closes.
 //
-// /organizer/export/submissions.csv is deliberately excluded: it enforces
-// its own tighter, non-redirecting 403 in submissionsCSV (organizer and
-// chair only, never observer, because the export carries speaker PII), and
-// an API-shaped export must never answer a cookie-less request with a
-// browser redirect.
+// The three /organizer/export paths are deliberately excluded: each enforces
+// its own tighter, non-redirecting 403 (organizer and chair only, never
+// observer, because the exports carry speaker PII), and an API-shaped export
+// must never answer a cookie-less request with a browser redirect.
 //
 // GOSX_STATIC_EXPORT=1 disables the gate entirely. `gosx build --prod`
 // (cmd/gosx/prerender.go) launches this exact binary as a short-lived,
@@ -621,7 +632,8 @@ func isMutationMethod(method string) bool {
 
 func isOrganizerGatedPath(path string) bool {
 	trimmed := strings.TrimSuffix(path, "/")
-	if trimmed == "/organizer/export/submissions.csv" {
+	switch trimmed {
+	case "/organizer/export/submissions.csv", "/organizer/export/workspace.json", "/organizer/export/archive.tar.gz":
 		return false
 	}
 	return trimmed == "/organizer" || strings.HasPrefix(trimmed, "/organizer/")
@@ -772,6 +784,11 @@ func submissionsCSV(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	state := appstate.MustGet().Snapshot()
+	if err := recordWorkspaceExport(r, "export.submissions", "rostrum-submissions.csv"); err != nil {
+		log.Printf("record submissions export: %v", err)
+		http.Error(w, "could not record export", http.StatusInternalServerError)
+		return
+	}
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	w.Header().Set("Content-Disposition", `attachment; filename="rostrum-submissions.csv"`)
 	w.Header().Set("Cache-Control", "private, no-store")
@@ -798,6 +815,181 @@ func submissionsCSV(w http.ResponseWriter, r *http.Request) {
 	if err := writer.Error(); err != nil {
 		log.Printf("write submissions export: %v", err)
 	}
+}
+
+// workspaceExport serves the validated, portable workspace envelope. It is
+// intentionally a standalone handler rather than a file-route action so an
+// operator can download a privacy-sensitive file with ordinary HTTP and a
+// cookie-less request always receives 403 instead of a login redirect.
+func workspaceExport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !canExportSubmissions(r) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	state := appstate.MustGet().Snapshot()
+	data, err := workspacearchive.Marshal(state)
+	if err != nil {
+		log.Printf("encode workspace export: %v", err)
+		http.Error(w, "could not export workspace", http.StatusInternalServerError)
+		return
+	}
+	if err := recordWorkspaceExport(r, "export.workspace", "rostrum-workspace.json"); err != nil {
+		log.Printf("record workspace export: %v", err)
+		http.Error(w, "could not record export", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="rostrum-workspace.json"`)
+	w.Header().Set("Cache-Control", "private, no-store")
+	_, _ = w.Write(data)
+}
+
+// workspaceArchive serves a streaming cold archive containing the portable
+// workspace envelope, every local upload, and the independent audit ledger.
+// Its archive is deliberately restoreable without a running Rostrum process;
+// see docs/deployment.md for the stopped-process recovery procedure.
+func workspaceArchive(root, auditPath string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !canExportSubmissions(r) {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		state := appstate.MustGet().Snapshot()
+		// Confirm encoding before we commit the audit access event or start a
+		// response stream. WriteTarGZ encodes once more when it writes the tar
+		// entry, but this first pass makes a malformed state fail cleanly.
+		if _, err := workspacearchive.Marshal(state); err != nil {
+			log.Printf("encode workspace archive: %v", err)
+			http.Error(w, "could not export workspace archive", http.StatusInternalServerError)
+			return
+		}
+		if err := recordWorkspaceExport(r, "export.archive", "rostrum-archive.tar.gz"); err != nil {
+			log.Printf("record workspace archive export: %v", err)
+			http.Error(w, "could not record export", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/gzip")
+		w.Header().Set("Content-Disposition", `attachment; filename="rostrum-archive.tar.gz"`)
+		w.Header().Set("Cache-Control", "private, no-store")
+		if err := workspacearchive.WriteTarGZ(w, state, filepath.Join(root, "data", "uploads"), auditPath); err != nil {
+			// The response may already have started, so preserve its valid stream
+			// prefix and log the operational detail instead of attempting a second
+			// incompatible HTTP response.
+			log.Printf("write workspace archive: %v", err)
+		}
+	}
+}
+
+// workspaceImport accepts only a checksummed workspace envelope. Full
+// archive recovery intentionally remains a stopped-process operation: the
+// archive is a forensic/asset bundle and must never replace active files
+// halfway through an HTTP request. Before this JSON-only restore changes any
+// state, it validates the whole envelope and writes the current state to a
+// durable, retention-managed backup.
+func workspaceImport(root, backupDirectory string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !canMutateWorkspace(r) {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		if err := r.ParseMultipartForm(maxWorkspaceImportBytes); err != nil {
+			var maxBytesError *http.MaxBytesError
+			if errors.As(err, &maxBytesError) {
+				writeMutationError(w, r, http.StatusRequestEntityTooLarge, "Workspace import must be smaller than 32 MB.")
+				return
+			}
+			writeMutationError(w, r, http.StatusBadRequest, "Choose a valid workspace export file.")
+			return
+		}
+		if r.MultipartForm != nil {
+			defer r.MultipartForm.RemoveAll()
+		}
+		file, _, err := r.FormFile("workspace")
+		if err != nil {
+			writeMutationError(w, r, http.StatusBadRequest, "Choose a workspace export file.")
+			return
+		}
+		defer file.Close()
+		data, err := io.ReadAll(io.LimitReader(file, maxWorkspaceImportBytes+1))
+		if err != nil {
+			writeMutationError(w, r, http.StatusBadRequest, "Could not read the workspace export file.")
+			return
+		}
+		if len(data) > maxWorkspaceImportBytes {
+			writeMutationError(w, r, http.StatusRequestEntityTooLarge, "Workspace import must be smaller than 32 MB.")
+			return
+		}
+		imported, err := workspacearchive.Decode(data)
+		if err != nil {
+			writeMutationError(w, r, http.StatusBadRequest, "Workspace import was rejected: "+err.Error())
+			return
+		}
+
+		current := appstate.MustGet().Snapshot()
+		next := workspacearchive.PreserveCurrentIdentity(current, imported)
+		next, err = workspacearchive.RebaseUploadPaths(next, filepath.Join(root, "data", "uploads"))
+		if err != nil {
+			writeMutationError(w, r, http.StatusBadRequest, "Workspace import was rejected: "+err.Error())
+			return
+		}
+		if err := next.Validate(); err != nil {
+			writeMutationError(w, r, http.StatusBadRequest, "Workspace import was rejected: "+err.Error())
+			return
+		}
+		backupPath, err := workspacearchive.WriteBackup(backupDirectory, current)
+		if err != nil {
+			log.Printf("create workspace import backup: %v", err)
+			writeMutationError(w, r, http.StatusInternalServerError, "Could not create the required pre-import backup.")
+			return
+		}
+		if err := appstate.MustGet().Replace(next, domain.AuditMeta{
+			Actor:      workspaceActor(r),
+			Action:     "import.workspace",
+			EntityType: "workspace",
+			EntityID:   "workspace",
+			Summary:    "Validated workspace import applied; local sign-in principals retained.",
+			Origin:     "organizer-import",
+		}); err != nil {
+			log.Printf("replace imported workspace after backup %s: %v", backupPath, err)
+			writeMutationError(w, r, http.StatusInternalServerError, "Could not apply the workspace import; the pre-import backup was retained.")
+			return
+		}
+		session.AddFlash(r, "notice", "Workspace restored. This host's sign-in principals were retained; a pre-import backup was created.")
+		live.Broadcast("workspace:restored", map[string]any{"at": time.Now().UTC()})
+		writeMutationSuccess(w, r, "Workspace restored. This host's sign-in principals were retained.", "/organizer/settings")
+	}
+}
+
+func recordWorkspaceExport(r *http.Request, actionName, exportName string) error {
+	return appstate.MustGet().UpdateAudit(domain.AuditMeta{
+		Actor:      workspaceActor(r),
+		Action:     actionName,
+		EntityType: "workspace",
+		EntityID:   "workspace",
+		Summary:    "Operator exported " + exportName + ".",
+		Origin:     "organizer-export",
+	}, func(*domain.State) error {
+		return nil
+	})
+}
+
+func workspaceActor(r *http.Request) string {
+	if user, ok := auth.Current(r); ok && strings.TrimSpace(user.ID) != "" {
+		return "organizer:" + user.ID
+	}
+	return "organizer"
 }
 
 // calendarDownload serves GET /calendar/{speaker}.ics.

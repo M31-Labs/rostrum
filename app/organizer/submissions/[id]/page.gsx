@@ -27,13 +27,22 @@ func AcceptForm(props any) Node {
 
 func ChairOverrideFields() Node {
 	return <details class="rubric-details">
-		<summary>Chair override (only if quorum is incomplete)</summary>
+		<summary>
+			Chair override (only if quorum is incomplete)
+		</summary>
 		<label>
-			<span><input type="checkbox" name="chair_override"></input> Record a chair override</span>
+			<span>
+				<input type="checkbox" name="chair_override"></input>
+				Record a chair override
+			</span>
 		</label>
 		<label>
 			<span>Decision rationale</span>
-			<textarea name="override_reason" maxlength="1000" placeholder="Why this final decision should proceed without the usual review quorum"></textarea>
+			<textarea
+				name="override_reason"
+				maxlength="1000"
+				placeholder="Why this final decision should proceed without the usual review quorum"
+			></textarea>
 			<p class="form-error" data-gosx-field-error="override_reason" aria-live="polite"></p>
 		</label>
 		<p class="form-error" data-gosx-field-error="chair_override" aria-live="polite"></p>

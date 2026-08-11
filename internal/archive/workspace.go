@@ -98,6 +98,33 @@ func PreserveCurrentIdentity(current, imported domain.State) domain.State {
 	return result
 }
 
+// RebaseUploadPaths moves imported task-completion references onto the
+// receiving instance's upload directory. Archives store the bytes by the
+// generated basename, not an old host's absolute path, so a validated import
+// can be followed by a stopped-process asset restore on a different host.
+// Existing paths are deliberately flattened: portalUpload has always stored
+// uploads in one directory and a crafted archive must not introduce a nested
+// or traversal path into the receiver's state.
+func RebaseUploadPaths(state domain.State, uploadsDirectory string) (domain.State, error) {
+	directory := filepath.Clean(strings.TrimSpace(uploadsDirectory))
+	if directory == "" || directory == "." {
+		return domain.State{}, fmt.Errorf("upload directory is required")
+	}
+	result := cloneState(state)
+	for index := range result.TaskCompletions {
+		storedPath := strings.TrimSpace(result.TaskCompletions[index].StoredPath)
+		if storedPath == "" {
+			continue
+		}
+		name := filepath.Base(filepath.FromSlash(storedPath))
+		if name == "" || name == "." || name == string(filepath.Separator) || name == ".." {
+			return domain.State{}, fmt.Errorf("task completion %s has an invalid stored upload path", result.TaskCompletions[index].ID)
+		}
+		result.TaskCompletions[index].StoredPath = filepath.ToSlash(filepath.Join(directory, name))
+	}
+	return result, nil
+}
+
 // WriteBackup atomically writes the exact pre-import state as a checksummed
 // envelope, then retains the newest BackupRetention files only.
 func WriteBackup(directory string, state domain.State) (string, error) {
@@ -264,12 +291,12 @@ func writeDirectory(writer *tar.Writer, directory, prefix string) error {
 }
 
 func writeFile(writer *tar.Writer, path, archivePath string) error {
-	info, err := os.Stat(path)
+	info, err := os.Lstat(path)
 	if err != nil {
 		return fmt.Errorf("stat archive file %s: %w", path, err)
 	}
 	if !info.Mode().IsRegular() {
-		return nil
+		return fmt.Errorf("archive file %s is not regular", path)
 	}
 	file, err := os.Open(path)
 	if err != nil {
@@ -284,8 +311,16 @@ func writeFile(writer *tar.Writer, path, archivePath string) error {
 	if err := writer.WriteHeader(header); err != nil {
 		return fmt.Errorf("write archive header %s: %w", path, err)
 	}
-	if _, err := io.Copy(writer, file); err != nil {
+	// The active audit segment can receive an append while an archive is
+	// streaming. The tar header commits the size observed above, so copy only
+	// that snapshot-sized prefix rather than letting a concurrent append exceed
+	// the entry and corrupt the rest of the archive.
+	written, err := io.Copy(writer, io.LimitReader(file, info.Size()))
+	if err != nil {
 		return fmt.Errorf("write archive file %s: %w", path, err)
+	}
+	if written != info.Size() {
+		return fmt.Errorf("archive file %s changed while it was read", path)
 	}
 	return nil
 }

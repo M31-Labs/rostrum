@@ -168,7 +168,9 @@ func Page() Node {
 				<ActionForm actionName="assignPendingToActivePlan">
 					<input type="hidden" name="csrf_token" value={csrf.token}></input>
 					<button class="button button-compact" type="submit">Assign pending proposals</button>
-					<p class="form-status" role="status" aria-live="polite">{actions.assignPendingToActivePlan.message}</p>
+					<p class="form-status" role="status" aria-live="polite">
+						{actions.assignPendingToActivePlan.message}
+					</p>
 				</ActionForm>
 			</header>
 			<div class="review-table" role="table" aria-label="Round two candidate scores">

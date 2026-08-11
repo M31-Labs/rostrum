@@ -49,6 +49,24 @@ func TestEnvelopeRejectsTamperingAndPreservesCurrentIdentity(t *testing.T) {
 	}
 }
 
+func TestRebaseUploadPathsUsesOnlyGeneratedBasenames(t *testing.T) {
+	state := domain.Seed(time.Now().UTC())
+	state.TaskCompletions = append(state.TaskCompletions, domain.TaskCompletion{
+		ID: "done_rebase", TaskID: state.Tasks[0].ID, SpeakerID: state.Speakers[0].ID,
+		StoredPath: "/old-host/data/uploads/upload_example.pdf",
+	})
+	rebased, err := RebaseUploadPaths(state, "/new-host/data/uploads")
+	if err != nil {
+		t.Fatalf("RebaseUploadPaths: %v", err)
+	}
+	if got, want := rebased.TaskCompletions[len(rebased.TaskCompletions)-1].StoredPath, "/new-host/data/uploads/upload_example.pdf"; got != want {
+		t.Fatalf("rebased path = %q, want %q", got, want)
+	}
+	if _, err := RebaseUploadPaths(state, ""); err == nil {
+		t.Fatal("RebaseUploadPaths(empty) = nil error, want required directory error")
+	}
+}
+
 func TestWriteBackupRetainsNewestTen(t *testing.T) {
 	directory := t.TempDir()
 	state := domain.Seed(time.Now().UTC())
