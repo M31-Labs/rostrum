@@ -493,6 +493,66 @@ func (state *State) QueueAcceptanceCommunication(sessionID string, speakerIDs []
 	return queued
 }
 
+// QueuePublishedInviteCommunications appends one durable, automatic calendar
+// invitation for every speaker on each published session in sessionIDs. The
+// operation is idempotent per (PublishedInviteTemplateID, speakerID, session)
+// pair, so retrying the publish action does not send duplicate invitations.
+// Callers must deliver the queued rows after the surrounding durable mutation
+// commits; the communications runner performs that send outside the store
+// lock and records the outcome separately.
+func (state *State) QueuePublishedInviteCommunications(sessionIDs []string, now time.Time) (queued int) {
+	if state == nil {
+		return 0
+	}
+	for _, rawSessionID := range sessionIDs {
+		sessionID := strings.TrimSpace(rawSessionID)
+		if sessionID == "" {
+			continue
+		}
+		session, found := state.Session(sessionID)
+		if !found || session.Status != "published" || !session.Scheduled() {
+			continue
+		}
+		for _, rawSpeakerID := range session.SpeakerIDs {
+			speakerID := strings.TrimSpace(rawSpeakerID)
+			if speakerID == "" {
+				continue
+			}
+			if _, exists := state.Communication(PublishedInviteTemplateID, speakerID, session.ID); exists {
+				continue
+			}
+			state.ensurePublishedInviteTemplate()
+			state.Communications = append(state.Communications, Communication{
+				ID:             NewID("comm"),
+				TemplateID:     PublishedInviteTemplateID,
+				SpeakerID:      speakerID,
+				SessionID:      session.ID,
+				Subject:        PublishedInviteSubject,
+				Status:         CommunicationQueued,
+				Provider:       "scheduler",
+				DeliveryMode:   DeliveryAutomatic,
+				Trigger:        "agenda.published",
+				IdempotencyKey: "agenda-published:" + session.ID + ":" + speakerID,
+				ScheduledFor:   now,
+				NextAttemptAt:  now,
+				CreatedAt:      now,
+				MaxAttempts:    5,
+			})
+			queued++
+		}
+	}
+	return queued
+}
+
+func (state *State) ensurePublishedInviteTemplate() {
+	for _, template := range state.EmailTemplates {
+		if template.ID == PublishedInviteTemplateID {
+			return
+		}
+	}
+	state.EmailTemplates = append(state.EmailTemplates, PublishedInviteTemplate())
+}
+
 // MarkCommunicationSent finds the queued Communication row addressed to
 // speakerID on templateID for sessionID — the row QueueAcceptanceCommunication
 // (or an equivalent queuing step) already appended — and records the
@@ -818,6 +878,31 @@ func auditText(value string, limit int) string {
 // accept-time transition in app/organizer/submissions/page.server.go send
 // an accepted speaker.
 const AcceptanceTemplateID = "tpl_acceptance"
+
+// PublishedInviteTemplateID names the system template used when a scheduled
+// session crosses from draft to published. It is separate from acceptance so
+// an acceptance sent before scheduling does not suppress the later calendar
+// invitation.
+const (
+	PublishedInviteTemplateID = "tpl_published_invite"
+	PublishedInviteSubject    = "Your session is on the agenda"
+)
+
+// PublishedInviteTemplate returns the default wording for a speaker's agenda
+// publication notice. The calendar attachment is added by the communications
+// runner after it confirms the session is published.
+func PublishedInviteTemplate() EmailTemplate {
+	return EmailTemplate{
+		ID:             PublishedInviteTemplateID,
+		Name:           "Published agenda invitation",
+		Audience:       "speaker",
+		Subject:        PublishedInviteSubject,
+		Body:           "Hi {{speaker.first_name}},\n\nYour session, {{session.title}}, is now on the published agenda for {{event.name}}. The calendar invite is attached.\n\nProgram team",
+		ReplyTo:        "program@example.com",
+		AttachCalendar: true,
+		System:         true,
+	}
+}
 
 type Integration struct {
 	ID            string    `json:"id"`

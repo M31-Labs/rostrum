@@ -2,6 +2,7 @@ package communications
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -66,6 +67,43 @@ func TestRunnerPersistsThenDeliversDerivedTaskReminder(t *testing.T) {
 	item := snapshot.Communications[0]
 	if item.Status != domain.CommunicationSent || item.AttemptCount != 1 || item.Provider != "test-sender" || item.SentAt.IsZero() {
 		t.Fatalf("delivery row = %#v", item)
+	}
+}
+
+func TestRunnerDeliversPublishedAgendaInvites(t *testing.T) {
+	now := time.Date(2026, time.August, 10, 12, 0, 0, 0, time.UTC)
+	state := domain.Seed(now)
+	state.Communications = nil
+	scheduled, found := state.Session("ses_maintainers")
+	if !found {
+		t.Fatal("seed session ses_maintainers not found")
+	}
+	scheduled.Status = "published"
+	if queued := state.QueuePublishedInviteCommunications([]string{scheduled.ID}, now); queued != 2 {
+		t.Fatalf("queued invites = %d, want 2", queued)
+	}
+	workspace, err := store.Open(":memory:", state)
+	if err != nil {
+		t.Fatalf("open workspace: %v", err)
+	}
+	sender := &testSender{}
+	report, err := (Runner{Store: workspace, Sender: sender, Now: func() time.Time { return now }}).RunDue()
+	if err != nil {
+		t.Fatalf("RunDue: %v", err)
+	}
+	if report.Sent != 2 || len(sender.sent) != 2 {
+		t.Fatalf("report/sends = %#v / %#v", report, sender.sent)
+	}
+	for _, message := range sender.sent {
+		if message.Calendar == nil || !strings.Contains(string(message.Calendar), "METHOD:REQUEST") {
+			t.Fatalf("published invite message missing calendar request: %#v", message)
+		}
+		if message.Subject != domain.PublishedInviteSubject {
+			t.Fatalf("published invite subject = %q, want %q", message.Subject, domain.PublishedInviteSubject)
+		}
+	}
+	if second, err := (Runner{Store: workspace, Sender: sender, Now: func() time.Time { return now }}).RunDue(); err != nil || second.Sent != 0 || len(sender.sent) != 2 {
+		t.Fatalf("repeat RunDue = %#v, %v; sends = %d, want no duplicate", second, err, len(sender.sent))
 	}
 }
 

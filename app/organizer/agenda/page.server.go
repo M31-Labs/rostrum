@@ -7,12 +7,15 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/m31-labs/rostrum/internal/actionflow"
 	"github.com/m31-labs/rostrum/internal/appstate"
+	delivery "github.com/m31-labs/rostrum/internal/communications"
 	"github.com/m31-labs/rostrum/internal/domain"
 	"github.com/m31-labs/rostrum/internal/live"
+	"github.com/m31-labs/rostrum/internal/mail"
 	"github.com/m31-labs/rostrum/internal/present"
 	decisionrules "github.com/m31-labs/rostrum/rules"
 	"m31labs.dev/gosx/action"
@@ -21,6 +24,10 @@ import (
 	"m31labs.dev/gosx/server"
 	"m31labs.dev/gosx/session"
 )
+
+// agendaSender is resolved after main loads .env, while still avoiding a
+// transport lookup for every publish action.
+var agendaSender = sync.OnceValue(mail.FromEnv)
 
 func init() {
 	if err := route.RegisterFileModuleHere(route.FileModuleOptions{
@@ -166,6 +173,9 @@ func unscheduleSession(ctx *action.Context) error {
 
 func publishAgenda(ctx *action.Context) error {
 	eventID := appstate.MustGet().Snapshot().Event.ID
+	now := time.Now().UTC()
+	var publishedSessionIDs []string
+	queuedInvites := 0
 	if err := appstate.MustGet().UpdateAudit(domain.AuditMeta{
 		Actor:      agendaActor(ctx),
 		Action:     "agenda.published",
@@ -179,7 +189,6 @@ func publishAgenda(ctx *action.Context) error {
 				return action.Validation("Resolve hard conflicts before publishing.", map[string]string{"agenda": "Speaker and room collisions remain."}, ctx.FormData)
 			}
 		}
-		now := time.Now().UTC()
 		for index := range state.Sessions {
 			// M5: only a scheduled session (non-zero start and end) goes
 			// public. An unscheduled bank session keeps its status, so it
@@ -189,12 +198,33 @@ func publishAgenda(ctx *action.Context) error {
 			}
 			state.Sessions[index].Status = "published"
 			state.Sessions[index].LastPublishedAt = now
+			publishedSessionIDs = append(publishedSessionIDs, state.Sessions[index].ID)
 		}
+		queuedInvites = state.QueuePublishedInviteCommunications(publishedSessionIDs, now)
 		return nil
 	}); err != nil {
 		return err
 	}
-	session.AddFlash(ctx.Request, "notice", "Published the conflict-free agenda to portals, embeds, and API consumers.")
+
+	deliveryReport := delivery.Report{}
+	if len(publishedSessionIDs) > 0 {
+		var err error
+		deliveryReport, err = (delivery.Runner{Store: appstate.MustGet(), Sender: agendaSender()}).RunDue()
+		if err != nil {
+			return err
+		}
+		live.Broadcast("communication:outbox_run", map[string]int{
+			"sent":       deliveryReport.Sent,
+			"retried":    deliveryReport.Retried,
+			"failed":     deliveryReport.Failed,
+			"suppressed": deliveryReport.Suppressed,
+		})
+	}
+	notice := "Published the conflict-free agenda to portals, embeds, and API consumers."
+	if queuedInvites > 0 {
+		notice += fmt.Sprintf(" Queued %d speaker calendar invitation(s); %d sent.", queuedInvites, deliveryReport.Sent)
+	}
+	session.AddFlash(ctx.Request, "notice", notice)
 	live.Broadcast("agenda:published", map[string]any{"at": time.Now().UTC()})
 	actionflow.Redirect(ctx, "/organizer/agenda")
 	return nil

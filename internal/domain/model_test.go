@@ -195,6 +195,35 @@ func TestQueueAcceptanceCommunicationIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestQueuePublishedInviteCommunicationsIsIdempotent(t *testing.T) {
+	now := time.Date(2026, time.August, 10, 12, 0, 0, 0, time.UTC)
+	state := Seed(now)
+	state.Communications = nil
+	scheduled, found := state.Session("ses_maintainers")
+	if !found {
+		t.Fatal("seed session ses_maintainers not found")
+	}
+	scheduled.Status = "published"
+
+	queued := state.QueuePublishedInviteCommunications([]string{scheduled.ID}, now)
+	if queued != len(scheduled.SpeakerIDs) || queued != 2 {
+		t.Fatalf("first queue: queued = %d, want 2", queued)
+	}
+	if _, found := state.Communication(PublishedInviteTemplateID, "spk_lina", scheduled.ID); !found {
+		t.Fatal("Lina's published invite row was not persisted")
+	}
+	if _, found := state.Communication(PublishedInviteTemplateID, "spk_priya", scheduled.ID); !found {
+		t.Fatal("Priya's published invite row was not persisted")
+	}
+
+	if queued = state.QueuePublishedInviteCommunications([]string{scheduled.ID}, now); queued != 0 {
+		t.Fatalf("second queue: queued = %d, want 0", queued)
+	}
+	if len(state.Communications) != 2 {
+		t.Fatalf("communications after repeat queue = %d, want 2", len(state.Communications))
+	}
+}
+
 func TestMarkCommunicationSentRecordsSuccess(t *testing.T) {
 	state := &State{Event: Event{Name: "M31 Systems Forum 2026"}}
 	state.QueueAcceptanceCommunication("ses_1", []string{"speaker_1"})

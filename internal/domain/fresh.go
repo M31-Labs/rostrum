@@ -69,6 +69,7 @@ func FreshState(now time.Time) State {
 		},
 		EmailTemplates: []EmailTemplate{
 			{ID: "tpl_submission_confirmation", Name: "Submission confirmation", Audience: "submitter", Subject: "We received {{submission.title}}", Body: "Hi {{speaker.first_name}},\n\nYour proposal, {{submission.title}}, is safely in our review queue.\n\nProgram team", ReplyTo: "program@example.com", System: true},
+			PublishedInviteTemplate(),
 		},
 		UpdatedAt: now,
 	}
@@ -90,6 +91,7 @@ func EmptyState(now time.Time) State {
 			StartsAt: now.AddDate(0, 3, 0),
 			EndsAt:   now.AddDate(0, 3, 0).Add(48 * time.Hour),
 		},
-		UpdatedAt: now,
+		EmailTemplates: []EmailTemplate{PublishedInviteTemplate()},
+		UpdatedAt:      now,
 	}
 }
