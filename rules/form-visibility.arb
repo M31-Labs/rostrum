@@ -1,29 +1,30 @@
-# Dynamic CFP fields use explicit question rules.
+# Dynamic CFP fields use an intentionally constrained question rule. The
+# builder may select a source question, an exact answer, and a target question;
+# it cannot inject arbitrary source or decision code. The host records the
+# target field alongside this policy result in the audit trail.
 
 feature answer from "programma" {
-    format: string
-    category: string
+    value: string
+    expected: string
+    effect: string
 }
 
-rule ShowWorkshopNeeds priority 1 {
+rule ShowMatchingAnswer priority 1 {
     when {
-        answer.format == "Workshop"
+        answer.effect == "show" and answer.value == answer.expected
     }
     then FieldVisibility {
-        field: "workshop_needs",
         visible: true,
-        reason: "workshops require room and facilitation details",
+        reason: "the selected answer makes this question relevant",
     }
 }
 
-rule HideWorkshopNeeds priority 99 {
+rule HideNonMatchingAnswer priority 99 {
     when {
-        answer.format != "Workshop"
+        answer.effect == "show" and answer.value != answer.expected
     }
     then FieldVisibility {
-        field: "workshop_needs",
         visible: false,
-        reason: "the field is not relevant to this format",
+        reason: "the selected answer does not make this question relevant",
     }
 }
-

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -64,7 +65,7 @@ func init() {
 	source := filepath.Join(slugDir, "page.gsx")
 	if err := route.RegisterFileModule(route.FileModuleFor(source, route.FileModuleOptions{
 		Load: func(ctx *route.RouteContext, page route.FilePage) (any, error) {
-			data, err := present.SubmissionForm(appstate.MustGet().Snapshot(), ctx.Param("slug"))
+			data, err := loadSubmissionForm(ctx)
 			if err != nil {
 				// An unknown or retired form slug is a routing miss, not a
 				// server fault: render the branded 404 (app/not-found.gsx)
@@ -84,7 +85,10 @@ func init() {
 			}
 			return server.Metadata{Title: server.Title{Default: "Call for speakers — Rostrum"}, Description: "Submit a proposal to " + eventName + "."}, nil
 		},
-		Actions: route.FileActions{"submitProposal": submitProposal},
+		Actions: route.FileActions{
+			"submitProposal": submitProposal,
+			"saveDraft":      saveDraft,
+		},
 	})); err != nil {
 		log.Fatal(err)
 	}
@@ -102,6 +106,140 @@ func init() {
 	})); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func loadSubmissionForm(ctx *route.RouteContext) (map[string]any, error) {
+	snapshot := appstate.MustGet().Snapshot()
+	draft, speakerID, ok := accessibleDraft(snapshot, ctx.Param("slug"), ctx.Query("draft"), ctx.Query("key"))
+	if ok {
+		data, err := present.SubmissionFormWithValues(snapshot, ctx.Param("slug"), draftValues(snapshot, draft))
+		if err != nil {
+			return nil, err
+		}
+		data["draft"] = map[string]any{"active": true, "id": draft.ID, "key": ctx.Query("key"), "speakerID": speakerID}
+		return data, nil
+	}
+	data, err := present.SubmissionForm(snapshot, ctx.Param("slug"))
+	if err != nil {
+		return nil, err
+	}
+	data["draft"] = map[string]any{"active": false, "id": "", "key": "", "speakerID": ""}
+	return data, nil
+}
+
+// saveDraft preserves an incomplete proposal without sending mail, creating a
+// review item, or consuming the final-submission rate limit. Its redirect is
+// a managed GoSX navigation, so the prefilled draft view arrives without a
+// document refresh and carries a signed, speaker-bound continuation key.
+func saveDraft(ctx *action.Context) error {
+	snapshot := appstate.MustGet().Snapshot()
+	form, found := snapshot.Form(ctx.FormData["form_id"])
+	if !found {
+		return action.Error(404, "Submission form not found.")
+	}
+	if message, ok := rejectUnknownFields(ctx.FormData, form.Fields); !ok {
+		return action.Validation(message, map[string]string{"form": message}, ctx.FormData)
+	}
+	engine, err := decisionrules.Shared()
+	if err != nil {
+		return err
+	}
+	visibleFields, visibilityTrace, err := visibleSchemaFields(engine, form, ctx.FormData)
+	if err != nil {
+		return err
+	}
+	fieldErrors := validateDraftFields(form.Fields, snapshot, ctx.FormData, visibleFields)
+	email := strings.ToLower(strings.TrimSpace(ctx.FormData["email"]))
+	if !strings.Contains(email, "@") {
+		fieldErrors["email"] = "Enter an email address so we can protect your draft."
+	}
+	if len(fieldErrors) > 0 {
+		return action.Validation("Correct the highlighted fields before saving your draft.", fieldErrors, ctx.FormData)
+	}
+
+	draftID := strings.TrimSpace(ctx.FormData["draft_id"])
+	plannedDraftID := draftID
+	if plannedDraftID == "" {
+		// Allocate the identifier before UpdateAudit so the immutable audit
+		// event always points at the exact draft this mutation creates.
+		plannedDraftID = domain.NewID("sub")
+	}
+	draftSpeakerID := ""
+	if draftID != "" {
+		_, draftSpeakerID, found = accessibleDraft(snapshot, form.Slug, draftID, ctx.FormData["draft_key"])
+		if !found {
+			return action.Validation("Your saved draft link is no longer valid. Start a new draft or reopen your saved link.", map[string]string{"form": "Draft access could not be verified."}, ctx.FormData)
+		}
+		if speaker, speakerFound := snapshot.Speaker(draftSpeakerID); !speakerFound || !strings.EqualFold(speaker.Email, email) {
+			return action.Validation("Use the email address that owns this saved draft.", map[string]string{"email": "This draft belongs to a different email address."}, ctx.FormData)
+		}
+	}
+
+	speakerID := ""
+	if err := appstate.MustGet().UpdateAudit(domain.AuditMeta{
+		Actor:      "submitter:" + email,
+		Action:     "submission.draft_saved",
+		EntityType: "submission",
+		EntityID:   plannedDraftID,
+		Summary:    "Saved an incomplete public CFP proposal draft.",
+		Origin:     "public-submission",
+		Rule:       "form-visibility.arb",
+		Trace:      strings.Join(visibilityTrace, " | "),
+	}, func(state *domain.State) error {
+		currentForm, currentFound := state.Form(form.ID)
+		if !currentFound {
+			return action.Error(404, "Submission form not found.")
+		}
+		if currentForm.Status != "open" || time.Now().After(currentForm.CloseAt) {
+			return action.Validation("This call for speakers is closed.", map[string]string{"form": "The submission deadline has passed."}, ctx.FormData)
+		}
+		now := time.Now().UTC()
+		if draftID != "" {
+			draft, draftFound := state.Submission(draftID)
+			if !draftFound || draft.Status != domain.SubmissionDraft || !contains(draft.SpeakerIDs, draftSpeakerID) {
+				return action.Validation("This draft is no longer available.", map[string]string{"form": "Please start a new draft."}, ctx.FormData)
+			}
+			speaker, speakerFound := state.Speaker(draftSpeakerID)
+			if !speakerFound || !strings.EqualFold(speaker.Email, email) {
+				return action.Validation("Draft ownership changed unexpectedly.", map[string]string{"form": "Please reopen your saved draft link."}, ctx.FormData)
+			}
+			applyDraftSpeakerFields(speaker, ctx.FormData, now)
+			speakerID = speaker.ID
+			applyDraftSubmission(draft, state.Event.ID, currentForm.ID, speakerID, ctx.FormData, visibilityTrace, now, currentForm.Fields, visibleFields)
+			return nil
+		}
+
+		for index := range state.Speakers {
+			candidate := &state.Speakers[index]
+			if strings.EqualFold(candidate.Email, email) {
+				speakerID = candidate.ID
+				applyDraftSpeakerFields(candidate, ctx.FormData, now)
+				break
+			}
+		}
+		if speakerID == "" {
+			speakerID = domain.NewID("spk")
+			speaker := domain.Speaker{ID: speakerID, Email: email, CreatedAt: now, UpdatedAt: now}
+			applyDraftSpeakerFields(&speaker, ctx.FormData, now)
+			state.Speakers = append(state.Speakers, speaker)
+		}
+		if draftCount(state.Submissions, currentForm.ID, speakerID) >= maxDrafts(currentForm) {
+			return action.Validation("You have reached this form's saved-draft limit.", map[string]string{"form": "Submit or withdraw one of your existing drafts before creating another."}, ctx.FormData)
+		}
+		newDraft := domain.Submission{ID: plannedDraftID}
+		applyDraftSubmission(&newDraft, state.Event.ID, currentForm.ID, speakerID, ctx.FormData, visibilityTrace, now, currentForm.Fields, visibleFields)
+		draftID = newDraft.ID
+		state.Submissions = append(state.Submissions, newDraft)
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	key := token.New().Sign(speakerID)
+	session.AddFlash(ctx.Request, "notice", "Draft saved. Keep this link private; it is how you return to your proposal.")
+	live.Broadcast("submission:draft_saved", map[string]string{"submission": draftID, "speaker": speakerID})
+	actionflow.Redirect(ctx, draftURL(form.Slug, draftID, key))
+	return nil
 }
 
 func submitProposal(ctx *action.Context) error {
@@ -126,28 +264,39 @@ func submitProposal(ctx *action.Context) error {
 		return action.Validation(message, map[string]string{"form": message}, ctx.FormData)
 	}
 
-	fieldErrors := validateSchemaFields(form.Fields, snapshot, ctx.FormData)
-	if !strings.Contains(ctx.FormData["email"], "@") {
-		fieldErrors["email"] = "Enter a valid email address."
-	}
-	// workshop_needs is required only when the chosen format is "Workshop",
-	// so its requirement cannot come from the schema's Required flag the way
-	// every other field's does; validateSchemaFields skips it and this checks
-	// it directly. FB-4 generalizes this through engine.FieldVisibility.
-	workshopValue := strings.TrimSpace(ctx.FormData["workshop_needs"])
-	if ctx.FormData["format"] == "Workshop" && workshopValue == "" {
-		fieldErrors["workshop_needs"] = "Tell us what the workshop needs."
-	} else if workshopField, ok := fieldByID(form.Fields, "workshop_needs"); ok && workshopField.MaxLength > 0 && len([]rune(workshopValue)) > workshopField.MaxLength {
-		fieldErrors["workshop_needs"] = fmt.Sprintf("Keep this field to %d characters.", workshopField.MaxLength)
-	}
-	if len(fieldErrors) > 0 {
-		return action.Validation("Correct the highlighted fields and submit again.", fieldErrors, ctx.FormData)
-	}
-
 	engine, err := decisionrules.Shared()
 	if err != nil {
 		return err
 	}
+	visibleFields, visibilityTrace, err := visibleSchemaFields(engine, form, ctx.FormData)
+	if err != nil {
+		return err
+	}
+	fieldErrors := validateSchemaFields(form.Fields, snapshot, ctx.FormData, visibleFields)
+	if !strings.Contains(ctx.FormData["email"], "@") {
+		fieldErrors["email"] = "Enter a valid email address."
+	}
+	if len(fieldErrors) > 0 {
+		return action.Validation("Correct the highlighted fields and submit again.", fieldErrors, ctx.FormData)
+	}
+	draftID := strings.TrimSpace(ctx.FormData["draft_id"])
+	plannedSubmissionID := draftID
+	if plannedSubmissionID == "" {
+		// As with drafts, choose the ID outside the transaction so the audit
+		// trail cannot contain a blank entity reference for a new proposal.
+		plannedSubmissionID = domain.NewID("sub")
+	}
+	draftSpeakerID := ""
+	if draftID != "" {
+		_, draftSpeakerID, found = accessibleDraft(snapshot, form.Slug, draftID, ctx.FormData["draft_key"])
+		if !found {
+			return action.Validation("Your saved draft link is no longer valid. Start a new draft or reopen your saved link.", map[string]string{"form": "Draft access could not be verified."}, ctx.FormData)
+		}
+		if speaker, speakerFound := snapshot.Speaker(draftSpeakerID); !speakerFound || !strings.EqualFold(speaker.Email, strings.TrimSpace(ctx.FormData["email"])) {
+			return action.Validation("Use the email address that owns this saved draft.", map[string]string{"email": "This draft belongs to a different email address."}, ctx.FormData)
+		}
+	}
+
 	decision, err := engine.Route(ctx.FormData["category"], ctx.FormData["format"], ctx.FormData["level"])
 	if err != nil {
 		return err
@@ -158,7 +307,22 @@ func submitProposal(ctx *action.Context) error {
 	speakerName := ""
 	title := strings.TrimSpace(ctx.FormData["title"])
 	confirmationID := domain.NewID("comm")
-	if err := appstate.MustGet().Update(func(state *domain.State) error {
+	auditAction := "submission.created"
+	auditSummary := "Submitted a proposal through the public CFP."
+	if draftID != "" {
+		auditAction = "submission.draft_submitted"
+		auditSummary = "Submitted a previously saved proposal draft."
+	}
+	if err := appstate.MustGet().UpdateAudit(domain.AuditMeta{
+		Actor:      "submitter:" + strings.ToLower(strings.TrimSpace(ctx.FormData["email"])),
+		Action:     auditAction,
+		EntityType: "submission",
+		EntityID:   plannedSubmissionID,
+		Summary:    auditSummary,
+		Origin:     "public-submission",
+		Rule:       decision.Rule,
+		Trace:      strings.Join(append(append([]string(nil), decision.Trace...), visibilityTrace...), " | "),
+	}, func(state *domain.State) error {
 		form, found := state.Form(ctx.FormData["form_id"])
 		if !found {
 			return fmt.Errorf("submission form not found")
@@ -169,16 +333,18 @@ func submitProposal(ctx *action.Context) error {
 		if _, found := state.Category(ctx.FormData["category"]); !found {
 			return action.Validation("Choose a valid category.", map[string]string{"category": "Unknown category."}, ctx.FormData)
 		}
+		now := time.Now().UTC()
 		email := strings.ToLower(strings.TrimSpace(ctx.FormData["email"]))
-		for _, speaker := range state.Speakers {
+		for index := range state.Speakers {
+			speaker := &state.Speakers[index]
 			if strings.EqualFold(speaker.Email, email) {
 				speakerID = speaker.ID
 				speakerEmail = speaker.Email
-				speakerName = strings.TrimSpace(speaker.FirstName + " " + speaker.LastName)
+				speakerName = speaker.Name()
+				applySubmittedSpeakerFields(speaker, ctx.FormData, now)
 				break
 			}
 		}
-		now := time.Now().UTC()
 		if speakerID == "" {
 			speakerID = domain.NewID("spk")
 			state.Speakers = append(state.Speakers, domain.Speaker{
@@ -189,13 +355,22 @@ func submitProposal(ctx *action.Context) error {
 			speakerEmail = email
 			speakerName = strings.TrimSpace(ctx.FormData["first_name"] + " " + ctx.FormData["last_name"])
 		}
-		submissionID = domain.NewID("sub")
-		state.Submissions = append(state.Submissions, domain.Submission{
-			ID: submissionID, EventID: state.Event.ID, FormID: form.ID, Title: strings.TrimSpace(ctx.FormData["title"]), Abstract: strings.TrimSpace(ctx.FormData["abstract"]),
-			Format: ctx.FormData["format"], CategoryID: ctx.FormData["category"], TrackID: decision.Track, Level: ctx.FormData["level"], SpeakerIDs: []string{speakerID},
-			Status: domain.SubmissionPending, RoutedQueue: decision.Queue, RoutedOwner: decision.Owner, RuleTrace: append([]string{decision.Rule + ": " + decision.Reason}, decision.Trace...),
-			Answers: submissionAnswers(form.Fields, ctx.FormData), SubmittedAt: now, UpdatedAt: now,
-		})
+		if draftID != "" && speakerID != draftSpeakerID {
+			return action.Validation("Draft ownership changed unexpectedly.", map[string]string{"form": "Please reopen your saved draft link."}, ctx.FormData)
+		}
+		if draftID != "" {
+			draft, draftFound := state.Submission(draftID)
+			if !draftFound || draft.Status != domain.SubmissionDraft || !contains(draft.SpeakerIDs, speakerID) {
+				return action.Validation("This draft is no longer available.", map[string]string{"form": "Please start a new draft."}, ctx.FormData)
+			}
+			submissionID = draft.ID
+			applySubmittedSubmission(draft, state.Event.ID, form.ID, speakerID, ctx.FormData, decision, visibilityTrace, now, form.Fields, visibleFields)
+		} else {
+			submissionID = plannedSubmissionID
+			submission := domain.Submission{ID: submissionID}
+			applySubmittedSubmission(&submission, state.Event.ID, form.ID, speakerID, ctx.FormData, decision, visibilityTrace, now, form.Fields, visibleFields)
+			state.Submissions = append(state.Submissions, submission)
+		}
 		for index := range state.Tasks {
 			if state.Tasks[index].ID == "task_profile" && !contains(state.Tasks[index].AssignedSpeakerIDs, speakerID) {
 				state.Tasks[index].AssignedSpeakerIDs = append(state.Tasks[index].AssignedSpeakerIDs, speakerID)
@@ -224,7 +399,14 @@ func submitProposal(ctx *action.Context) error {
 	if named, ok := sender.(mail.Named); ok {
 		provider = named.Name()
 	}
-	if err := appstate.MustGet().Update(func(state *domain.State) error {
+	if err := appstate.MustGet().UpdateAudit(domain.AuditMeta{
+		Actor:      "system:mail",
+		Action:     "communication.recorded",
+		EntityType: "communication",
+		EntityID:   confirmationID,
+		Summary:    "Recorded the public-submission confirmation delivery outcome.",
+		Origin:     "public-submission",
+	}, func(state *domain.State) error {
 		state.Communications = append(state.Communications, domain.Communication{
 			ID: confirmationID, TemplateID: form.ConfirmationTemplate, SpeakerID: speakerID,
 			Subject: "We received " + title, Status: sendStatus, Provider: provider, SentAt: time.Now().UTC(),
@@ -346,6 +528,169 @@ func latestSubmissionTitle(state domain.State, formID, speakerID string) string 
 	return latest.Title
 }
 
+// accessibleDraft requires both a draft-shaped record and a valid signed key
+// for one of its speakers. A bare database ID is never sufficient to prefill
+// personally identifying proposal content on the public route.
+func accessibleDraft(state domain.State, formSlug, draftID, key string) (domain.Submission, string, bool) {
+	draftID = strings.TrimSpace(draftID)
+	if draftID == "" {
+		return domain.Submission{}, "", false
+	}
+	form, formFound := state.Form(formSlug)
+	draft, draftFound := state.Submission(draftID)
+	speakerID, keyOK := token.New().Verify(strings.TrimSpace(key))
+	if !formFound || !draftFound || !keyOK || draft.Status != domain.SubmissionDraft || draft.FormID != form.ID || !contains(draft.SpeakerIDs, speakerID) {
+		return domain.Submission{}, "", false
+	}
+	return *draft, speakerID, true
+}
+
+func draftURL(formSlug, draftID, key string) string {
+	target := url.URL{Path: "/submit/" + formSlug}
+	values := url.Values{}
+	values.Set("draft", draftID)
+	values.Set("key", key)
+	target.RawQuery = values.Encode()
+	return target.String()
+}
+
+func draftValues(state domain.State, draft domain.Submission) map[string]string {
+	values := make(map[string]string, len(draft.Answers)+12)
+	values["title"] = draft.Title
+	values["abstract"] = draft.Abstract
+	values["format"] = draft.Format
+	values["category"] = draft.CategoryID
+	values["level"] = draft.Level
+	for key, value := range draft.Answers {
+		values[key] = value
+	}
+	if len(draft.SpeakerIDs) > 0 {
+		if speaker, found := state.Speaker(draft.SpeakerIDs[0]); found {
+			values["first_name"] = speaker.FirstName
+			values["last_name"] = speaker.LastName
+			values["email"] = speaker.Email
+			values["role"] = speaker.Role
+			values["company"] = speaker.Company
+			values["biography"] = speaker.Biography
+		}
+	}
+	return values
+}
+
+func applyDraftSpeakerFields(speaker *domain.Speaker, formData map[string]string, now time.Time) {
+	if speaker == nil {
+		return
+	}
+	if value := strings.TrimSpace(formData["first_name"]); value != "" {
+		speaker.FirstName = value
+	}
+	if value := strings.TrimSpace(formData["last_name"]); value != "" {
+		speaker.LastName = value
+	}
+	if value := strings.TrimSpace(formData["role"]); value != "" {
+		speaker.Role = value
+	}
+	if value := strings.TrimSpace(formData["company"]); value != "" {
+		speaker.Company = value
+	}
+	if value := strings.TrimSpace(formData["biography"]); value != "" {
+		speaker.Biography = value
+	}
+	speaker.UpdatedAt = now
+}
+
+func applySubmittedSpeakerFields(speaker *domain.Speaker, formData map[string]string, now time.Time) {
+	if speaker == nil {
+		return
+	}
+	speaker.FirstName = strings.TrimSpace(formData["first_name"])
+	speaker.LastName = strings.TrimSpace(formData["last_name"])
+	// Optional profile information is intentionally additive. A proposal form
+	// can omit or leave optional participant fields blank without erasing a
+	// speaker profile captured in a previous submission or portal edit.
+	applyDraftSpeakerFields(speaker, formData, now)
+}
+
+func applyDraftSubmission(submission *domain.Submission, eventID, formID, speakerID string, formData map[string]string, visibilityTrace []string, now time.Time, fields []domain.FormField, visible map[string]bool) {
+	submission.EventID = eventID
+	submission.FormID = formID
+	submission.Title = strings.TrimSpace(formData["title"])
+	submission.Abstract = strings.TrimSpace(formData["abstract"])
+	submission.Format = strings.TrimSpace(formData["format"])
+	submission.CategoryID = strings.TrimSpace(formData["category"])
+	submission.Level = strings.TrimSpace(formData["level"])
+	submission.SpeakerIDs = []string{speakerID}
+	submission.Status = domain.SubmissionDraft
+	submission.TrackID = ""
+	submission.RoutedQueue = ""
+	submission.RoutedOwner = ""
+	submission.RuleTrace = append([]string(nil), visibilityTrace...)
+	submission.Answers = submissionAnswers(fields, formData, visible)
+	submission.WithdrawalReason = ""
+	submission.WithdrawnAt = time.Time{}
+	submission.SubmittedAt = time.Time{}
+	submission.UpdatedAt = now
+}
+
+func applySubmittedSubmission(submission *domain.Submission, eventID, formID, speakerID string, formData map[string]string, decision decisionrules.RoutingDecision, visibilityTrace []string, now time.Time, fields []domain.FormField, visible map[string]bool) {
+	submission.EventID = eventID
+	submission.FormID = formID
+	submission.Title = strings.TrimSpace(formData["title"])
+	submission.Abstract = strings.TrimSpace(formData["abstract"])
+	submission.Format = strings.TrimSpace(formData["format"])
+	submission.CategoryID = strings.TrimSpace(formData["category"])
+	submission.TrackID = decision.Track
+	submission.Level = strings.TrimSpace(formData["level"])
+	submission.SpeakerIDs = []string{speakerID}
+	submission.Status = domain.SubmissionPending
+	submission.RoutedQueue = decision.Queue
+	submission.RoutedOwner = decision.Owner
+	submission.RuleTrace = append(append([]string{decision.Rule + ": " + decision.Reason}, decision.Trace...), visibilityTrace...)
+	submission.Answers = submissionAnswers(fields, formData, visible)
+	submission.WithdrawalReason = ""
+	submission.WithdrawnAt = time.Time{}
+	submission.SubmittedAt = now
+	submission.UpdatedAt = now
+}
+
+func validateDraftFields(fields []domain.FormField, state domain.State, formData map[string]string, visible map[string]bool) map[string]string {
+	fieldErrors := make(map[string]string)
+	for _, field := range fields {
+		if !visible[field.ID] {
+			continue
+		}
+		value := strings.TrimSpace(formData[field.ID])
+		if value == "" {
+			continue
+		}
+		if field.MaxLength > 0 && len([]rune(value)) > field.MaxLength {
+			fieldErrors[field.ID] = fmt.Sprintf("Keep this field to %d characters.", field.MaxLength)
+			continue
+		}
+		if field.Type == "select" && !contains(present.FormFieldOptionValues(state, field), value) {
+			fieldErrors[field.ID] = "Choose a valid option."
+		}
+	}
+	return fieldErrors
+}
+
+func draftCount(submissions []domain.Submission, formID, speakerID string) int {
+	count := 0
+	for _, submission := range submissions {
+		if submission.FormID == formID && submission.Status == domain.SubmissionDraft && contains(submission.SpeakerIDs, speakerID) {
+			count++
+		}
+	}
+	return count
+}
+
+func maxDrafts(form *domain.SubmissionForm) int {
+	if form != nil && form.MaxDraftsPerSubmitter > 0 {
+		return form.MaxDraftsPerSubmitter
+	}
+	return 3
+}
+
 // coreSubmissionFields lists the schema field IDs that already have a typed
 // home on domain.Submission (title, abstract, format, category, level) or
 // domain.Speaker (first_name, last_name, email, role, company, biography).
@@ -361,10 +706,10 @@ var coreSubmissionFields = map[string]bool{
 // validateSchemaFields. This is the other half of the C2 fix: an unknown key
 // never reaches this map, because rejectUnknownFields ran first, and a core
 // field is never duplicated into it.
-func submissionAnswers(fields []domain.FormField, formData map[string]string) map[string]string {
+func submissionAnswers(fields []domain.FormField, formData map[string]string, visible map[string]bool) map[string]string {
 	answers := make(map[string]string)
 	for _, field := range fields {
-		if coreSubmissionFields[field.ID] {
+		if coreSubmissionFields[field.ID] || !visible[field.ID] {
 			continue
 		}
 		if value := strings.TrimSpace(formData[field.ID]); value != "" {
@@ -380,7 +725,7 @@ func submissionAnswers(fields []domain.FormField, formData map[string]string) ma
 // unbounded-key half of C2, since a posted key the schema never declared can
 // no longer reach the store.
 func rejectUnknownFields(formData map[string]string, fields []domain.FormField) (string, bool) {
-	allowed := map[string]bool{"csrf_token": true, "form_id": true}
+	allowed := map[string]bool{"csrf_token": true, "form_id": true, "draft_id": true, "draft_key": true}
 	for _, field := range fields {
 		allowed[field.ID] = true
 	}
@@ -392,15 +737,14 @@ func rejectUnknownFields(formData map[string]string, fields []domain.FormField) 
 	return "", true
 }
 
-// validateSchemaFields checks every schema field's Required flag, MaxLength,
-// and — for a select field — option membership against the posted value.
-// workshop_needs is skipped here because its requirement depends on the
-// chosen format, not the schema's Required flag; submitProposal checks it
-// separately, right after calling this.
-func validateSchemaFields(fields []domain.FormField, state domain.State, formData map[string]string) map[string]string {
+// validateSchemaFields checks every *visible* schema field's Required flag,
+// MaxLength, and — for a select field — option membership. Hidden questions
+// are disabled by the hydrated form and are also ignored server-side, so a
+// stale browser cannot be forced to satisfy a now-inapplicable requirement.
+func validateSchemaFields(fields []domain.FormField, state domain.State, formData map[string]string, visible map[string]bool) map[string]string {
 	fieldErrors := make(map[string]string)
 	for _, field := range fields {
-		if field.ID == "workshop_needs" {
+		if !visible[field.ID] {
 			continue
 		}
 		value := strings.TrimSpace(formData[field.ID])
@@ -419,6 +763,36 @@ func validateSchemaFields(fields []domain.FormField, state domain.State, formDat
 		}
 	}
 	return fieldErrors
+}
+
+// visibleSchemaFields evaluates every persisted question rule through
+// Arbiter. The builder limits rules to `equals → show`, but this function
+// repeats the shape validation at the trust boundary so a restored archive or
+// handcrafted request cannot turn a generic host conditional into policy.
+func visibleSchemaFields(engine *decisionrules.Engine, form *domain.SubmissionForm, formData map[string]string) (map[string]bool, []string, error) {
+	visible := make(map[string]bool, len(form.Fields))
+	for _, field := range form.Fields {
+		visible[field.ID] = true
+	}
+	trace := make([]string, 0, len(form.QuestionRules))
+	for _, rule := range form.QuestionRules {
+		if rule.Operator != "equals" || rule.Effect != "show" {
+			return nil, nil, fmt.Errorf("unsupported question rule %s", rule.ID)
+		}
+		if _, found := fieldByID(form.Fields, rule.SourceFieldID); !found {
+			return nil, nil, fmt.Errorf("question rule %s has an unknown source field", rule.ID)
+		}
+		if _, found := fieldByID(form.Fields, rule.TargetFieldID); !found {
+			return nil, nil, fmt.Errorf("question rule %s has an unknown target field", rule.ID)
+		}
+		decision, err := engine.QuestionVisibility(strings.TrimSpace(formData[rule.SourceFieldID]), rule.Value, rule.Effect, rule.TargetFieldID)
+		if err != nil {
+			return nil, nil, err
+		}
+		visible[rule.TargetFieldID] = decision.Visible
+		trace = append(trace, decision.Rule+": "+rule.TargetFieldID+"="+strconv.FormatBool(decision.Visible))
+	}
+	return visible, trace, nil
 }
 
 // fieldByID finds a schema field by ID.

@@ -123,11 +123,17 @@ func (e *Engine) Route(category, format, level string) (RoutingDecision, error) 
 	}, nil
 }
 
-func (e *Engine) FieldVisibility(format, category string) (VisibilityDecision, error) {
+// QuestionVisibility evaluates the only conditional-question decision shape
+// organizers may create in the form builder: show targetField when a source
+// answer exactly equals expected. The equality and visibility outcome live in
+// reviewed Arbiter policy rather than a host-language if/else chain, while the
+// builder still owns the concrete field IDs and answer value.
+func (e *Engine) QuestionVisibility(value, expected, effect, targetField string) (VisibilityDecision, error) {
 	match, trace, err := evaluate(e.visibility, map[string]any{
 		"answer": map[string]any{
-			"format":   format,
-			"category": category,
+			"value":    value,
+			"expected": expected,
+			"effect":   effect,
 		},
 	})
 	if err != nil {
@@ -141,12 +147,19 @@ func (e *Engine) FieldVisibility(format, category string) (VisibilityDecision, e
 		return VisibilityDecision{}, fmt.Errorf("visibility rule %q returned a non-boolean visible parameter", match.Name)
 	}
 	return VisibilityDecision{
-		Field:   stringParam(match, "field"),
+		Field:   targetField,
 		Visible: visible,
 		Reason:  stringParam(match, "reason"),
 		Rule:    match.Name,
 		Trace:   trace,
 	}, nil
+}
+
+// FieldVisibility retains the seeded Workshop policy's stable API for
+// callers and older archive fixtures. New generic form rules should call
+// QuestionVisibility directly.
+func (e *Engine) FieldVisibility(format, category string) (VisibilityDecision, error) {
+	return e.QuestionVisibility(format, "Workshop", "show", "workshop_needs")
 }
 
 func (e *Engine) EvaluateConflict(conflict domain.Conflict) (ConflictDecision, error) {

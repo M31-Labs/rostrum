@@ -196,8 +196,100 @@ func FormScheduleForm() Node {
 			<input type="datetime-local" name="close_at" value={data.form.closeISO}></input>
 			<p class="form-error" data-gosx-field-error="close_at" aria-live="polite"></p>
 		</label>
+		<label class="field-control">
+			<span>Saved drafts per submitter</span>
+			<input
+				type="number"
+				name="max_drafts_per_submitter"
+				min="1"
+				max="10"
+				value={data.form.maxDraftsPerSubmitter}
+			></input>
+			<p class="form-error" data-gosx-field-error="max_drafts_per_submitter" aria-live="polite"></p>
+		</label>
 		<p class="form-status" role="status" aria-live="polite">{actions.setFormSchedule.message}</p>
-		<button class="button button-compact" type="submit">Save close date</button>
+		<button class="button button-compact" type="submit">Save controls</button>
+	</ActionForm>
+}
+
+func CreateForm() Node {
+	return <ActionForm class="field-add-form" actionName="createForm">
+		<input type="hidden" name="csrf_token" value={csrf.token}></input>
+		<p class="form-status" role="status" aria-live="polite">{actions.createForm.message}</p>
+		<div class="form-grid-two">
+			<label>
+				<span>Internal name</span>
+				<input name="name" value={actions.createForm.values.name} placeholder="2027 Community CFP" required></input>
+				<p class="form-error" data-gosx-field-error="name" aria-live="polite"></p>
+			</label>
+			<label>
+				<span>Public title</span>
+				<input name="title" value={actions.createForm.values.title} placeholder="Tell us what you are building" required></input>
+				<p class="form-error" data-gosx-field-error="title" aria-live="polite"></p>
+			</label>
+			<label>
+				<span>Public URL slug</span>
+				<input name="slug" value={actions.createForm.values.slug} placeholder="community-cfp" required></input>
+				<p class="form-error" data-gosx-field-error="slug" aria-live="polite"></p>
+			</label>
+			<label>
+				<span>Form kind</span>
+				<select name="kind">
+					<option value="abstract" selected={actions.createForm.values.kind == "" || actions.createForm.values.kind == "abstract"}>Abstract</option>
+					<option value="proposal" selected={actions.createForm.values.kind == "proposal"}>Proposal</option>
+					<option value="application" selected={actions.createForm.values.kind == "application"}>Application</option>
+				</select>
+				<p class="form-error" data-gosx-field-error="kind" aria-live="polite"></p>
+			</label>
+		</div>
+		<button class="button button-primary" type="submit">Create closed form</button>
+	</ActionForm>
+}
+
+func AddQuestionRule() Node {
+	return <ActionForm class="field-add-form" actionName="addQuestionRule">
+		<input type="hidden" name="csrf_token" value={csrf.token}></input>
+		<input type="hidden" name="form_id" value={data.form.id}></input>
+		<p class="form-status" role="status" aria-live="polite">{actions.addQuestionRule.message}</p>
+		<div class="form-grid-two">
+			<label>
+				<span>When this question</span>
+				<select name="source_field_id" required>
+					<option value="">Choose a source</option>
+					<Each of={data.ruleChoices} as="field">
+						<option value={field.id} selected={field.id == actions.addQuestionRule.values.source_field_id}>{field.label}</option>
+					</Each>
+				</select>
+				<p class="form-error" data-gosx-field-error="source_field_id" aria-live="polite"></p>
+			</label>
+			<label>
+				<span>Exactly equals</span>
+				<input name="value" value={actions.addQuestionRule.values.value} required></input>
+				<p class="form-error" data-gosx-field-error="value" aria-live="polite"></p>
+			</label>
+			<label>
+				<span>Show this question</span>
+				<select name="target_field_id" required>
+					<option value="">Choose a target</option>
+					<Each of={data.ruleChoices} as="field">
+						<option value={field.id} selected={field.id == actions.addQuestionRule.values.target_field_id} disabled={field.locked}>{field.label}</option>
+					</Each>
+				</select>
+				<p class="form-error" data-gosx-field-error="target_field_id" aria-live="polite"></p>
+			</label>
+		</div>
+		<button class="button button-compact" type="submit">Add visibility rule</button>
+	</ActionForm>
+}
+
+func RemoveQuestionRule(props any) Node {
+	return <ActionForm class="field-remove-form" actionName="removeQuestionRule">
+		<input type="hidden" name="csrf_token" value={csrf.token}></input>
+		<input type="hidden" name="form_id" value={data.form.id}></input>
+		<input type="hidden" name="rule_id" value={props.id}></input>
+		<p class="form-error" data-gosx-field-error="rule" aria-live="polite"></p>
+		<p class="form-status sr-only" role="status" aria-live="polite">{actions.removeQuestionRule.message}</p>
+		<button class="button button-compact" type="submit" aria-label={"Remove visibility rule for " + props.target}>Remove</button>
 	</ActionForm>
 }
 
@@ -212,16 +304,51 @@ func Page() Node {
 				</p>
 			</div>
 			<div class="workspace-header-actions">
-				<a class="button" href={data.form.publicURL} data-gosx-link>Preview public form</a>
-				<If cond={data.form.statusValue == "open"}>
-					<ToggleStatus next="closed" label="Close CFP" className="button"></ToggleStatus>
-				</If>
-				<If cond={data.form.statusValue == "closed"}>
-					<ToggleStatus next="open" label="Open CFP" className="button button-primary"></ToggleStatus>
+				<If cond={data.hasForm}>
+					<a class="button" href={data.form.publicURL} data-gosx-link>Preview public form</a>
+					<If cond={data.form.statusValue == "open"}>
+						<ToggleStatus next="closed" label="Close CFP" className="button"></ToggleStatus>
+					</If>
+					<If cond={data.form.statusValue == "closed"}>
+						<ToggleStatus next="open" label="Open CFP" className="button button-primary"></ToggleStatus>
+					</If>
 				</If>
 			</div>
 		</header>
 		<p class="flash-message">{flash.notice}</p>
+		<section class="panel">
+			<header class="panel-header">
+				<div>
+					<p class="panel-kicker">Form library</p>
+					<h2>Choose or create a public call</h2>
+				</div>
+				<span>Public CFPs</span>
+			</header>
+			<div class="field-builder-list">
+				<Each of={data.forms} as="form">
+					<a class={form.selected ? "field-builder-row selected" : "field-builder-row"} href={form.href} data-gosx-link>
+						<div>
+							<strong>{form.name}</strong>
+							<small>{form.title} · {form.kind} · /submit/{form.slug}</small>
+						</div>
+						<span class={"status-pill status-" + form.statusTone}>{form.status}</span>
+						<span class="field-requirement">{form.fieldCount} fields</span>
+					</a>
+				</Each>
+			</div>
+			<details class="field-add-details">
+				<summary>Create another form</summary>
+				<CreateForm></CreateForm>
+			</details>
+		</section>
+		<If cond={!data.hasForm}>
+			<section class="panel">
+				<p class="panel-kicker">No active form</p>
+				<h2>Create the first closed CFP to begin.</h2>
+				<p>The starter schema adds locked routing and speaker-identity questions; you can add custom questions and rules before opening it.</p>
+			</section>
+		</If>
+		<If cond={data.hasForm}>
 		<section class="form-summary-grid">
 			<article class="form-summary-card summary-primary">
 				<div class="summary-top">
@@ -316,13 +443,13 @@ func Page() Node {
 						</article>
 						<details class="field-manage-details">
 							<summary>{"Edit " + field.label}</summary>
-							<UpdateFieldForm field={field}></UpdateFieldForm>
 							<If cond={!field.locked}>
+								<UpdateFieldForm field={field}></UpdateFieldForm>
 								<RemoveFieldForm id={field.id} label={field.label}></RemoveFieldForm>
 							</If>
 							<If cond={field.locked}>
 								<p class="control-note">
-									Locked fields power required routing and cannot be removed.
+									Locked core fields preserve routing and speaker identity; custom questions remain fully editable.
 								</p>
 							</If>
 						</details>
@@ -358,7 +485,12 @@ func Page() Node {
 								{rule.trace}
 							</small>
 						</article>
+						<RemoveQuestionRule id={rule.id} target={rule.target}></RemoveQuestionRule>
 					</Each>
+					<details class="field-add-details">
+						<summary>Add a visibility rule</summary>
+						<AddQuestionRule></AddQuestionRule>
+					</details>
 				</section>
 				<section class="panel">
 					<header class="panel-header">
@@ -401,5 +533,6 @@ func Page() Node {
 				</Each>
 			</div>
 		</section>
+		</If>
 	</main>
 }

@@ -8,19 +8,27 @@ import (
 	"time"
 
 	"github.com/m31-labs/rostrum/internal/domain"
+	"github.com/m31-labs/rostrum/internal/token"
 	decisionrules "github.com/m31-labs/rostrum/rules"
 )
 
 func SubmissionForm(state domain.State, slug string) (map[string]any, error) {
+	return submissionForm(state, slug, nil)
+}
+
+// SubmissionFormWithValues renders the same public CFP with a trusted saved
+// draft prefilled. Callers must authenticate ownership before passing values;
+// this package deliberately does not turn a submission ID into access.
+func SubmissionFormWithValues(state domain.State, slug string, values map[string]string) (map[string]any, error) {
+	return submissionForm(state, slug, values)
+}
+
+func submissionForm(state domain.State, slug string, values map[string]string) (map[string]any, error) {
 	form, found := state.Form(slug)
 	if !found {
 		return nil, fmt.Errorf("form %s not found", slug)
 	}
 	engine, err := decisionrules.Shared()
-	if err != nil {
-		return nil, err
-	}
-	workshop, err := engine.FieldVisibility("Workshop", "")
 	if err != nil {
 		return nil, err
 	}
@@ -36,6 +44,14 @@ func SubmissionForm(state domain.State, slug string) (map[string]any, error) {
 	for _, item := range state.Event.Levels {
 		levels = append(levels, map[string]string{"value": item, "label": item})
 	}
+	proposalFields, err := submissionFormFieldRows(state, *form, "proposal", values, engine)
+	if err != nil {
+		return nil, err
+	}
+	participantFields, err := submissionFormFieldRows(state, *form, "participant", values, engine)
+	if err != nil {
+		return nil, err
+	}
 	return map[string]any{
 		"workspace": WorkspaceIdentity(state),
 		"event": map[string]any{
@@ -45,41 +61,36 @@ func SubmissionForm(state domain.State, slug string) (map[string]any, error) {
 			"location": state.Event.Location,
 		},
 		"form": map[string]any{
-			"id":              form.ID,
-			"slug":            form.Slug,
-			"name":            form.Name,
-			"title":           form.ExternalTitle,
-			"heading":         form.WelcomeHeading,
-			"body":            form.WelcomeBody,
-			"status":          form.Status,
-			"open":            form.Status == "open" && time.Now().Before(form.CloseAt),
-			"close":           form.CloseAt.Format("Monday, January 02 at 15:04 MST"),
-			"confirmation":    form.SendConfirmation,
-			"redirect":        form.RedirectToPortal,
-			"conditionalRule": workshop.Rule,
-			"conditionalWhy":  workshop.Reason,
+			"id":           form.ID,
+			"slug":         form.Slug,
+			"name":         form.Name,
+			"title":        form.ExternalTitle,
+			"heading":      form.WelcomeHeading,
+			"body":         form.WelcomeBody,
+			"status":       form.Status,
+			"open":         form.Status == "open" && time.Now().Before(form.CloseAt),
+			"close":        form.CloseAt.Format("Monday, January 02 at 15:04 MST"),
+			"confirmation": form.SendConfirmation,
+			"redirect":     form.RedirectToPortal,
 		},
-		"categories": categories,
-		"formats":    formats,
-		"levels":     levels,
-		// proposalFields and participantFields render the public form from
-		// form.Fields, grouped by the two sections the layout keeps. The
-		// format field stays in the list so it renders in schema order, but
-		// the ConditionalFormatFields island — not this list — draws it and
-		// the workshop_needs field beside it, so workshop_needs is omitted
-		// here to avoid rendering it twice.
-		"proposalFields":    submissionFormFieldRows(state, form.Fields, "proposal"),
-		"participantFields": submissionFormFieldRows(state, form.Fields, "participant"),
+		"categories":        categories,
+		"formats":           formats,
+		"levels":            levels,
+		"proposalFields":    proposalFields,
+		"participantFields": participantFields,
 	}, nil
 }
 
 // submissionFormFieldRows returns the public, schema-driven rows for one
-// section of a submission form. Removing a field from form.Fields removes it
-// from this list, and therefore from the rendered page, on the next load.
-func submissionFormFieldRows(state domain.State, fields []domain.FormField, section string) []map[string]any {
-	rows := make([]map[string]any, 0, len(fields))
-	for _, field := range fields {
-		if field.Section != section || field.ID == "workshop_needs" {
+// section. A source field owning question rules is emitted as a single
+// hydrated group with its target questions; every other field stays a small
+// server component. This keeps the browser work coherent and gives builder
+// rules immediate, no-refresh visibility feedback.
+func submissionFormFieldRows(state domain.State, form domain.SubmissionForm, section string, values map[string]string, engine *decisionrules.Engine) ([]map[string]any, error) {
+	rows := make([]map[string]any, 0, len(form.Fields))
+	byID := make(map[string]map[string]any)
+	for _, field := range form.Fields {
+		if field.Section != section {
 			continue
 		}
 		var maxLength any
@@ -90,7 +101,7 @@ func submissionFormFieldRows(state domain.State, fields []domain.FormField, sect
 		if field.Type == "email" {
 			inputType = "email"
 		}
-		rows = append(rows, map[string]any{
+		row := map[string]any{
 			"id":        field.ID,
 			"label":     field.Label,
 			"type":      field.Type,
@@ -107,9 +118,31 @@ func submissionFormFieldRows(state domain.State, fields []domain.FormField, sect
 			"help":        field.Help,
 			"maxLength":   maxLength,
 			"options":     submissionFormFieldOptions(state, field),
-		})
+			"value":       values[field.ID],
+			"targets":     []map[string]any{},
+		}
+		rows = append(rows, row)
+		byID[field.ID] = row
 	}
-	return rows
+	for _, rule := range form.QuestionRules {
+		source, sourceOK := byID[rule.SourceFieldID]
+		target, targetOK := byID[rule.TargetFieldID]
+		if !sourceOK || !targetOK {
+			continue
+		}
+		visibility, err := engine.QuestionVisibility("", rule.Value, rule.Effect, rule.TargetFieldID)
+		if err != nil {
+			return nil, err
+		}
+		target["isConditionalTarget"] = true
+		target["ruleValue"] = rule.Value
+		target["ruleEffect"] = rule.Effect
+		target["conditionalWhy"] = visibility.Reason
+		target["policyRule"] = visibility.Rule
+		source["isConditionalSource"] = true
+		source["targets"] = append(source["targets"].([]map[string]any), target)
+	}
+	return rows, nil
 }
 
 // submissionFormFieldOptions resolves the value/label pairs a select field
@@ -243,11 +276,22 @@ func SpeakerPortal(state domain.State, speakerID string, submitted bool) (map[st
 	proposals := make([]map[string]any, 0)
 	for _, item := range state.Submissions {
 		if containsID(item.SpeakerIDs, speaker.ID) {
+			form, formFound := state.Form(item.FormID)
+			resumeURL := ""
+			if item.Status == domain.SubmissionDraft && formFound {
+				resumeURL = "/submit/" + form.Slug + "?draft=" + item.ID + "&key=" + token.New().Sign(speaker.ID)
+			}
+			_, scheduled := state.SessionBySubmission(item.ID)
 			proposals = append(proposals, map[string]any{
-				"title":     item.Title,
-				"status":    StatusLabel(item.Status),
-				"tone":      StatusTone(item.Status),
-				"submitted": item.SubmittedAt.Format("January 02, 2006"),
+				"id":          item.ID,
+				"title":       item.Title,
+				"status":      StatusLabel(item.Status),
+				"tone":        StatusTone(item.Status),
+				"submitted":   submissionDateLabel(item),
+				"canWithdraw": canWithdrawSubmission(item.Status),
+				"scheduled":   scheduled,
+				"hasResume":   resumeURL != "",
+				"resumeURL":   resumeURL,
 			})
 		}
 	}
@@ -317,6 +361,25 @@ func SpeakerPortal(state domain.State, speakerID string, submitted bool) (map[st
 		"calendarURL":  "/calendar/" + speaker.ID + ".ics",
 		"sessionCount": len(sessions),
 	}, nil
+}
+
+func submissionDateLabel(submission domain.Submission) string {
+	if submission.Status == domain.SubmissionDraft {
+		return "Draft saved " + submission.UpdatedAt.Format("January 02, 2006")
+	}
+	if submission.Status == domain.SubmissionWithdrawn {
+		return "Withdrawn " + submission.WithdrawnAt.Format("January 02, 2006")
+	}
+	return "Submitted " + submission.SubmittedAt.Format("January 02, 2006")
+}
+
+func canWithdrawSubmission(status string) bool {
+	switch status {
+	case domain.SubmissionDraft, domain.SubmissionPending, domain.SubmissionAcceptedQueue, domain.SubmissionAccepted, domain.SubmissionDeclineQueue:
+		return true
+	default:
+		return false
+	}
 }
 
 func allowedResourceEmbed(value string) bool {

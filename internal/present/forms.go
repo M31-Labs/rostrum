@@ -8,10 +8,8 @@ import (
 	decisionrules "github.com/m31-labs/rostrum/rules"
 )
 
-// FieldTypes lists the field types the FB-3 builder offers when adding or
-// editing a field. Every value here is one app/submit/[slug]/page.gsx's
-// FormFieldRow already knows how to render on the public form (FB-1), so a
-// builder edit is guaranteed to have somewhere to land on the next load.
+// FieldTypes lists the field types the builder offers. Every value here has a
+// public renderer, so a builder edit cannot create an orphaned question.
 var FieldTypes = []map[string]string{
 	{"value": "text", "label": "Short text"},
 	{"value": "textarea", "label": "Paragraph"},
@@ -19,19 +17,27 @@ var FieldTypes = []map[string]string{
 	{"value": "email", "label": "Email"},
 }
 
-// FieldSections lists the two sections the public submission form groups
-// fields into (FB-1's two-section layout: proposal, then participant).
+// FieldSections are the two deliberate public-form groups. Conditional rules
+// are constrained to fields in the same section so the interactive group can
+// preserve schema order and a coherent accessible fieldset.
 var FieldSections = []map[string]string{
 	{"value": "proposal", "label": "Proposal"},
 	{"value": "participant", "label": "Participant"},
 }
 
-func Forms(state domain.State) (map[string]any, error) {
+// Forms presents the selected form's builder surface while retaining a full
+// picker for workspaces that run more than one CFP. Selecting a picker link
+// is a GoSX soft navigation; mutations remain managed ActionForms.
+func Forms(state domain.State, selection ...string) (map[string]any, error) {
+	selected := ""
+	if len(selection) > 0 {
+		selected = selection[0]
+	}
 	engine, err := decisionrules.Shared()
 	if err != nil {
 		return nil, err
 	}
-	form := state.Forms[0]
+
 	routes := make([]map[string]any, 0, len(state.Event.Categories))
 	for _, category := range state.Event.Categories {
 		decision, err := engine.Route(category.ID, "Talk", "Intermediate")
@@ -48,8 +54,144 @@ func Forms(state domain.State) (map[string]any, error) {
 		})
 	}
 
-	fields := make([]map[string]any, 0, len(form.Fields))
-	for index, field := range form.Fields {
+	formRows := make([]map[string]any, 0, len(state.Forms))
+	for _, item := range state.Forms {
+		formRows = append(formRows, map[string]any{
+			"id":         item.ID,
+			"name":       item.Name,
+			"title":      item.ExternalTitle,
+			"slug":       item.Slug,
+			"kind":       StatusLabel(item.Kind),
+			"status":     StatusLabel(item.Status),
+			"statusTone": StatusTone(item.Status),
+			"selected":   selectedFormID(state, selected) == item.ID,
+			"href":       "/organizer/forms?form=" + item.ID,
+			"publicURL":  "/submit/" + item.Slug,
+			"fieldCount": len(item.Fields),
+		})
+	}
+
+	form, found := selectedSubmissionForm(state, selected)
+	if !found {
+		return map[string]any{
+			"section":       "forms",
+			"demoMode":      DemoMode(),
+			"workspace":     WorkspaceIdentity(state),
+			"hasForm":       false,
+			"forms":         formRows,
+			"form":          emptyFormRow(),
+			"fields":        []map[string]any{},
+			"fieldTypes":    FieldTypes,
+			"fieldSections": FieldSections,
+			"ruleChoices":   []map[string]any{},
+			"questionRules": []map[string]any{},
+			"routes":        routes,
+		}, nil
+	}
+
+	fields := formBuilderFields(form.Fields)
+	ruleChoices := make([]map[string]any, 0, len(form.Fields))
+	for _, field := range form.Fields {
+		ruleChoices = append(ruleChoices, map[string]any{
+			"id":      field.ID,
+			"label":   field.Label,
+			"section": field.Section,
+			"locked":  field.Locked,
+		})
+	}
+
+	questionRules := make([]map[string]any, 0, len(form.QuestionRules))
+	for _, rule := range form.QuestionRules {
+		visibility, err := engine.QuestionVisibility("", rule.Value, rule.Effect, rule.TargetFieldID)
+		if err != nil {
+			return nil, err
+		}
+		questionRules = append(questionRules, map[string]any{
+			"id":          rule.ID,
+			"sourceID":    rule.SourceFieldID,
+			"targetID":    rule.TargetFieldID,
+			"source":      formFieldLabel(form.Fields, rule.SourceFieldID),
+			"target":      formFieldLabel(form.Fields, rule.TargetFieldID),
+			"operator":    rule.Operator,
+			"value":       rule.Value,
+			"effect":      rule.Effect,
+			"condition":   formFieldLabel(form.Fields, rule.SourceFieldID) + " " + rule.Operator + " “" + rule.Value + "”",
+			"then":        rule.Effect + " “" + formFieldLabel(form.Fields, rule.TargetFieldID) + "”",
+			"description": rule.Description,
+			"policy":      visibility.Rule,
+			"trace":       visibility.Reason,
+		})
+	}
+
+	return map[string]any{
+		"section":       "forms",
+		"demoMode":      DemoMode(),
+		"workspace":     WorkspaceIdentity(state),
+		"hasForm":       true,
+		"forms":         formRows,
+		"form":          submissionFormRow(form),
+		"fields":        fields,
+		"fieldTypes":    FieldTypes,
+		"fieldSections": FieldSections,
+		"ruleChoices":   ruleChoices,
+		"questionRules": questionRules,
+		"routes":        routes,
+	}, nil
+}
+
+func selectedSubmissionForm(state domain.State, selected string) (domain.SubmissionForm, bool) {
+	if strings.TrimSpace(selected) != "" {
+		if form, found := state.Form(selected); found {
+			return *form, true
+		}
+	}
+	if len(state.Forms) == 0 {
+		return domain.SubmissionForm{}, false
+	}
+	return state.Forms[0], true
+}
+
+func selectedFormID(state domain.State, selected string) string {
+	if form, found := selectedSubmissionForm(state, selected); found {
+		return form.ID
+	}
+	return ""
+}
+
+func emptyFormRow() map[string]any {
+	return map[string]any{
+		"id": "", "name": "", "title": "", "status": "", "statusValue": "", "statusTone": "neutral",
+		"close": "Not scheduled", "closeISO": "", "redirect": false, "confirmation": false, "ruleFile": "rules/form-visibility.arb",
+		"publicURL": "", "welcomeHeading": "", "welcomeBody": "", "fieldCount": 0, "conditionalCount": 0,
+		"maxDraftsPerSubmitter": "3",
+	}
+}
+
+func submissionFormRow(form domain.SubmissionForm) map[string]any {
+	row := emptyFormRow()
+	row["id"] = form.ID
+	row["name"] = form.Name
+	row["title"] = form.ExternalTitle
+	row["status"] = StatusLabel(form.Status)
+	row["statusValue"] = form.Status
+	row["statusTone"] = StatusTone(form.Status)
+	row["close"] = DateTime(form.CloseAt)
+	row["closeISO"] = form.CloseAt.Format("2006-01-02T15:04")
+	row["redirect"] = form.RedirectToPortal
+	row["confirmation"] = form.SendConfirmation
+	row["ruleFile"] = form.RuleFile
+	row["publicURL"] = "/submit/" + form.Slug
+	row["welcomeHeading"] = form.WelcomeHeading
+	row["welcomeBody"] = form.WelcomeBody
+	row["fieldCount"] = len(form.Fields)
+	row["conditionalCount"] = len(form.QuestionRules)
+	row["maxDraftsPerSubmitter"] = strconv.Itoa(draftLimit(form))
+	return row
+}
+
+func formBuilderFields(formFields []domain.FormField) []map[string]any {
+	fields := make([]map[string]any, 0, len(formFields))
+	for index, field := range formFields {
 		fields = append(fields, map[string]any{
 			"index":        index + 1,
 			"id":           field.ID,
@@ -63,59 +205,29 @@ func Forms(state domain.State) (map[string]any, error) {
 			"requirement":  requirementLabel(field.Required),
 			"placeholder":  field.Placeholder,
 			"help":         field.Help,
-			// options is the comma-joined form the FB-3 builder's single
-			// options input edits; addField/updateField in
-			// app/organizer/forms/page.server.go split it back apart on save.
-			"options":   strings.Join(field.Options, ", "),
-			"maxLength": maxLengthValue(field.MaxLength),
-			"first":     index == 0,
-			"last":      index == len(form.Fields)-1,
+			"options":      strings.Join(field.Options, ", "),
+			"maxLength":    maxLengthValue(field.MaxLength),
+			"first":        index == 0,
+			"last":         index == len(formFields)-1,
 		})
 	}
+	return fields
+}
 
-	questionRules := make([]map[string]any, 0, len(form.QuestionRules))
-	for _, rule := range form.QuestionRules {
-		visibility, err := engine.FieldVisibility(rule.Value, "")
-		if err != nil {
-			return nil, err
+func formFieldLabel(fields []domain.FormField, id string) string {
+	for _, field := range fields {
+		if field.ID == id {
+			return field.Label
 		}
-		questionRules = append(questionRules, map[string]any{
-			"condition":   rule.SourceFieldID + " " + rule.Operator + " “" + rule.Value + "”",
-			"then":        rule.Effect + " “" + rule.TargetFieldID + "”",
-			"description": rule.Description,
-			"policy":      visibility.Rule,
-			"trace":       visibility.Reason,
-		})
 	}
+	return id
+}
 
-	return map[string]any{
-		"section":   "forms",
-		"demoMode":  DemoMode(),
-		"workspace": WorkspaceIdentity(state),
-		"form": map[string]any{
-			"id":               form.ID,
-			"name":             form.Name,
-			"title":            form.ExternalTitle,
-			"status":           StatusLabel(form.Status),
-			"statusValue":      form.Status,
-			"statusTone":       StatusTone(form.Status),
-			"close":            DateTime(form.CloseAt),
-			"closeISO":         form.CloseAt.Format("2006-01-02T15:04"),
-			"redirect":         form.RedirectToPortal,
-			"confirmation":     form.SendConfirmation,
-			"ruleFile":         form.RuleFile,
-			"publicURL":        "/submit/" + form.Slug,
-			"welcomeHeading":   form.WelcomeHeading,
-			"welcomeBody":      form.WelcomeBody,
-			"fieldCount":       len(form.Fields),
-			"conditionalCount": len(form.QuestionRules),
-		},
-		"fields":        fields,
-		"fieldTypes":    FieldTypes,
-		"fieldSections": FieldSections,
-		"questionRules": questionRules,
-		"routes":        routes,
-	}, nil
+func draftLimit(form domain.SubmissionForm) int {
+	if form.MaxDraftsPerSubmitter > 0 {
+		return form.MaxDraftsPerSubmitter
+	}
+	return 3
 }
 
 func requirementLabel(required bool) string {
@@ -125,10 +237,6 @@ func requirementLabel(required bool) string {
 	return "Optional"
 }
 
-// maxLengthValue renders a FormField.MaxLength for the builder's max-length
-// input: blank for "no limit" (0 or less) rather than a literal "0", so a
-// freshly seeded field without a limit does not look like a zero-character
-// field.
 func maxLengthValue(value int) string {
 	if value <= 0 {
 		return ""

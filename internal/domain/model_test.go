@@ -224,3 +224,27 @@ func TestMarkCommunicationSentReportsNotFoundForNoMatchingRow(t *testing.T) {
 		t.Fatal("MarkCommunicationSent found = true with no queued row, want false")
 	}
 }
+
+func TestStateValidateRejectsChainedConditionalQuestions(t *testing.T) {
+	state := Seed(time.Date(2026, time.August, 10, 12, 0, 0, 0, time.UTC))
+	form := &state.Forms[0]
+	// workshop_needs is already a conditional target. It must never become a
+	// source too, or a browser could have to evaluate a chained rule whose
+	// visibility order is ambiguous.
+	form.QuestionRules = append(form.QuestionRules, QuestionRule{
+		ID: "rule_chained", SourceFieldID: "workshop_needs", Operator: "equals",
+		Value: "yes", TargetFieldID: "topics", Effect: "show",
+	})
+	if err := state.Validate(); err == nil {
+		t.Fatal("State.Validate accepted a chained conditional question")
+	}
+}
+
+func TestStateValidateRequiresWithdrawalTimestamp(t *testing.T) {
+	state := Seed(time.Date(2026, time.August, 10, 12, 0, 0, 0, time.UTC))
+	state.Submissions[0].Status = SubmissionWithdrawn
+	state.Submissions[0].WithdrawnAt = time.Time{}
+	if err := state.Validate(); err == nil {
+		t.Fatal("State.Validate accepted a withdrawn submission without a timestamp")
+	}
+}

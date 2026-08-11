@@ -166,3 +166,37 @@ func TestSpeakerPortalHeadshotFallback(t *testing.T) {
 		t.Fatalf("headshotURL = %q, want the speaker's HeadshotURL passed through unchanged", speaker["headshotURL"])
 	}
 }
+
+func TestSubmissionFormWithValuesKeepsConditionalSchemaAndDraftValues(t *testing.T) {
+	state := domain.Seed(time.Date(2026, time.August, 10, 12, 0, 0, 0, time.UTC))
+	view, err := SubmissionFormWithValues(state, "systems-forum-cfp", map[string]string{
+		"title":          "A saved title",
+		"format":         "Workshop",
+		"workshop_needs": "A round table and two microphones.",
+	})
+	if err != nil {
+		t.Fatalf("SubmissionFormWithValues: %v", err)
+	}
+	rows := view["proposalFields"].([]map[string]any)
+	byID := map[string]map[string]any{}
+	for _, row := range rows {
+		byID[row["id"].(string)] = row
+	}
+	if got := byID["title"]["value"]; got != "A saved title" {
+		t.Fatalf("title value = %q, want saved draft value", got)
+	}
+	format := byID["format"]
+	if !format["isConditionalSource"].(bool) {
+		t.Fatal("format isConditionalSource = false, want a generic conditional source")
+	}
+	targets := format["targets"].([]map[string]any)
+	if len(targets) != 1 || targets[0]["id"] != "workshop_needs" {
+		t.Fatalf("format targets = %#v, want workshop_needs", targets)
+	}
+	if targets[0]["value"] != "A round table and two microphones." {
+		t.Fatalf("conditional target draft value = %q", targets[0]["value"])
+	}
+	if targets[0]["ruleValue"] != "Workshop" || targets[0]["policyRule"] == "" {
+		t.Fatalf("conditional target policy data = %#v", targets[0])
+	}
+}

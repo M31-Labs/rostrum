@@ -38,8 +38,9 @@ func init() {
 			return server.Metadata{Title: server.Title{Default: "Speaker portal — Rostrum"}, Description: "Update your profile, complete event tasks, and review your schedule."}, nil
 		},
 		Actions: route.FileActions{
-			"updateProfile": updateProfile,
-			"completeTask":  completeTask,
+			"updateProfile":      updateProfile,
+			"completeTask":       completeTask,
+			"withdrawSubmission": withdrawSubmission,
 		},
 	})); err != nil {
 		log.Fatal(err)
@@ -212,6 +213,93 @@ func completeTask(ctx *action.Context) error {
 	live.Broadcast("task:submitted", map[string]string{"speaker": speakerID, "task": taskID})
 	actionflow.Redirect(ctx, "/portal/"+speakerID+"#tasks")
 	return nil
+}
+
+// withdrawSubmission is speaker-authorized through the portal's bound
+// session, never a posted speaker_id. Withdrawing removes the item from every
+// active review plan and cancels any linked session so it vanishes from the
+// public agenda; evaluations remain as historical audit evidence.
+func withdrawSubmission(ctx *action.Context) error {
+	speakerID := boundSpeaker(ctx)
+	submissionID := strings.TrimSpace(ctx.FormData["submission_id"])
+	reason := strings.TrimSpace(ctx.FormData["reason"])
+	if speakerID == "" || submissionID == "" {
+		return action.Validation("Your portal session or proposal identity is missing.", map[string]string{"submission": "Reopen your portal and try again."}, ctx.FormData)
+	}
+	if len([]rune(reason)) > 500 {
+		return action.Validation("Keep the withdrawal note under 500 characters.", map[string]string{"reason": "Shorten the note."}, ctx.FormData)
+	}
+	cancelledSessions := 0
+	if err := appstate.MustGet().UpdateAudit(domain.AuditMeta{
+		Actor:      "speaker:" + speakerID,
+		Action:     "submission.withdrawn",
+		EntityType: "submission",
+		EntityID:   submissionID,
+		Summary:    "Speaker withdrew a proposal from the program lifecycle.",
+		Origin:     "speaker-portal",
+	}, func(state *domain.State) error {
+		submission, found := state.Submission(submissionID)
+		if !found || !containsSpeakerID(submission.SpeakerIDs, speakerID) {
+			return action.Error(404, "Proposal not found.")
+		}
+		if !canSpeakerWithdraw(submission.Status) {
+			return action.Validation("This proposal can no longer be withdrawn here.", map[string]string{"submission": "Contact the program team if you need help."}, ctx.FormData)
+		}
+		now := time.Now().UTC()
+		submission.Status = domain.SubmissionWithdrawn
+		submission.WithdrawalReason = reason
+		submission.WithdrawnAt = now
+		submission.UpdatedAt = now
+		for index := range state.ReviewPlans {
+			state.ReviewPlans[index].SubmissionIDs = withoutSubmission(state.ReviewPlans[index].SubmissionIDs, submissionID)
+		}
+		for index := range state.Sessions {
+			if state.Sessions[index].SubmissionID != submissionID {
+				continue
+			}
+			state.Sessions[index].Status = "cancelled"
+			cancelledSessions++
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	message := "Your proposal has been withdrawn from review."
+	if cancelledSessions > 0 {
+		message = "Your proposal has been withdrawn and its linked session has been removed from the public agenda."
+	}
+	session.AddFlash(ctx.Request, "notice", message)
+	live.Broadcast("submission:withdrawn", map[string]string{"submission": submissionID, "speaker": speakerID})
+	actionflow.Redirect(ctx, "/portal/"+speakerID+"#proposals")
+	return nil
+}
+
+func canSpeakerWithdraw(status string) bool {
+	switch status {
+	case domain.SubmissionDraft, domain.SubmissionPending, domain.SubmissionAcceptedQueue, domain.SubmissionAccepted, domain.SubmissionDeclineQueue:
+		return true
+	default:
+		return false
+	}
+}
+
+func withoutSubmission(ids []string, target string) []string {
+	result := ids[:0]
+	for _, id := range ids {
+		if id != target {
+			result = append(result, id)
+		}
+	}
+	return result
+}
+
+func containsSpeakerID(ids []string, target string) bool {
+	for _, id := range ids {
+		if id == target {
+			return true
+		}
+	}
+	return false
 }
 
 func upsertCompletion(state *domain.State, taskID, speakerID, status string, values map[string]string) {

@@ -34,7 +34,7 @@ func TestEngineControlsConditionalFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !workshop.Visible || workshop.Field != "workshop_needs" || workshop.Rule != "ShowWorkshopNeeds" {
+	if !workshop.Visible || workshop.Field != "workshop_needs" || workshop.Rule != "ShowMatchingAnswer" {
 		t.Fatalf("unexpected workshop visibility: %#v", workshop)
 	}
 
@@ -42,8 +42,16 @@ func TestEngineControlsConditionalFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if talk.Visible || talk.Rule != "HideWorkshopNeeds" {
+	if talk.Visible || talk.Rule != "HideNonMatchingAnswer" {
 		t.Fatalf("unexpected talk visibility: %#v", talk)
+	}
+
+	custom, err := engine.QuestionVisibility("Yes", "Yes", "show", "supporting_material")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !custom.Visible || custom.Field != "supporting_material" || custom.Rule != "ShowMatchingAnswer" {
+		t.Fatalf("unexpected generic visibility: %#v", custom)
 	}
 }
 

@@ -13,6 +13,7 @@ import (
 	"github.com/m31-labs/rostrum/internal/live"
 	"github.com/m31-labs/rostrum/internal/present"
 	"m31labs.dev/gosx/action"
+	"m31labs.dev/gosx/auth"
 	"m31labs.dev/gosx/route"
 	"m31labs.dev/gosx/server"
 	"m31labs.dev/gosx/session"
@@ -31,22 +32,105 @@ var validFieldSections = map[string]bool{"proposal": true, "participant": true}
 func init() {
 	if err := route.RegisterFileModuleHere(route.FileModuleOptions{
 		Load: func(ctx *route.RouteContext, page route.FilePage) (any, error) {
-			return present.Forms(appstate.MustGet().Snapshot())
+			return present.Forms(appstate.MustGet().Snapshot(), ctx.Query("form"))
 		},
 		Metadata: func(ctx *route.RouteContext, page route.FilePage, data any) (server.Metadata, error) {
 			return server.Metadata{Title: server.Title{Default: "Forms & routing — Rostrum"}, Description: "Conditional CFP configuration with audited category routing."}, nil
 		},
 		Actions: route.FileActions{
-			"toggleForm":      toggleForm,
-			"addField":        addField,
-			"updateField":     updateField,
-			"removeField":     removeField,
-			"moveField":       moveField,
-			"setFormSchedule": setFormSchedule,
+			"createForm":         createForm,
+			"toggleForm":         toggleForm,
+			"addField":           addField,
+			"updateField":        updateField,
+			"removeField":        removeField,
+			"moveField":          moveField,
+			"setFormSchedule":    setFormSchedule,
+			"addQuestionRule":    addQuestionRule,
+			"removeQuestionRule": removeQuestionRule,
 		},
 	}); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// createForm makes a separately addressable public CFP. New forms begin
+// closed and receive the locked core schema that preserves typed submission
+// fields and routing; organizers deliberately open them only after their
+// wording, schedule, and conditional questions are ready.
+func createForm(ctx *action.Context) error {
+	name := strings.TrimSpace(ctx.FormData["name"])
+	title := strings.TrimSpace(ctx.FormData["title"])
+	slug := domain.Slugify(ctx.FormData["slug"])
+	kind := strings.TrimSpace(ctx.FormData["kind"])
+	fieldErrors := map[string]string{}
+	if name == "" {
+		fieldErrors["name"] = "Enter an internal form name."
+	}
+	if title == "" {
+		fieldErrors["title"] = "Enter the public form title."
+	}
+	if slug == "" {
+		slug = domain.Slugify(title)
+	}
+	if slug == "" || slug != strings.TrimSpace(ctx.FormData["slug"]) && strings.TrimSpace(ctx.FormData["slug"]) != "" {
+		fieldErrors["slug"] = "Use lowercase letters, numbers, and hyphens."
+	}
+	if kind == "" {
+		kind = "abstract"
+	}
+	if kind != "abstract" && kind != "proposal" && kind != "application" {
+		fieldErrors["kind"] = "Choose abstract, proposal, or application."
+	}
+	if len(fieldErrors) > 0 {
+		return action.Validation("Correct the form details.", fieldErrors, ctx.FormData)
+	}
+
+	formID := uniqueFormID(appstate.MustGet().Snapshot().Forms, "form_"+slug)
+	if err := appstate.MustGet().UpdateAudit(domain.AuditMeta{
+		Actor:      formsActor(ctx),
+		Action:     "form.created",
+		EntityType: "submission_form",
+		EntityID:   formID,
+		Summary:    "Created a new closed public submission form.",
+		Origin:     "organizer-forms",
+	}, func(state *domain.State) error {
+		for _, existing := range state.Forms {
+			if existing.Slug == slug {
+				return action.Validation("Choose a unique public slug.", map[string]string{"slug": "That public form URL is already in use."}, ctx.FormData)
+			}
+		}
+		// The form ID was resolved against the snapshot immediately before the
+		// mutation. A concurrent form creation with the same slug is rejected
+		// above, preserving the audit EntityID chosen for this mutation.
+		if formIDTaken(state.Forms, formID) {
+			return action.Validation("Choose a unique public slug.", map[string]string{"slug": "That public form URL is already in use."}, ctx.FormData)
+		}
+		state.Forms = append(state.Forms, domain.SubmissionForm{
+			ID:                    formID,
+			EventID:               state.Event.ID,
+			Name:                  name,
+			ExternalTitle:         title,
+			Slug:                  slug,
+			Kind:                  kind,
+			Status:                "closed",
+			WelcomeHeading:        "Tell us what you have learned.",
+			WelcomeBody:           "Start a draft whenever you like; the program team will open this call when it is ready for submissions.",
+			CloseAt:               time.Now().Add(30 * 24 * time.Hour).UTC(),
+			MaxDraftsPerSubmitter: 3,
+			RedirectToPortal:      true,
+			SendConfirmation:      true,
+			ConfirmationTemplate:  "tpl_submission_confirmation",
+			RuleFile:              "rules/form-visibility.arb",
+			Fields:                coreFields(state.Event),
+		})
+		return nil
+	}); err != nil {
+		return err
+	}
+	session.AddFlash(ctx.Request, "notice", "Created a closed form. Configure it, then open it when ready.")
+	live.Broadcast("form:created", map[string]string{"id": formID, "slug": slug})
+	actionflow.Redirect(ctx, formURL(formID))
+	return nil
 }
 
 func toggleForm(ctx *action.Context) error {
@@ -55,7 +139,14 @@ func toggleForm(ctx *action.Context) error {
 	if nextStatus != "open" && nextStatus != "closed" {
 		return action.Validation("Choose a valid form state.", map[string]string{"status": "Use open or closed."}, ctx.FormData)
 	}
-	if err := appstate.MustGet().Update(func(state *domain.State) error {
+	if err := appstate.MustGet().UpdateAudit(domain.AuditMeta{
+		Actor:      formsActor(ctx),
+		Action:     "form.status_changed",
+		EntityType: "submission_form",
+		EntityID:   formID,
+		Summary:    "Changed the public submission form state to " + nextStatus + ".",
+		Origin:     "organizer-forms",
+	}, func(state *domain.State) error {
 		form, found := state.Form(formID)
 		if !found {
 			return action.Error(404, "Form not found.")
@@ -67,7 +158,7 @@ func toggleForm(ctx *action.Context) error {
 	}
 	session.AddFlash(ctx.Request, "notice", "CFP state changed to "+nextStatus+".")
 	live.Broadcast("form:updated", map[string]string{"id": formID, "status": nextStatus})
-	actionflow.Redirect(ctx, "/organizer/forms")
+	actionflow.Redirect(ctx, formURL(formID))
 	return nil
 }
 
@@ -83,7 +174,14 @@ func addField(ctx *action.Context) error {
 	}
 
 	newID := ""
-	if err := appstate.MustGet().Update(func(state *domain.State) error {
+	if err := appstate.MustGet().UpdateAudit(domain.AuditMeta{
+		Actor:      formsActor(ctx),
+		Action:     "form.field_added",
+		EntityType: "submission_form",
+		EntityID:   formID,
+		Summary:    "Added a custom question to the submission form.",
+		Origin:     "organizer-forms",
+	}, func(state *domain.State) error {
 		form, found := state.Form(formID)
 		if !found {
 			return action.Error(404, "Form not found.")
@@ -106,7 +204,7 @@ func addField(ctx *action.Context) error {
 	}
 	session.AddFlash(ctx.Request, "notice", "Added the "+label+" field.")
 	live.Broadcast("form:updated", map[string]string{"id": formID, "field": newID})
-	actionflow.Redirect(ctx, "/organizer/forms")
+	actionflow.Redirect(ctx, formURL(formID))
 	return nil
 }
 
@@ -123,7 +221,14 @@ func updateField(ctx *action.Context) error {
 		return action.Validation("Correct the highlighted fields.", fieldErrors, ctx.FormData)
 	}
 
-	if err := appstate.MustGet().Update(func(state *domain.State) error {
+	if err := appstate.MustGet().UpdateAudit(domain.AuditMeta{
+		Actor:      formsActor(ctx),
+		Action:     "form.field_updated",
+		EntityType: "submission_form",
+		EntityID:   formID,
+		Summary:    "Updated a custom question on the submission form.",
+		Origin:     "organizer-forms",
+	}, func(state *domain.State) error {
 		form, found := state.Form(formID)
 		if !found {
 			return action.Error(404, "Form not found.")
@@ -131,6 +236,12 @@ func updateField(ctx *action.Context) error {
 		for index := range form.Fields {
 			if form.Fields[index].ID != fieldID {
 				continue
+			}
+			if form.Fields[index].Locked {
+				return action.Validation("Core fields are locked.", map[string]string{"field": "Locked fields keep routing and speaker identity stable."}, ctx.FormData)
+			}
+			if questionRuleNeedsSection(form.QuestionRules, fieldID) && form.Fields[index].Section != section {
+				return action.Validation("Remove or update this question's conditional rule first.", map[string]string{"section": "A conditional source and target must stay in the same section."}, ctx.FormData)
 			}
 			form.Fields[index].Label = label
 			form.Fields[index].Type = fieldType
@@ -148,7 +259,7 @@ func updateField(ctx *action.Context) error {
 	}
 	session.AddFlash(ctx.Request, "notice", "Updated the "+label+" field.")
 	live.Broadcast("form:updated", map[string]string{"id": formID, "field": fieldID})
-	actionflow.Redirect(ctx, "/organizer/forms")
+	actionflow.Redirect(ctx, formURL(formID))
 	return nil
 }
 
@@ -160,7 +271,14 @@ func removeField(ctx *action.Context) error {
 	formID := strings.TrimSpace(ctx.FormData["form_id"])
 	fieldID := strings.TrimSpace(ctx.FormData["field_id"])
 	label := ""
-	if err := appstate.MustGet().Update(func(state *domain.State) error {
+	if err := appstate.MustGet().UpdateAudit(domain.AuditMeta{
+		Actor:      formsActor(ctx),
+		Action:     "form.field_removed",
+		EntityType: "submission_form",
+		EntityID:   formID,
+		Summary:    "Removed a custom question from the submission form.",
+		Origin:     "organizer-forms",
+	}, func(state *domain.State) error {
 		form, found := state.Form(formID)
 		if !found {
 			return action.Error(404, "Form not found.")
@@ -172,6 +290,9 @@ func removeField(ctx *action.Context) error {
 			if field.Locked {
 				return action.Validation("This field is locked and cannot be removed.", map[string]string{"field": "Locked fields power required routing and cannot be deleted."}, ctx.FormData)
 			}
+			if questionRuleReferences(form.QuestionRules, fieldID) {
+				return action.Validation("Remove the conditional rule first.", map[string]string{"field": "This question is used by a conditional rule."}, ctx.FormData)
+			}
 			label = field.Label
 			form.Fields = append(form.Fields[:index], form.Fields[index+1:]...)
 			return nil
@@ -182,7 +303,7 @@ func removeField(ctx *action.Context) error {
 	}
 	session.AddFlash(ctx.Request, "notice", "Removed the "+label+" field.")
 	live.Broadcast("form:updated", map[string]string{"id": formID, "field": fieldID})
-	actionflow.Redirect(ctx, "/organizer/forms")
+	actionflow.Redirect(ctx, formURL(formID))
 	return nil
 }
 
@@ -197,7 +318,14 @@ func moveField(ctx *action.Context) error {
 		return action.Validation("Choose a direction to move the field.", map[string]string{"direction": "Use up or down."}, ctx.FormData)
 	}
 	moved := false
-	if err := appstate.MustGet().Update(func(state *domain.State) error {
+	if err := appstate.MustGet().UpdateAudit(domain.AuditMeta{
+		Actor:      formsActor(ctx),
+		Action:     "form.field_reordered",
+		EntityType: "submission_form",
+		EntityID:   formID,
+		Summary:    "Reordered a submission form question.",
+		Origin:     "organizer-forms",
+	}, func(state *domain.State) error {
 		form, found := state.Form(formID)
 		if !found {
 			return action.Error(404, "Form not found.")
@@ -229,7 +357,7 @@ func moveField(ctx *action.Context) error {
 		session.AddFlash(ctx.Request, "notice", "Reordered the fields.")
 		live.Broadcast("form:updated", map[string]string{"id": formID, "field": fieldID})
 	}
-	actionflow.Redirect(ctx, "/organizer/forms")
+	actionflow.Redirect(ctx, formURL(formID))
 	return nil
 }
 
@@ -241,10 +369,26 @@ func moveField(ctx *action.Context) error {
 func setFormSchedule(ctx *action.Context) error {
 	formID := strings.TrimSpace(ctx.FormData["form_id"])
 	closeAtValue := strings.TrimSpace(ctx.FormData["close_at"])
+	draftLimitValue := strings.TrimSpace(ctx.FormData["max_drafts_per_submitter"])
 	if closeAtValue == "" {
 		return action.Validation("Choose a close date and time.", map[string]string{"close_at": "Required."}, ctx.FormData)
 	}
-	if err := appstate.MustGet().Update(func(state *domain.State) error {
+	draftLimit := 3
+	if draftLimitValue != "" {
+		parsed, parseErr := strconv.Atoi(draftLimitValue)
+		if parseErr != nil || parsed < 1 || parsed > 10 {
+			return action.Validation("Choose a draft limit between 1 and 10.", map[string]string{"max_drafts_per_submitter": "Use a whole number from 1 to 10."}, ctx.FormData)
+		}
+		draftLimit = parsed
+	}
+	if err := appstate.MustGet().UpdateAudit(domain.AuditMeta{
+		Actor:      formsActor(ctx),
+		Action:     "form.schedule_updated",
+		EntityType: "submission_form",
+		EntityID:   formID,
+		Summary:    "Updated the CFP close date and draft limit.",
+		Origin:     "organizer-forms",
+	}, func(state *domain.State) error {
 		form, found := state.Form(formID)
 		if !found {
 			return action.Error(404, "Form not found.")
@@ -258,13 +402,131 @@ func setFormSchedule(ctx *action.Context) error {
 			return action.Validation("Choose a valid close date and time.", map[string]string{"close_at": "Invalid date or time."}, ctx.FormData)
 		}
 		form.CloseAt = closeAt
+		form.MaxDraftsPerSubmitter = draftLimit
 		return nil
 	}); err != nil {
 		return err
 	}
 	session.AddFlash(ctx.Request, "notice", "Updated the CFP close date.")
 	live.Broadcast("form:updated", map[string]string{"id": formID})
-	actionflow.Redirect(ctx, "/organizer/forms")
+	actionflow.Redirect(ctx, formURL(formID))
+	return nil
+}
+
+// addQuestionRule creates one constrained, explainable visibility rule. The
+// application validates the builder-selected field references; Arbiter owns
+// the resulting equality decision at runtime (rules/form-visibility.arb).
+func addQuestionRule(ctx *action.Context) error {
+	formID := strings.TrimSpace(ctx.FormData["form_id"])
+	sourceID := strings.TrimSpace(ctx.FormData["source_field_id"])
+	targetID := strings.TrimSpace(ctx.FormData["target_field_id"])
+	value := strings.TrimSpace(ctx.FormData["value"])
+	fieldErrors := map[string]string{}
+	if sourceID == "" {
+		fieldErrors["source_field_id"] = "Choose the question that controls visibility."
+	}
+	if targetID == "" {
+		fieldErrors["target_field_id"] = "Choose the question to reveal."
+	}
+	if value == "" {
+		fieldErrors["value"] = "Enter the answer that reveals the question."
+	}
+	if len(fieldErrors) > 0 {
+		return action.Validation("Correct the conditional rule.", fieldErrors, ctx.FormData)
+	}
+
+	ruleID := ""
+	if err := appstate.MustGet().UpdateAudit(domain.AuditMeta{
+		Actor:      formsActor(ctx),
+		Action:     "form.question_rule_added",
+		EntityType: "submission_form",
+		EntityID:   formID,
+		Summary:    "Added a governed conditional question rule.",
+		Origin:     "organizer-forms",
+		Rule:       "form-visibility.arb",
+	}, func(state *domain.State) error {
+		form, found := state.Form(formID)
+		if !found {
+			return action.Error(404, "Form not found.")
+		}
+		source, sourceFound := formField(form.Fields, sourceID)
+		target, targetFound := formField(form.Fields, targetID)
+		if !sourceFound {
+			return action.Validation("Choose a valid source question.", map[string]string{"source_field_id": "That question is no longer on this form."}, ctx.FormData)
+		}
+		if !targetFound {
+			return action.Validation("Choose a valid target question.", map[string]string{"target_field_id": "That question is no longer on this form."}, ctx.FormData)
+		}
+		if source.ID == target.ID {
+			return action.Validation("Choose two different questions.", map[string]string{"target_field_id": "A question cannot control itself."}, ctx.FormData)
+		}
+		if source.Section != target.Section {
+			return action.Validation("Keep conditional questions in one section.", map[string]string{"target_field_id": "Choose a target in the same form section as the source."}, ctx.FormData)
+		}
+		if target.Locked {
+			return action.Validation("Core questions cannot be conditional.", map[string]string{"target_field_id": "Choose an unlocked custom question."}, ctx.FormData)
+		}
+		if questionRuleReferencesTarget(form.QuestionRules, source.ID) || questionRuleReferencesSource(form.QuestionRules, target.ID) {
+			return action.Validation("Keep conditional rules to one layer.", map[string]string{"target_field_id": "A conditional target cannot also control another question."}, ctx.FormData)
+		}
+		if questionRuleTargetTaken(form.QuestionRules, target.ID) {
+			return action.Validation("That question already has a visibility rule.", map[string]string{"target_field_id": "Remove its existing rule before changing the source."}, ctx.FormData)
+		}
+		if source.Type == "select" && !formFieldAllowsValue(state, source, value) {
+			return action.Validation("Choose an answer offered by the source question.", map[string]string{"value": "This must match one of the source question's options."}, ctx.FormData)
+		}
+		ruleID = uniqueQuestionRuleID(form.QuestionRules, "rule_"+source.ID+"_"+target.ID)
+		form.QuestionRules = append(form.QuestionRules, domain.QuestionRule{
+			ID:            ruleID,
+			SourceFieldID: source.ID,
+			Operator:      "equals",
+			Value:         value,
+			TargetFieldID: target.ID,
+			Effect:        "show",
+			Description:   "Show “" + target.Label + "” when “" + source.Label + "” is “" + value + "”.",
+		})
+		return nil
+	}); err != nil {
+		return err
+	}
+	session.AddFlash(ctx.Request, "notice", "Added the conditional question rule.")
+	live.Broadcast("form:updated", map[string]string{"id": formID, "rule": ruleID})
+	actionflow.Redirect(ctx, formURL(formID))
+	return nil
+}
+
+func removeQuestionRule(ctx *action.Context) error {
+	formID := strings.TrimSpace(ctx.FormData["form_id"])
+	ruleID := strings.TrimSpace(ctx.FormData["rule_id"])
+	if ruleID == "" {
+		return action.Validation("Choose a rule to remove.", map[string]string{"rule": "Rule identity is missing."}, ctx.FormData)
+	}
+	if err := appstate.MustGet().UpdateAudit(domain.AuditMeta{
+		Actor:      formsActor(ctx),
+		Action:     "form.question_rule_removed",
+		EntityType: "submission_form",
+		EntityID:   formID,
+		Summary:    "Removed a governed conditional question rule.",
+		Origin:     "organizer-forms",
+		Rule:       "form-visibility.arb",
+	}, func(state *domain.State) error {
+		form, found := state.Form(formID)
+		if !found {
+			return action.Error(404, "Form not found.")
+		}
+		for index, rule := range form.QuestionRules {
+			if rule.ID == ruleID {
+				form.QuestionRules = append(form.QuestionRules[:index], form.QuestionRules[index+1:]...)
+				return nil
+			}
+		}
+		return action.Error(404, "Question rule not found.")
+	}); err != nil {
+		return err
+	}
+	session.AddFlash(ctx.Request, "notice", "Removed the conditional question rule.")
+	live.Broadcast("form:updated", map[string]string{"id": formID, "rule": ruleID})
+	actionflow.Redirect(ctx, formURL(formID))
 	return nil
 }
 
@@ -352,4 +614,142 @@ func fieldIDTaken(fields []domain.FormField, id string) bool {
 		}
 	}
 	return false
+}
+
+func uniqueFormID(forms []domain.SubmissionForm, base string) string {
+	if base == "form_" || base == "" {
+		base = "form"
+	}
+	candidate := base
+	for suffix := 2; formIDTaken(forms, candidate); suffix++ {
+		candidate = fmt.Sprintf("%s-%d", base, suffix)
+	}
+	return candidate
+}
+
+func formIDTaken(forms []domain.SubmissionForm, id string) bool {
+	for _, form := range forms {
+		if form.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+// coreFields is the minimal, locked schema every new CFP receives. The
+// underlying typed Submission and Speaker records only need these fields to
+// preserve routing, review, speaker identity, and a usable public workflow.
+func coreFields(event domain.Event) []domain.FormField {
+	return []domain.FormField{
+		{ID: "title", Section: "proposal", Label: "Session title", Type: "text", Required: true, Locked: true, Placeholder: "A concrete title that tells us what changes", MaxLength: 120},
+		{ID: "abstract", Section: "proposal", Label: "Abstract", Type: "textarea", Required: true, Locked: true, Help: "Describe the problem, the approach, and what attendees will be able to do afterward.", MaxLength: 1600},
+		{ID: "format", Section: "proposal", Label: "Format", Type: "select", Required: true, Locked: true, Options: append([]string(nil), event.Formats...)},
+		{ID: "category", Section: "proposal", Label: "Category", Type: "select", Required: true, Locked: true, Options: categoryNames(event.Categories)},
+		{ID: "level", Section: "proposal", Label: "Audience level", Type: "select", Required: true, Locked: true, Options: append([]string(nil), event.Levels...)},
+		{ID: "first_name", Section: "participant", Label: "First name", Type: "text", Required: true, Locked: true, MaxLength: 80},
+		{ID: "last_name", Section: "participant", Label: "Last name", Type: "text", Required: true, Locked: true, MaxLength: 80},
+		{ID: "email", Section: "participant", Label: "Email", Type: "email", Required: true, Locked: true, MaxLength: 254},
+		{ID: "role", Section: "participant", Label: "Role", Type: "text", Required: false, Locked: true, MaxLength: 160},
+		{ID: "company", Section: "participant", Label: "Company or project", Type: "text", Required: false, Locked: true, MaxLength: 160},
+		{ID: "biography", Section: "participant", Label: "Short biography", Type: "textarea", Required: false, Locked: true, MaxLength: 800},
+	}
+}
+
+func categoryNames(categories []domain.Category) []string {
+	values := make([]string, 0, len(categories))
+	for _, category := range categories {
+		values = append(values, category.Name)
+	}
+	return values
+}
+
+func formField(fields []domain.FormField, id string) (domain.FormField, bool) {
+	for _, field := range fields {
+		if field.ID == id {
+			return field, true
+		}
+	}
+	return domain.FormField{}, false
+}
+
+func formFieldAllowsValue(state *domain.State, field domain.FormField, value string) bool {
+	for _, option := range present.FormFieldOptionValues(*state, field) {
+		if option == value {
+			return true
+		}
+	}
+	return false
+}
+
+func questionRuleTargetTaken(rules []domain.QuestionRule, targetID string) bool {
+	for _, rule := range rules {
+		if rule.TargetFieldID == targetID {
+			return true
+		}
+	}
+	return false
+}
+
+func questionRuleReferences(rules []domain.QuestionRule, fieldID string) bool {
+	for _, rule := range rules {
+		if rule.SourceFieldID == fieldID || rule.TargetFieldID == fieldID {
+			return true
+		}
+	}
+	return false
+}
+
+func questionRuleReferencesTarget(rules []domain.QuestionRule, fieldID string) bool {
+	for _, rule := range rules {
+		if rule.TargetFieldID == fieldID {
+			return true
+		}
+	}
+	return false
+}
+
+func questionRuleReferencesSource(rules []domain.QuestionRule, fieldID string) bool {
+	for _, rule := range rules {
+		if rule.SourceFieldID == fieldID {
+			return true
+		}
+	}
+	return false
+}
+
+func questionRuleNeedsSection(rules []domain.QuestionRule, fieldID string) bool {
+	return questionRuleReferences(rules, fieldID)
+}
+
+func uniqueQuestionRuleID(rules []domain.QuestionRule, base string) string {
+	if base == "" {
+		base = "rule"
+	}
+	candidate := base
+	for suffix := 2; questionRuleIDTaken(rules, candidate); suffix++ {
+		candidate = fmt.Sprintf("%s-%d", base, suffix)
+	}
+	return candidate
+}
+
+func questionRuleIDTaken(rules []domain.QuestionRule, id string) bool {
+	for _, rule := range rules {
+		if rule.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func formURL(formID string) string {
+	return "/organizer/forms?form=" + formID
+}
+
+func formsActor(ctx *action.Context) string {
+	if ctx != nil && ctx.Request != nil {
+		if user, ok := auth.Current(ctx.Request); ok && strings.TrimSpace(user.ID) != "" {
+			return "organizer:" + strings.TrimSpace(user.ID)
+		}
+	}
+	return "organizer"
 }

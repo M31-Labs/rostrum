@@ -79,24 +79,25 @@ type Category struct {
 }
 
 type SubmissionForm struct {
-	ID                   string         `json:"id"`
-	EventID              string         `json:"eventId"`
-	Name                 string         `json:"name"`
-	ExternalTitle        string         `json:"externalTitle"`
-	Slug                 string         `json:"slug"`
-	Kind                 string         `json:"kind"`
-	Status               string         `json:"status"`
-	WelcomeHeading       string         `json:"welcomeHeading"`
-	WelcomeBody          string         `json:"welcomeBody"`
-	SuccessHeading       string         `json:"successHeading"`
-	SuccessBody          string         `json:"successBody"`
-	CloseAt              time.Time      `json:"closeAt"`
-	RedirectToPortal     bool           `json:"redirectToPortal"`
-	SendConfirmation     bool           `json:"sendConfirmation"`
-	ConfirmationTemplate string         `json:"confirmationTemplate"`
-	RuleFile             string         `json:"ruleFile"`
-	Fields               []FormField    `json:"fields"`
-	QuestionRules        []QuestionRule `json:"questionRules"`
+	ID                    string         `json:"id"`
+	EventID               string         `json:"eventId"`
+	Name                  string         `json:"name"`
+	ExternalTitle         string         `json:"externalTitle"`
+	Slug                  string         `json:"slug"`
+	Kind                  string         `json:"kind"`
+	Status                string         `json:"status"`
+	WelcomeHeading        string         `json:"welcomeHeading"`
+	WelcomeBody           string         `json:"welcomeBody"`
+	SuccessHeading        string         `json:"successHeading"`
+	SuccessBody           string         `json:"successBody"`
+	CloseAt               time.Time      `json:"closeAt"`
+	MaxDraftsPerSubmitter int            `json:"maxDraftsPerSubmitter"`
+	RedirectToPortal      bool           `json:"redirectToPortal"`
+	SendConfirmation      bool           `json:"sendConfirmation"`
+	ConfirmationTemplate  string         `json:"confirmationTemplate"`
+	RuleFile              string         `json:"ruleFile"`
+	Fields                []FormField    `json:"fields"`
+	QuestionRules         []QuestionRule `json:"questionRules"`
 }
 
 type FormField struct {
@@ -177,45 +178,51 @@ func (speaker Speaker) Initials() string {
 }
 
 type Submission struct {
-	ID             string            `json:"id"`
-	EventID        string            `json:"eventId"`
-	FormID         string            `json:"formId"`
-	Title          string            `json:"title"`
-	Abstract       string            `json:"abstract"`
-	Format         string            `json:"format"`
-	CategoryID     string            `json:"categoryId"`
-	TrackID        string            `json:"trackId"`
-	Level          string            `json:"level"`
-	Tags           []string          `json:"tags"`
-	SpeakerIDs     []string          `json:"speakerIds"`
-	Status         string            `json:"status"`
-	DecisionActor  string            `json:"decisionActor"`
-	DecisionReason string            `json:"decisionReason"`
-	DecisionRule   string            `json:"decisionRule"`
-	DecisionTrace  []string          `json:"decisionTrace"`
-	DecisionAt     time.Time         `json:"decisionAt"`
-	RoutedQueue    string            `json:"routedQueue"`
-	RoutedOwner    string            `json:"routedOwner"`
-	RuleTrace      []string          `json:"ruleTrace"`
-	Answers        map[string]string `json:"answers"`
-	SubmittedAt    time.Time         `json:"submittedAt"`
-	UpdatedAt      time.Time         `json:"updatedAt"`
+	ID               string            `json:"id"`
+	EventID          string            `json:"eventId"`
+	FormID           string            `json:"formId"`
+	Title            string            `json:"title"`
+	Abstract         string            `json:"abstract"`
+	Format           string            `json:"format"`
+	CategoryID       string            `json:"categoryId"`
+	TrackID          string            `json:"trackId"`
+	Level            string            `json:"level"`
+	Tags             []string          `json:"tags"`
+	SpeakerIDs       []string          `json:"speakerIds"`
+	Status           string            `json:"status"`
+	DecisionActor    string            `json:"decisionActor"`
+	DecisionReason   string            `json:"decisionReason"`
+	DecisionRule     string            `json:"decisionRule"`
+	DecisionTrace    []string          `json:"decisionTrace"`
+	DecisionAt       time.Time         `json:"decisionAt"`
+	RoutedQueue      string            `json:"routedQueue"`
+	RoutedOwner      string            `json:"routedOwner"`
+	RuleTrace        []string          `json:"ruleTrace"`
+	Answers          map[string]string `json:"answers"`
+	WithdrawalReason string            `json:"withdrawalReason"`
+	WithdrawnAt      time.Time         `json:"withdrawnAt"`
+	SubmittedAt      time.Time         `json:"submittedAt"`
+	UpdatedAt        time.Time         `json:"updatedAt"`
 }
 
 const (
+	SubmissionDraft         = "draft"
 	SubmissionPending       = "pending"
 	SubmissionAcceptedQueue = "accepted_queue"
 	SubmissionAccepted      = "accepted"
 	SubmissionDeclineQueue  = "decline_queue"
 	SubmissionDeclined      = "declined"
+	SubmissionWithdrawn     = "withdrawn"
 )
 
 var SubmissionStatuses = []string{
+	SubmissionDraft,
 	SubmissionPending,
 	SubmissionAcceptedQueue,
 	SubmissionAccepted,
 	SubmissionDeclineQueue,
 	SubmissionDeclined,
+	SubmissionWithdrawn,
 }
 
 type ReviewPlan struct {
@@ -846,6 +853,17 @@ func (state State) Validate() error {
 	if err := state.VerifyAuditTrail(); err != nil {
 		return err
 	}
+	if err := validateSubmissionForms(state); err != nil {
+		return err
+	}
+	for _, submission := range state.Submissions {
+		if !submissionStatusKnown(submission.Status) {
+			return fmt.Errorf("submission %s has an unknown status %q", submission.ID, submission.Status)
+		}
+		if submission.Status == SubmissionWithdrawn && submission.WithdrawnAt.IsZero() {
+			return fmt.Errorf("withdrawn submission %s has no withdrawal timestamp", submission.ID)
+		}
+	}
 	for _, session := range state.Sessions {
 		if session.Scheduled() && !session.EndsAt.After(session.StartsAt) {
 			return fmt.Errorf("session %s ends before it starts", session.ID)
@@ -867,6 +885,62 @@ func (state State) Validate() error {
 		}
 	}
 	return nil
+}
+
+func validateSubmissionForms(state State) error {
+	slugs := map[string]string{}
+	for _, form := range state.Forms {
+		if strings.TrimSpace(form.EventID) == "" || strings.TrimSpace(form.Name) == "" || strings.TrimSpace(form.Slug) == "" {
+			return fmt.Errorf("submission form %s is incomplete", form.ID)
+		}
+		if previous, exists := slugs[form.Slug]; exists {
+			return fmt.Errorf("submission forms %s and %s share slug %s", previous, form.ID, form.Slug)
+		}
+		slugs[form.Slug] = form.ID
+		if form.MaxDraftsPerSubmitter < 0 || form.MaxDraftsPerSubmitter > 10 {
+			return fmt.Errorf("submission form %s has an invalid draft limit", form.ID)
+		}
+		fields := map[string]FormField{}
+		for _, field := range form.Fields {
+			if strings.TrimSpace(field.ID) == "" || strings.TrimSpace(field.Section) == "" || strings.TrimSpace(field.Type) == "" {
+				return fmt.Errorf("submission form %s has an incomplete field", form.ID)
+			}
+			if _, exists := fields[field.ID]; exists {
+				return fmt.Errorf("submission form %s has duplicate field %s", form.ID, field.ID)
+			}
+			fields[field.ID] = field
+		}
+		targets := map[string]bool{}
+		sources := map[string]bool{}
+		for _, rule := range form.QuestionRules {
+			source, sourceOK := fields[rule.SourceFieldID]
+			target, targetOK := fields[rule.TargetFieldID]
+			if strings.TrimSpace(rule.ID) == "" || !sourceOK || !targetOK {
+				return fmt.Errorf("submission form %s has a rule with an unknown field", form.ID)
+			}
+			if rule.SourceFieldID == rule.TargetFieldID || rule.Operator != "equals" || rule.Effect != "show" || strings.TrimSpace(rule.Value) == "" {
+				return fmt.Errorf("submission form %s has an unsupported question rule %s", form.ID, rule.ID)
+			}
+			if source.Section != target.Section || target.Locked {
+				return fmt.Errorf("submission form %s has an invalid conditional target %s", form.ID, target.ID)
+			}
+			if targets[target.ID] || sources[target.ID] || targets[source.ID] {
+				return fmt.Errorf("submission form %s has a chained or duplicate conditional target %s", form.ID, target.ID)
+			}
+			targets[target.ID] = true
+			sources[source.ID] = true
+		}
+	}
+	return nil
+}
+
+func submissionStatusKnown(status string) bool {
+	for _, candidate := range SubmissionStatuses {
+		if candidate == status {
+			return true
+		}
+	}
+	return false
 }
 
 func validateUniqueIDs(state State) error {

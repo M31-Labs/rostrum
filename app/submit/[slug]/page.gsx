@@ -58,41 +58,106 @@ func FormFieldRow(props any) Node {
 
 //gosx:island
 func ConditionalFormatFields(props any) Node {
-	format := signal.New(props.formatValue)
-	selectFormat := func() { format.Set(value) }
+	answer := signal.New(props.sourceValue)
+	setAnswer := func() { answer.Set(value) }
 	return <div class="conditional-format-fields">
-		<label>
+		<label class="field-row">
 			<span>
-				Format
-				<b>Required</b>
+				{props.source.label}
+				<If cond={props.source.required}>
+					<b>Required</b>
+				</If>
 			</span>
-			<select name="format" aria-describedby="format-error" required onChange={selectFormat}>
-				<option value="">Choose format</option>
-				<Each of={props.formats} as="option">
-					<option value={option.value} selected={option.value == format.Get()}>{option.label}</option>
-				</Each>
-			</select>
-			<p class="form-error" id="format-error" aria-live="polite">{props.formatError}</p>
+			<If cond={props.source.isTextarea}>
+				<textarea
+					name={props.source.id}
+					maxlength={props.source.maxLength}
+					placeholder={props.source.placeholder}
+					aria-describedby={props.source.id + "-error"}
+					required={props.source.required}
+					onInput={setAnswer}
+				>{props.sourceValue}</textarea>
+			</If>
+			<If cond={props.source.isSelect}>
+				<select
+					name={props.source.id}
+					aria-describedby={props.source.id + "-error"}
+					required={props.source.required}
+					onChange={setAnswer}
+				>
+					<option value="">{"Choose " + props.source.label}</option>
+					<Each of={props.source.options} as="option">
+						<option value={option.value} selected={option.value == answer.Get()}>{option.label}</option>
+					</Each>
+				</select>
+			</If>
+			<If cond={props.source.isInput}>
+				<input
+					type={props.source.inputType}
+					name={props.source.id}
+					value={props.sourceValue}
+					maxlength={props.source.maxLength}
+					placeholder={props.source.placeholder}
+					aria-describedby={props.source.id + "-error"}
+					required={props.source.required}
+					onInput={setAnswer}
+				></input>
+			</If>
+			<If cond={props.source.help != ""}>
+				<small>{props.source.help}</small>
+			</If>
+			<p class="form-error" id={props.source.id + "-error"} data-gosx-field-error={props.source.id} aria-live="polite">{props.sourceError}</p>
 		</label>
-		<label class="conditional-field" hidden={format.Get() != "Workshop"}>
-			<span>
-				Workshop logistics
-				<b>Required for workshops</b>
-			</span>
-			<textarea
-				name="workshop_needs"
-				maxlength="800"
-				placeholder="Room setup, facilitation, materials, and participant limit"
-				aria-describedby="workshop_needs-error"
-				required={format.Get() == "Workshop"}
-				disabled={format.Get() != "Workshop"}
-			>{props.workshopNeeds}</textarea>
-			<small>
-				Conditional CFP policy ·
-				{props.conditionalWhy}
-			</small>
-			<p class="form-error" id="workshop_needs-error" aria-live="polite">{props.workshopError}</p>
-		</label>
+		<Each of={props.source.targets} as="target">
+			<label class="field-row conditional-field" hidden={answer.Get() != target.ruleValue}>
+				<span>
+					{target.label}
+					<If cond={target.required}>
+						<b>Required when shown</b>
+					</If>
+				</span>
+				<If cond={target.isTextarea}>
+					<textarea
+						name={target.id}
+						maxlength={target.maxLength}
+						placeholder={target.placeholder}
+						aria-describedby={target.id + "-error"}
+						required={target.required && answer.Get() == target.ruleValue}
+						disabled={answer.Get() != target.ruleValue}
+					>{target.value}</textarea>
+				</If>
+				<If cond={target.isSelect}>
+					<select
+						name={target.id}
+						aria-describedby={target.id + "-error"}
+						required={target.required && answer.Get() == target.ruleValue}
+						disabled={answer.Get() != target.ruleValue}
+					>
+						<option value="">{"Choose " + target.label}</option>
+						<Each of={target.options} as="option">
+							<option value={option.value} selected={option.value == target.value}>{option.label}</option>
+						</Each>
+					</select>
+				</If>
+				<If cond={target.isInput}>
+					<input
+						type={target.inputType}
+						name={target.id}
+						value={target.value}
+						maxlength={target.maxLength}
+						placeholder={target.placeholder}
+						aria-describedby={target.id + "-error"}
+						required={target.required && answer.Get() == target.ruleValue}
+						disabled={answer.Get() != target.ruleValue}
+					></input>
+				</If>
+				<If cond={target.help != ""}>
+					<small>{target.help}</small>
+				</If>
+				<small>Conditional CFP policy · {target.conditionalWhy}</small>
+				<p class="form-error" id={target.id + "-error"} data-gosx-field-error={target.id} aria-live="polite"></p>
+			</label>
+		</Each>
 	</div>
 }
 
@@ -149,27 +214,29 @@ func Page() Node {
 				<ActionForm class="public-form" actionName="submitProposal" aria-describedby="submission-form-status">
 					<input type="hidden" name="csrf_token" value={csrf.token}></input>
 					<input type="hidden" name="form_id" value={data.form.id}></input>
+					<input type="hidden" name="draft_id" value={data.draft.id}></input>
+					<input type="hidden" name="draft_key" value={data.draft.key}></input>
 					<p class="form-status" id="submission-form-status" role="alert" tabindex="-1">{action.message}</p>
+					<If cond={data.draft.active}>
+						<p class="form-status" role="status">You are editing a saved draft. Submitting it will send it into review.</p>
+					</If>
 					<fieldset>
 						<legend>
 							<span>01</span>
 							Proposal
 						</legend>
 						<Each of={data.proposalFields} as="field">
-							<If cond={field.id == "format"}>
+							<If cond={field.isConditionalSource}>
 								<ConditionalFormatFields
-									formats={data.formats}
-									formatValue={"" + actions.submitProposal.values.format}
-									formatError={"" + actions.submitProposal.fieldErrors.format}
-									workshopNeeds={"" + actions.submitProposal.values.workshop_needs}
-									workshopError={"" + actions.submitProposal.fieldErrors.workshop_needs}
-									conditionalWhy={data.form.conditionalWhy}
+									source={field}
+									sourceValue={actions.submitProposal.name != "" ? "" + actions.submitProposal.values[field.id] : field.value}
+									sourceError={"" + actions.submitProposal.fieldErrors[field.id]}
 								></ConditionalFormatFields>
 							</If>
-							<If cond={field.id != "format"}>
+							<If cond={!field.isConditionalTarget && !field.isConditionalSource}>
 								<FormFieldRow
 									field={field}
-									value={actions.submitProposal.values[field.id]}
+									value={actions.submitProposal.name != "" ? actions.submitProposal.values[field.id] : field.value}
 									error={actions.submitProposal.fieldErrors[field.id]}
 								></FormFieldRow>
 							</If>
@@ -181,17 +248,29 @@ func Page() Node {
 							Participant
 						</legend>
 						<Each of={data.participantFields} as="field">
-							<FormFieldRow
-								field={field}
-								value={actions.submitProposal.values[field.id]}
-								error={actions.submitProposal.fieldErrors[field.id]}
-							></FormFieldRow>
+							<If cond={field.isConditionalSource}>
+								<ConditionalFormatFields
+									source={field}
+									sourceValue={actions.submitProposal.name != "" ? "" + actions.submitProposal.values[field.id] : field.value}
+									sourceError={"" + actions.submitProposal.fieldErrors[field.id]}
+								></ConditionalFormatFields>
+							</If>
+							<If cond={!field.isConditionalTarget && !field.isConditionalSource}>
+								<FormFieldRow
+									field={field}
+									value={actions.submitProposal.name != "" ? actions.submitProposal.values[field.id] : field.value}
+									error={actions.submitProposal.fieldErrors[field.id]}
+								></FormFieldRow>
+							</If>
 						</Each>
 					</fieldset>
 					<footer>
 						<p>
 							By submitting, you agree to the event code of conduct. Payments are not collected.
 						</p>
+						<button class="button" type="submit" formaction={actionPath("saveDraft")}>
+							Save draft
+						</button>
 						<button class="button button-primary" type="submit">
 							Submit proposal
 							<span aria-hidden="true">→</span>

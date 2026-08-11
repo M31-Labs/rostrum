@@ -122,6 +122,21 @@ func FileAction(props any) Node {
 	</Form>
 }
 
+func WithdrawSubmission(props any) Node {
+	return <ActionForm class="field-remove-form" actionName="withdrawSubmission">
+		<input type="hidden" name="csrf_token" value={csrf.token}></input>
+		<input type="hidden" name="submission_id" value={props.id}></input>
+		<label>
+			<span class="sr-only">Optional note for the program team</span>
+			<input name="reason" maxlength="500" placeholder="Optional note for the program team"></input>
+			<p class="form-error" data-gosx-field-error="reason" aria-live="polite"></p>
+		</label>
+		<p class="form-error" data-gosx-field-error="submission" aria-live="polite"></p>
+		<p class="form-status" role="status" aria-live="polite">{actions.withdrawSubmission.message}</p>
+		<button class="button button-compact" type="submit">Withdraw proposal</button>
+	</ActionForm>
+}
+
 func ProfileFields(props any) Node {
 	return <fragment>
 		<div class="form-grid-two">
@@ -386,10 +401,19 @@ func Page() Node {
 							<article class="portal-proposal">
 								<strong>{proposal.title}</strong>
 								<span class={"status-pill status-" + proposal.tone}>{proposal.status}</span>
-								<small>
-									Submitted
-									{proposal.submitted}
-								</small>
+								<small>{proposal.submitted}</small>
+								<If cond={proposal.scheduled && proposal.canWithdraw}>
+									<p class="form-error">Withdrawing will remove the linked session from the public agenda.</p>
+								</If>
+								<If cond={proposal.hasResume}>
+									<a class="button button-compact" href={proposal.resumeURL} data-gosx-link>Continue draft</a>
+								</If>
+								<If cond={proposal.canWithdraw && !data.viewingAsOrganizer}>
+									<details>
+										<summary>Withdraw this proposal</summary>
+										<WithdrawSubmission id={proposal.id}></WithdrawSubmission>
+									</details>
+								</If>
 							</article>
 						</Each>
 					</section>
