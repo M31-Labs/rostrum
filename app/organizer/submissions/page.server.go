@@ -139,9 +139,13 @@ func sendAcceptanceInvite(sessionID, speakerID string) {
 	if !found {
 		return
 	}
+	communication, found := snapshot.Communication(domain.AcceptanceTemplateID, speakerID, sessionID)
+	if !found {
+		return
+	}
 	subject, body := present.RenderCommunication(snapshot, template, *speaker, *sessionItem)
 
-	msg := mail.Message{To: speaker.Email, ToName: speaker.Name(), Subject: subject, TextBody: body}
+	msg := mail.Message{To: speaker.Email, ToName: speaker.Name(), Subject: subject, TextBody: body, IdempotencyKey: communication.ID}
 	if template.AttachCalendar && sessionItem.Scheduled() {
 		ics, err := programcalendar.Invite(snapshot, *sessionItem, *speaker, organizerEmail(template))
 		if err != nil {

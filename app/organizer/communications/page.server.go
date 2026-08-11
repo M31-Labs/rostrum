@@ -44,10 +44,11 @@ func init() {
 var messageSender = sync.OnceValue(mail.FromEnv)
 
 // queueMessage handles the Communications workspace's send form. For the
-// "demo-outbox" provider it sends now, through messageSender
-// (mail.FromEnv): the demo OutboxSender when no SMTP relay is configured,
-// or a real relay once SMTP_HOST is set, so the same code path is
-// demonstrable today and correct once an organizer configures SMTP. The
+// "configured" provider it sends now, through messageSender (mail.FromEnv):
+// the demo OutboxSender when no transport is configured, a Resend sender
+// when RESEND_API_KEY is configured, or SMTP when SMTP_HOST is configured.
+// The same code path is demonstrable today and correct once an organizer
+// configures a provider. The
 // "gmail" and "outlook" providers stay queue-only: the organizer finishes
 // delivery themselves through this page's deep-link compose buttons, so no
 // automated Send call belongs on that path.
@@ -60,7 +61,7 @@ func queueMessage(ctx *action.Context) error {
 	templateID := strings.TrimSpace(ctx.FormData["template_id"])
 	speakerID := strings.TrimSpace(ctx.FormData["speaker_id"])
 	provider := strings.TrimSpace(ctx.FormData["provider"])
-	if provider != "demo-outbox" && provider != "gmail" && provider != "outlook" {
+	if provider != "configured" && provider != "demo-outbox" && provider != "gmail" && provider != "outlook" {
 		return action.Validation("Choose a delivery provider.", map[string]string{"provider": "Unknown provider."}, ctx.FormData)
 	}
 
@@ -89,8 +90,8 @@ func queueMessage(ctx *action.Context) error {
 		item.SessionID = sessionItem.ID
 	}
 
-	if provider == "demo-outbox" {
-		msg := mail.Message{To: speaker.Email, ToName: speaker.Name(), Subject: subject, TextBody: body}
+	if provider == "configured" || provider == "demo-outbox" {
+		msg := mail.Message{To: speaker.Email, ToName: speaker.Name(), Subject: subject, TextBody: body, IdempotencyKey: item.ID}
 		if template.AttachCalendar && hasSession && sessionItem.Scheduled() {
 			ics, err := programcalendar.Invite(snapshot, sessionItem, *speaker, organizerEmail(template))
 			if err != nil {

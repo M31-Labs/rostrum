@@ -43,14 +43,23 @@ type Submission struct {
 // Record the outcome as a Communication row: Status "sent" on a nil error,
 // "failed" with a sanitized category otherwise (never the raw err text).
 func SendConfirmation(sender Sender, base string, speaker Recipient, submission Submission, portalKey string) error {
+	return SendConfirmationWithKey(sender, base, speaker, submission, portalKey, "")
+}
+
+// SendConfirmationWithKey is SendConfirmation with an optional stable
+// provider idempotency key. Callers that have already created a durable
+// Communication row should pass its ID so a retry cannot create a second
+// Resend delivery within the provider's idempotency window.
+func SendConfirmationWithKey(sender Sender, base string, speaker Recipient, submission Submission, portalKey, idempotencyKey string) error {
 	if sender == nil {
 		return fmt.Errorf("mail: SendConfirmation requires a Sender")
 	}
 	msg := Message{
-		To:       speaker.Email,
-		ToName:   speaker.Name,
-		Subject:  confirmationSubject(submission),
-		TextBody: confirmationBody(base, speaker, submission, portalKey),
+		To:             speaker.Email,
+		ToName:         speaker.Name,
+		Subject:        confirmationSubject(submission),
+		TextBody:       confirmationBody(base, speaker, submission, portalKey),
+		IdempotencyKey: idempotencyKey,
 	}
 	return sender.Send(msg)
 }

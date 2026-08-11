@@ -145,8 +145,10 @@ press `G` plus a route key to jump to any surface.
 
 Rostrum runs complete with zero credentials. Add these when you want them:
 
-- **SMTP (Simple Mail Transfer Protocol).** Set `SMTP_HOST` to send real
-  confirmation email. Without it, messages record to a visible demo outbox.
+- **Transactional email.** Set `MAIL_DRIVER=resend` with `RESEND_API_KEY`, or
+  set `MAIL_DRIVER=smtp` with `SMTP_HOST`, to send real confirmation mail.
+  SMTP remains a standards-based self-hosted option; without a configured
+  driver, messages record to a visible demo outbox.
 - **Accelevents.** Set `ACCELEVENTS_API_KEY` and `ACCELEVENTS_EVENT_URL` to
   unlock live publishing. Dry runs work without either.
 

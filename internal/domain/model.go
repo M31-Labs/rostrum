@@ -347,6 +347,19 @@ func (state *State) HasAcceptanceCommunication(sessionID, speakerID string) bool
 	return false
 }
 
+// Communication finds the durable communication record for one template,
+// speaker, and session triple. The copy is suitable for delivery metadata
+// such as a provider idempotency key; callers must still use a store Update
+// to change its delivery result.
+func (state State) Communication(templateID, speakerID, sessionID string) (Communication, bool) {
+	for _, item := range state.Communications {
+		if item.TemplateID == templateID && item.SpeakerID == speakerID && item.SessionID == sessionID {
+			return item, true
+		}
+	}
+	return Communication{}, false
+}
+
 // QueueAcceptanceCommunication appends one queued Communication per speaker
 // in speakerIDs, addressed to sessionID and using the AcceptanceTemplateID
 // template. It is idempotent per (speakerID, sessionID) pair (see

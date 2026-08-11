@@ -2,12 +2,16 @@
 // one message: the confirmation a speaker receives right after submitting a
 // proposal, carrying a link straight into their portal.
 //
-// The package defines one Sender interface with two implementations:
+// The package defines one Sender interface with three implementations:
 //
 //   - OutboxSender, the zero-credential demo default. It records every
 //     message instead of dialing a network relay, so a judge or a local run
 //     with no SMTP configuration still gets an observable "sent" record.
-//   - SMTPSender, a real relay over the standard library's net/smtp.
+//   - SMTPSender, a real relay over the standard library's net/smtp. It
+//     keeps self-hosted and standards-based deployments fully viable.
+//   - ResendSender, a small HTTP API adapter for Resend-style transactional
+//     delivery. Other providers can implement Sender without changing the
+//     submission, acceptance, or reminder workflows.
 //
 // FromEnv chooses between them from environment configuration, so the rest
 // of the application never branches on which one is active.
@@ -19,6 +23,7 @@
 package mail
 
 import (
+	"fmt"
 	"os"
 	"strings"
 	"sync"
@@ -42,6 +47,12 @@ type Message struct {
 	// folding it into TextBody, so a test or an outbox viewer can inspect
 	// the invite bytes directly instead of parsing MIME out of the body.
 	Calendar []byte
+
+	// IdempotencyKey is an optional stable key for providers that support
+	// de-duplication. ResendSender derives a deterministic key when it is
+	// empty, but callers that retry a known Communication should pass that
+	// row's ID here.
+	IdempotencyKey string
 }
 
 // Sender delivers one Message. Send returns a non-nil error only when the
@@ -100,31 +111,99 @@ func (o *OutboxSender) Name() string {
 	return "demo-outbox"
 }
 
-// FromEnv builds the Sender the process should use, chosen once from
-// environment configuration: SMTPSender when SMTP_HOST is set, otherwise
-// OutboxSender. Call it once at startup and reuse the result. FromEnv
-// performs no network I/O itself, so choosing SMTP never blocks or fails
-// here even when the relay turns out to be unreachable; that failure
-// surfaces on the first Send instead.
+// configurationErrorSender fails closed for an invalid explicit mail
+// configuration. Treating an unknown MAIL_DRIVER as the demo outbox would
+// make a production deployment look as if it sent real mail when it did not.
+type configurationErrorSender struct {
+	err error
+}
+
+func (sender configurationErrorSender) Send(Message) error { return sender.err }
+func (sender configurationErrorSender) Name() string       { return "mail-config" }
+
+// FromEnv builds the Sender the process should use. MAIL_DRIVER can select
+// outbox, smtp, or resend explicitly. When it is absent, Resend wins when a
+// RESEND_API_KEY exists, followed by SMTP when SMTP_HOST exists, followed by
+// the zero-credential demo outbox. That preserves older SMTP-only setups
+// while making a Resend deployment require no application code fork.
+//
+// FromEnv performs no network I/O itself, so choosing a network provider
+// never blocks or fails here; transport failures surface on the first Send.
 //
 // Recognized environment variables:
 //
+//   - MAIL_DRIVER — optional explicit outbox, smtp, or resend selection.
+//   - RESEND_API_KEY — API key for the Resend email API.
+//   - RESEND_API_BASE_URL — override for a Resend-compatible test endpoint;
+//     defaults to https://api.resend.com.
 //   - SMTP_HOST — relay hostname; SMTP is selected when this is set.
 //   - SMTP_PORT — relay port; defaults to "587" (STARTTLS submission).
 //   - SMTP_USER — username for PLAIN auth; omit for an open relay.
 //   - SMTP_PASSWORD — password for PLAIN auth.
 //   - MAIL_FROM — the From address, for example "Rostrum <noreply@example.com>".
 func FromEnv() Sender {
-	host := strings.TrimSpace(os.Getenv("SMTP_HOST"))
-	if host == "" {
-		return NewOutboxSender()
+	driver, err := driverFromEnv()
+	if err != nil {
+		return configurationErrorSender{err: err}
 	}
-	return &SMTPSender{
-		Host:     host,
-		Port:     envOrDefault("SMTP_PORT", "587"),
-		Username: os.Getenv("SMTP_USER"),
-		Password: os.Getenv("SMTP_PASSWORD"),
-		From:     os.Getenv("MAIL_FROM"),
+	switch driver {
+	case "outbox":
+		return NewOutboxSender()
+	case "resend":
+		return &ResendSender{
+			APIKey:  os.Getenv("RESEND_API_KEY"),
+			BaseURL: envOrDefault("RESEND_API_BASE_URL", defaultResendAPIBaseURL),
+			From:    os.Getenv("MAIL_FROM"),
+		}
+	case "smtp":
+		return &SMTPSender{
+			Host:     strings.TrimSpace(os.Getenv("SMTP_HOST")),
+			Port:     envOrDefault("SMTP_PORT", "587"),
+			Username: os.Getenv("SMTP_USER"),
+			Password: os.Getenv("SMTP_PASSWORD"),
+			From:     os.Getenv("MAIL_FROM"),
+		}
+	default:
+		return configurationErrorSender{err: fmt.Errorf("mail: unsupported driver %q", driver)}
+	}
+}
+
+// TransportConfigured reports whether FromEnv resolves to a complete real
+// transport. Setup uses it to decide if sending a magic link is possible;
+// a selected but incomplete SMTP or Resend configuration is intentionally
+// not treated as ready.
+func TransportConfigured() bool {
+	driver, err := driverFromEnv()
+	if err != nil {
+		return false
+	}
+	switch driver {
+	case "resend":
+		return strings.TrimSpace(os.Getenv("RESEND_API_KEY")) != "" && strings.TrimSpace(os.Getenv("MAIL_FROM")) != ""
+	case "smtp":
+		return strings.TrimSpace(os.Getenv("SMTP_HOST")) != "" && strings.TrimSpace(os.Getenv("MAIL_FROM")) != ""
+	default:
+		return false
+	}
+}
+
+func driverFromEnv() (string, error) {
+	driver := strings.ToLower(strings.TrimSpace(os.Getenv("MAIL_DRIVER")))
+	switch driver {
+	case "", "auto":
+		if strings.TrimSpace(os.Getenv("RESEND_API_KEY")) != "" {
+			return "resend", nil
+		}
+		if strings.TrimSpace(os.Getenv("SMTP_HOST")) != "" {
+			return "smtp", nil
+		}
+		return "outbox", nil
+	case "outbox", "demo-outbox", "fake":
+		return "outbox", nil
+	case "smtp", "resend":
+		return driver, nil
+	default:
+		return "", fmt.Errorf("mail: MAIL_DRIVER must be outbox, smtp, or resend (got %q)", driver)
 	}
 }
 

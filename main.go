@@ -115,13 +115,14 @@ func main() {
 
 	// Identity plane (see specs/identity-plane.md): one auth.Manager over the
 	// session manager above, with magic-link, OAuth, and WebAuthn sign-in
-	// wired on top. mailConfigured tracks whether a real transport (not the
-	// demo outbox) is available, because the outbox has nowhere a
+	// wired on top. mailConfigured tracks whether a complete real transport
+	// (Resend/API or SMTP, not the demo outbox) is available, because the
+	// outbox has nowhere a
 	// self-hoster can read a link from — setup.go signs the browser in
 	// directly instead when it is false.
 	authManager := identity.New(sessions)
 	mailSender := mail.FromEnv()
-	mailConfigured := strings.TrimSpace(os.Getenv("SMTP_HOST")) != ""
+	mailConfigured := mail.TransportConfigured()
 	magicLinks := authManager.MagicLinks(auth.MagicLinkOptions{
 		BaseURL:     publicBase,
 		SuccessPath: "/organizer",

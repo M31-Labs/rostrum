@@ -157,6 +157,7 @@ func submitProposal(ctx *action.Context) error {
 	speakerEmail := ""
 	speakerName := ""
 	title := strings.TrimSpace(ctx.FormData["title"])
+	confirmationID := domain.NewID("comm")
 	if err := appstate.MustGet().Update(func(state *domain.State) error {
 		form, found := state.Form(ctx.FormData["form_id"])
 		if !found {
@@ -211,9 +212,9 @@ func submitProposal(ctx *action.Context) error {
 	// outcome as a Communication row in a second, small mutation; never store
 	// the raw provider error on the row (M8), only a sent/failed status.
 	sender := confirmationSender()
-	sendErr := mail.SendConfirmation(sender, publicBaseURL(), mail.Recipient{
+	sendErr := mail.SendConfirmationWithKey(sender, publicBaseURL(), mail.Recipient{
 		SpeakerID: speakerID, Name: speakerName, Email: speakerEmail,
-	}, mail.Submission{Title: title}, token.New().Sign(speakerID))
+	}, mail.Submission{Title: title}, token.New().Sign(speakerID), confirmationID)
 	sendStatus := "sent"
 	if sendErr != nil {
 		sendStatus = "failed"
@@ -225,7 +226,7 @@ func submitProposal(ctx *action.Context) error {
 	}
 	if err := appstate.MustGet().Update(func(state *domain.State) error {
 		state.Communications = append(state.Communications, domain.Communication{
-			ID: domain.NewID("comm"), TemplateID: form.ConfirmationTemplate, SpeakerID: speakerID,
+			ID: confirmationID, TemplateID: form.ConfirmationTemplate, SpeakerID: speakerID,
 			Subject: "We received " + title, Status: sendStatus, Provider: provider, SentAt: time.Now().UTC(),
 		})
 		return nil

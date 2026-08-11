@@ -131,7 +131,7 @@ func Page() Node {
 					<label>
 						<span>Delivery</span>
 						<select name="provider">
-							<option value="demo-outbox">Demo outbox — send now</option>
+							<option value="configured">Configured transport — send now</option>
 							<option value="gmail">Gmail — queue for connected account</option>
 							<option value="outlook">Outlook — queue for connected account</option>
 						</select>

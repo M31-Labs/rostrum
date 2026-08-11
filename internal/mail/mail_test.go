@@ -111,6 +111,16 @@ func TestSendConfirmationRejectsNilSender(t *testing.T) {
 	}
 }
 
+func TestSendConfirmationWithKeyCarriesProviderIdempotencyKey(t *testing.T) {
+	outbox := NewOutboxSender()
+	if err := SendConfirmationWithKey(outbox, "https://cfp.example.com", Recipient{SpeakerID: "spk_1", Email: "ada@example.com"}, Submission{Title: "Compilers"}, "portal-key", "comm_123"); err != nil {
+		t.Fatalf("SendConfirmationWithKey: %v", err)
+	}
+	if got := outbox.Sent()[0].IdempotencyKey; got != "comm_123" {
+		t.Fatalf("IdempotencyKey = %q, want %q", got, "comm_123")
+	}
+}
+
 func TestPortalURL(t *testing.T) {
 	cases := []struct{ base, speakerID, key, want string }{
 		{"https://cfp.example.com", "spk_1", "tok", "https://cfp.example.com/portal/spk_1?key=tok"},
@@ -325,14 +335,18 @@ func TestSMTPSenderName(t *testing.T) {
 }
 
 func TestFromEnvSelectsOutboxByDefault(t *testing.T) {
+	t.Setenv("MAIL_DRIVER", "")
+	t.Setenv("RESEND_API_KEY", "")
 	t.Setenv("SMTP_HOST", "")
 	sender := FromEnv()
 	if _, ok := sender.(*OutboxSender); !ok {
-		t.Fatalf("FromEnv() = %T, want *OutboxSender when SMTP_HOST is unset", sender)
+		t.Fatalf("FromEnv() = %T, want *OutboxSender with no configured transport", sender)
 	}
 }
 
 func TestFromEnvSelectsSMTPWhenHostIsSet(t *testing.T) {
+	t.Setenv("MAIL_DRIVER", "")
+	t.Setenv("RESEND_API_KEY", "")
 	t.Setenv("SMTP_HOST", "smtp.example.com")
 	t.Setenv("SMTP_PORT", "2525")
 	t.Setenv("SMTP_USER", "rostrum")
@@ -352,6 +366,8 @@ func TestFromEnvSelectsSMTPWhenHostIsSet(t *testing.T) {
 }
 
 func TestFromEnvDefaultsSMTPPort(t *testing.T) {
+	t.Setenv("MAIL_DRIVER", "smtp")
+	t.Setenv("RESEND_API_KEY", "")
 	t.Setenv("SMTP_HOST", "smtp.example.com")
 	t.Setenv("SMTP_PORT", "")
 	sender := FromEnv().(*SMTPSender)
@@ -364,6 +380,8 @@ func TestFromEnvDefaultsSMTPPort(t *testing.T) {
 var (
 	_ Sender = (*OutboxSender)(nil)
 	_ Sender = (*SMTPSender)(nil)
+	_ Sender = (*ResendSender)(nil)
 	_ Named  = (*OutboxSender)(nil)
 	_ Named  = (*SMTPSender)(nil)
+	_ Named  = (*ResendSender)(nil)
 )

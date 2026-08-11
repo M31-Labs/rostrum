@@ -104,6 +104,9 @@ func TestAcceptingASubmissionSendsAnAcceptanceInviteWithCalendar(t *testing.T) {
 	if last.To != "ada@example.com" {
 		t.Fatalf("last recorded message To = %q, want ada@example.com", last.To)
 	}
+	if last.IdempotencyKey != comm.ID {
+		t.Fatalf("last IdempotencyKey = %q, want durable communication ID %q", last.IdempotencyKey, comm.ID)
+	}
 	if len(last.Calendar) == 0 {
 		t.Fatal("last recorded message carries no Calendar payload, want the session's RFC 5545 invite")
 	}
