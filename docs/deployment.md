@@ -1,8 +1,20 @@
+---
+description: Build, configure, secure, persist, back up, and operate one Rostrum event workspace.
+nav_order: "05 / 07"
+eyebrow: Operate one durable workspace
+---
+
 # Deployment guide
+
+<!-- markdownlint-disable MD013 -->
 
 Rostrum deploys as one Go process plus the `app/` templates and `public/`
 assets. One replica against one JSON data file serves a single-organization
 instance.
+
+For evaluation rather than operations, start with the
+[judge and organizer guide](judging-guide.md). This document assumes an
+operator is preparing a persistent live or read-only deployment.
 
 ## Build the production bundle
 
@@ -48,16 +60,15 @@ the process refuses to start with:
 
 Set `ROSTRUM_VERSION` to the immutable release tag or commit SHA. The value is
 returned by `GET /api/health`, so a deployment record can prove which Rostrum
-build passed its release smoke test. After deployment, run the unauthenticated
-render check against its public address:
+build is serving. Check every live deployment directly:
 
 ```bash
-make smoke SMOKE_URL=https://program.example.com
+curl -fsS https://program.example.com/api/health
 ```
 
-That remote mode checks public and login surfaces. Perform the authenticated
-organizer workflow in the launch checklist separately; a smoke script must not
-need a production organizer credential.
+Perform the authenticated live organizer workflow in the launch checklist
+separately. `make smoke SMOKE_URL=…` is the deterministic `APP_MODE=demo`
+contract and is expected to fail against an organizer-gated live deployment.
 
 ## Hosted read-only preview
 
@@ -103,9 +114,26 @@ place to exercise interactive mutations. A process-local client-IP limiter
 also caps anonymous preview traffic; keep the reverse proxy's normal rate
 limits enabled for a public deployment.
 
-For Kubernetes, start from [`deploy/k8s/rostrum-demo.yaml`](../deploy/k8s/rostrum-demo.yaml).
+For Kubernetes, start from [`deploy/k8s/rostrum-demo.yaml`](https://github.com/M31-Labs/rostrum/blob/main/deploy/k8s/rostrum-demo.yaml).
 It creates a separate namespace, volume, service, ingress, and session secret.
 Replace only its documented image, host, ingress, and secret placeholders.
+
+Before sharing the preview, run the acceptance checks in
+[launch readiness](launch-readiness.md#hosted-preview-acceptance). A hosted
+URL is a convenience surface, not a substitute for repository or local-run
+evidence.
+
+Verify the exact read-only release from a checkout of the same candidate:
+
+```bash
+make smoke \
+  SMOKE_URL=https://demo.example.com \
+  SMOKE_EXPECTED_VERSION=<immutable-release-or-commit>
+```
+
+Remote smoke covers the complete demo contract: organizer and signed
+persona inspection, public/embed/API/calendar surfaces, deterministic counts,
+no-index headers, mutation refusal, and the exact expected version.
 
 ## Reverse proxy
 
@@ -132,9 +160,7 @@ registered passkey.
   information). A cookie-less request gets 403, never a redirect.
 - `/portal/*`, `/calendar/*`, and `/portal-file/*` require a signed speaker
   link or a bound session.
-- `/review/{token}` requires a signed reviewer link on every request (this
-  compatibility window is documented in
-  `hypha://m31labs/programma/specs/identity-plane.md`).
+- `/review/{token}` requires a signed reviewer link on every request.
 
 ### Organizer allowlist
 
@@ -148,7 +174,7 @@ grant survives a restart even if you later change the allowlist.
 A fresh self-host with `ORGANIZER_EMAILS` empty and no stored organizer logs
 a one-time setup URL at startup:
 
-```
+```text
 Rostrum has no organizer yet. Finish setup at: https://program.example.com/setup?token=...
 ```
 
@@ -177,11 +203,10 @@ organizer session.
 
 ### Storage note for the identity plane
 
-Issued magic-link tokens and registered passkeys persist in the same JSON
-workspace file as everything else, so they follow the single-replica rule
-below: run exactly one application replica. A future multi-instance
-deployment needs a shared store behind the same `MagicLinkStore` and
-`WebAuthnStore` interfaces.
+Issued magic-link tokens and registered passkeys persist in the same canonical
+workspace aggregate as everything else, so they follow the single-replica rule
+below. A future multi-instance deployment needs validated shared behavior
+behind the same `MagicLinkStore` and `WebAuthnStore` interfaces.
 
 Keep these routes reachable by the public: `/`, `/login`, `/submit/*`,
 `/public/*`, `/api/health`, `/api/v1/*`, `/portal/*`, and `/review/*`. The
@@ -233,6 +258,31 @@ Keep the staged `audit/` directory with the recovery record; do not splice it
 into a live audit log, whose hash chain belongs to the receiving instance.
 This preserves both the source evidence and the destination’s audit history.
 
+## Accelevents publishing
+
+Rostrum publishes a deliberately narrow, one-way program projection to
+Accelevents. Rostrum remains canonical: the adapter never reads Accelevents
+changes back into the workspace. Configure a restricted staging event first:
+
+```text
+ACCELEVENTS_EVENT_URL=https://...
+ACCELEVENTS_API_KEY=...
+```
+
+The Integrations page always offers a credential-free dry run. Live publishing
+is separately locked until both variables are present, then sends only
+speakers attached to published, scheduled sessions, followed by those
+published sessions. It records a complete or failed run in Rostrum's visible
+sync ledger. Use the dry run for
+repository evaluation; before production, repeat the publish against a
+disposable or restricted Accelevents event and verify the resulting speakers,
+sessions, and stable Rostrum identifiers directly in that event.
+
+This adapter is an explicit operator action rather than background
+synchronization. A remote rejection stops the run and preserves its failure in
+the ledger; correct the provider configuration and publish again. Do not point
+the hosted read-only preview at Accelevents credentials.
+
 ## Airtable projection
 
 Rostrum treats Airtable as a one-way operational projection, never as the
@@ -266,11 +316,12 @@ as Airtable attachments and does not pull any Airtable changes back.
 
 ## Operational configuration
 
-- Use a secret manager for the session, SMTP, and Accelevents credentials.
+- Use a secret manager for session, mail, OAuth, database, Accelevents, and
+  Airtable credentials.
 - Restrict outbound egress to the provider APIs you configure.
 - Poll `GET /api/health`; it returns the application name, version, and
   timestamp.
-- Keep the Accelevents sync ledger and review provenance as audit data.
+- Keep sync history and review provenance as audit data.
 - Set the proxy body-size limit to 12 MiB or more. Rostrum accepts uploads
   to 10 MiB inside a 12 MiB request envelope and caps all other request
   bodies at 1 MiB.

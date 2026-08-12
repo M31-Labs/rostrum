@@ -40,6 +40,22 @@ var submissionLimiter = ratelimit.NewCounter(5)
 // submissionLimiter by dropping cookies between requests (SE-3b).
 var submissionIPLimiter = ratelimit.NewTokenBucket(10, time.Hour)
 
+const (
+	draftCreationSessionLimit = 5
+	draftCreationIPLimit      = 10
+)
+
+// draftCreationLimiter caps new, unkeyed draft identities per form and request
+// identity for the lifetime of this process. A signed draft update bypasses
+// this guard because it updates an existing speaker and submission instead of
+// growing the store.
+var draftCreationLimiter = ratelimit.NewCounter(draftCreationSessionLimit)
+
+// draftCreationIPLimiter independently smooths new draft identities per form
+// and network address. It prevents a caller from evading the request-identity
+// cap by discarding their session between otherwise anonymous saves.
+var draftCreationIPLimiter = ratelimit.NewTokenBucket(draftCreationIPLimit, time.Hour)
+
 // confirmationSender is the process-wide mail transport, resolved once on
 // first use. It is deferred (not a plain package var) because mail.FromEnv
 // reads SMTP_* from the environment, which main() loads from .env only after
@@ -159,6 +175,22 @@ func saveDraft(ctx *action.Context) error {
 	}
 
 	draftID := strings.TrimSpace(ctx.FormData["draft_id"])
+	if draftID == "" {
+		// Only an unkeyed save creates a new isolated speaker and draft. Apply
+		// both admission guards after schema validation but before allocating an
+		// ID or entering UpdateAudit, so a rejected request cannot grow state or
+		// its audit ledger. A valid signed draft update remains available even
+		// after this browser has exhausted its creation budget.
+		identity := ratelimit.RequestIdentity(ctx.Request)
+		if !draftCreationLimiter.Allow(rateLimitFormKey(form.ID, identity)) {
+			message := "You have reached the new-draft limit for this call. Continue from one of your saved draft links or try again later."
+			return action.Validation(message, map[string]string{"form": message}, ctx.FormData)
+		}
+		if ip := ratelimit.ClientIP(ctx.Request); ip != "" && !draftCreationIPLimiter.Allow(rateLimitFormKey(form.ID, ip)) {
+			message := "Too many new drafts have been created from this network right now. Continue from a saved draft link or try again later."
+			return action.Validation(message, map[string]string{"form": message}, ctx.FormData)
+		}
+	}
 	plannedDraftID := draftID
 	if plannedDraftID == "" {
 		// Allocate the identifier before UpdateAudit so the immutable audit
@@ -210,20 +242,15 @@ func saveDraft(ctx *action.Context) error {
 			return nil
 		}
 
-		for index := range state.Speakers {
-			candidate := &state.Speakers[index]
-			if strings.EqualFold(candidate.Email, email) {
-				speakerID = candidate.ID
-				applyDraftSpeakerFields(candidate, ctx.FormData, now)
-				break
-			}
-		}
-		if speakerID == "" {
-			speakerID = domain.NewID("spk")
-			speaker := domain.Speaker{ID: speakerID, Email: email, CreatedAt: now, UpdatedAt: now}
-			applyDraftSpeakerFields(&speaker, ctx.FormData, now)
-			state.Speakers = append(state.Speakers, speaker)
-		}
+		// An email address entered on the public form is contact data, not proof
+		// that this browser owns an existing speaker. Always isolate a new draft
+		// behind a new speaker identity; only the verified draft-key branch above
+		// may update an existing speaker. This prevents a known email address from
+		// becoming a speaker-wide portal credential.
+		speakerID = domain.NewID("spk")
+		speaker := domain.Speaker{ID: speakerID, Email: email, CreatedAt: now, UpdatedAt: now}
+		applyDraftSpeakerFields(&speaker, ctx.FormData, now)
+		state.Speakers = append(state.Speakers, speaker)
 		if draftCount(state.Submissions, currentForm.ID, speakerID) >= maxDrafts(currentForm) {
 			return action.Validation("You have reached this form's saved-draft limit.", map[string]string{"form": "Submit or withdraw one of your existing drafts before creating another."}, ctx.FormData)
 		}
@@ -241,6 +268,18 @@ func saveDraft(ctx *action.Context) error {
 	live.Broadcast("submission:draft_saved", map[string]string{"submission": draftID, "speaker": speakerID})
 	actionflow.Redirect(ctx, draftURL(form.Slug, draftID, key))
 	return nil
+}
+
+// rateLimitFormKey scopes a public-intake identity to one CFP without turning
+// an unavailable request identity into a shared non-empty key. Real inbound
+// requests always have a remote address; preserving the empty value keeps the
+// ratelimit package's documented fallback behavior intact in direct tests.
+func rateLimitFormKey(formID, identity string) string {
+	identity = strings.TrimSpace(identity)
+	if identity == "" {
+		return ""
+	}
+	return strings.TrimSpace(formID) + ":" + identity
 }
 
 func submitProposal(ctx *action.Context) error {
@@ -315,25 +354,29 @@ func submitProposal(ctx *action.Context) error {
 		submissionQueue = current.Decision.Queue
 		now := time.Now().UTC()
 		email := strings.ToLower(strings.TrimSpace(ctx.FormData["email"]))
-		for index := range state.Speakers {
-			speaker := &state.Speakers[index]
-			if strings.EqualFold(speaker.Email, email) {
-				speakerID = speaker.ID
-				speakerEmail = speaker.Email
-				speakerName = speaker.Name()
-				applySubmittedSpeakerFields(speaker, ctx.FormData, now)
-				break
+		if draftID != "" {
+			// accessibleDraft verified a signed key for draftSpeakerID before this
+			// transaction. That possession proof, rather than the posted email, is
+			// what authorizes updating the draft's existing speaker identity.
+			speaker, found := state.Speaker(draftSpeakerID)
+			if !found || !strings.EqualFold(speaker.Email, email) {
+				return action.Validation("Draft ownership changed unexpectedly.", map[string]string{"form": "Please reopen your saved draft link."}, ctx.FormData)
 			}
-		}
-		if speakerID == "" {
+			speakerID = speaker.ID
+			applySubmittedSpeakerFields(speaker, ctx.FormData, now)
+			speakerEmail = speaker.Email
+			speakerName = speaker.Name()
+		} else {
+			// A direct public submission has supplied no ownership proof. Even when
+			// its email matches a known speaker, create an isolated identity so the
+			// browser-visible portal key can never authorize the known speaker's
+			// profile, tasks, files, or earlier proposals.
 			speakerID = domain.NewID("spk")
-			state.Speakers = append(state.Speakers, domain.Speaker{
-				ID: speakerID, FirstName: strings.TrimSpace(ctx.FormData["first_name"]), LastName: strings.TrimSpace(ctx.FormData["last_name"]),
-				Email: email, Role: strings.TrimSpace(ctx.FormData["role"]), Company: strings.TrimSpace(ctx.FormData["company"]), Biography: strings.TrimSpace(ctx.FormData["biography"]),
-				CreatedAt: now, UpdatedAt: now,
-			})
+			speaker := domain.Speaker{ID: speakerID, Email: email, CreatedAt: now, UpdatedAt: now}
+			applySubmittedSpeakerFields(&speaker, ctx.FormData, now)
+			state.Speakers = append(state.Speakers, speaker)
 			speakerEmail = email
-			speakerName = strings.TrimSpace(ctx.FormData["first_name"] + " " + ctx.FormData["last_name"])
+			speakerName = speaker.Name()
 		}
 		if draftID != "" && speakerID != draftSpeakerID {
 			return action.Validation("Draft ownership changed unexpectedly.", map[string]string{"form": "Please reopen your saved draft link."}, ctx.FormData)
@@ -482,10 +525,10 @@ func thanksRedirectURL(formSlug, speakerID string) string {
 
 // loadThanks renders the FB-5 success page. It resolves the form's
 // customizable success copy (domain.SubmissionForm.SuccessPageHeading and
-// SuccessPageBody), the most recently submitted title for the speaker named
-// by ?speaker=, and the keyed portal URL the visible link points to. A
-// direct visit with no ?speaker= still renders the page; it just omits the
-// portal link and countdown copy, since there is no session to carry there.
+// SuccessPageBody). It resolves the proposal title and portal URL only when
+// ?key= verifies to the same subject as ?speaker=. A direct, unkeyed, invalid,
+// or mismatched visit still renders the branded success page with generic copy
+// and no speaker-specific data or navigation.
 func loadThanks(ctx *route.RouteContext, page route.FilePage) (any, error) {
 	snapshot := appstate.MustGet().Snapshot()
 	form, found := snapshot.Form(ctx.Param("slug"))
@@ -495,6 +538,13 @@ func loadThanks(ctx *route.RouteContext, page route.FilePage) (any, error) {
 		return nil, route.NotFound("submission form not found")
 	}
 	speakerID := strings.TrimSpace(ctx.Query("speaker"))
+	portalURL := thanksPortalURL(speakerID, ctx.Query("key"))
+	hasPortal := portalURL != ""
+	if !hasPortal {
+		// A bare public speaker ID is enumerable and conveys no authority. Keep
+		// the response generic unless the key proves the same speaker subject.
+		speakerID = ""
+	}
 	return map[string]any{
 		"workspace": present.WorkspaceIdentity(snapshot),
 		"form": map[string]any{
@@ -503,39 +553,42 @@ func loadThanks(ctx *route.RouteContext, page route.FilePage) (any, error) {
 		},
 		"submission": map[string]any{"title": latestSubmissionTitle(snapshot, form.ID, speakerID)},
 		"formSlug":   form.Slug,
-		"portalURL":  thanksPortalURL(speakerID, ctx.Query("key")),
-		"hasPortal":  speakerID != "",
+		"portalURL":  portalURL,
+		"hasPortal":  hasPortal,
 	}, nil
 }
 
 // thanksMetadata attaches the FB-5 redirect: a declarative
 // <meta http-equiv="refresh"> head tag that carries the browser on to the
-// speaker's keyed portal URL about ten seconds after the success page
-// renders. This is document metadata, not a <script>, so it holds the
-// zero-bespoke-JavaScript invariant and needs no CSP change.
+// speaker's keyed portal URL about ten seconds after the success page renders.
+// It emits the tag only for a key verified to the requested speaker. This is
+// document metadata, not a <script>, so it holds the zero-bespoke-JavaScript
+// invariant and needs no CSP change.
 func thanksMetadata(ctx *route.RouteContext, page route.FilePage, data any) (server.Metadata, error) {
 	speakerID := strings.TrimSpace(ctx.Query("speaker"))
-	if speakerID != "" {
+	if portalURL := thanksPortalURL(speakerID, ctx.Query("key")); portalURL != "" {
 		ctx.AddHead(gosx.El("meta", gosx.Attrs(
 			gosx.Attr("http-equiv", "refresh"),
-			gosx.Attr("content", "10;url="+thanksPortalURL(speakerID, ctx.Query("key"))),
+			gosx.Attr("content", "10;url="+portalURL),
 		)))
 	}
 	return server.Metadata{Title: server.Title{Default: "Proposal received — Rostrum"}, Description: "Your proposal is in, and your speaker portal is one click away."}, nil
 }
 
-// thanksPortalURL builds the keyed portal URL the success page's meta
-// refresh and its visible "Go to your portal now" link both target. key is
-// the PT-2 token (token.New().Sign) thanksRedirectURL already signed for
-// this speaker, so following either target authenticates the portal session
-// on arrival with no separate sign-in step.
+// thanksPortalURL builds the keyed portal URL the success page's meta refresh
+// and visible link target, but only when key verifies to the same speakerID.
+// A speaker ID by itself is public metadata, not authorization, so invalid,
+// absent, and cross-speaker keys all produce an empty URL.
 func thanksPortalURL(speakerID, key string) string {
-	target := url.URL{Path: "/portal/" + speakerID}
-	if key != "" {
-		values := url.Values{}
-		values.Set("key", key)
-		target.RawQuery = values.Encode()
+	speakerID = strings.TrimSpace(speakerID)
+	keySpeakerID, ok := token.New().Verify(strings.TrimSpace(key))
+	if speakerID == "" || !ok || keySpeakerID != speakerID {
+		return ""
 	}
+	target := url.URL{Path: "/portal/" + speakerID}
+	values := url.Values{}
+	values.Set("key", strings.TrimSpace(key))
+	target.RawQuery = values.Encode()
 	return target.String()
 }
 

@@ -28,13 +28,20 @@ const developmentSecret = "rostrum-development-secret-change-me"
 const TTL = 90 * 24 * time.Hour
 
 // keyPurpose separates the derived signing key from any other key HMAC-SHA256
-// might derive from the same SESSION_SECRET elsewhere in the process.
-const keyPurpose = "rostrum.portal.token.v1:"
+// might derive from the same SESSION_SECRET elsewhere in the process. Demo
+// tour links use a second purpose so they can never authenticate against a
+// live process, even when demo and live deployments share SESSION_SECRET.
+const (
+	keyPurpose     = "rostrum.portal.token.v1:"
+	demoKeyPurpose = "rostrum.portal.demo-token.v1:"
+	demoAudience   = "rostrum-demo"
+)
 
 // Token signs and verifies portal identity tokens for one process.
 type Token struct {
-	key []byte
-	ttl time.Duration
+	key     []byte
+	demoKey []byte
+	ttl     time.Duration
 }
 
 var (
@@ -57,14 +64,16 @@ func newToken(secret string) *Token {
 		secret = developmentSecret
 	}
 	sum := sha256.Sum256([]byte(keyPurpose + secret))
-	return &Token{key: sum[:], ttl: TTL}
+	demoSum := sha256.Sum256([]byte(demoKeyPurpose + secret))
+	return &Token{key: sum[:], demoKey: demoSum[:], ttl: TTL}
 }
 
-// claims is the signed payload. Both fields are exported to json so the MAC
+// claims is the signed payload. Its fields are exported to JSON so the MAC
 // covers a stable, unambiguous encoding.
 type claims struct {
 	SpeakerID string `json:"sid"`
 	ExpiresAt int64  `json:"exp"`
+	Audience  string `json:"aud,omitempty"`
 }
 
 // Sign returns a signed, expiring token that binds speakerID to whoever
@@ -75,10 +84,25 @@ func (t *Token) Sign(speakerID string) string {
 		ExpiresAt: time.Now().Add(t.ttl).Unix(),
 	})
 	if err != nil {
-		// claims has two primitive fields and never fails to marshal.
+		// claims contains only primitive fields and never fails to marshal.
 		return ""
 	}
 	return encodeSegment(body) + "." + encodeSegment(t.sign(body))
+}
+
+// SignDemo returns a demo-only portal token for a persona link on /tour. Its
+// explicit audience and separately derived key make it invalid anywhere that
+// is not currently running with APP_MODE=demo.
+func (t *Token) SignDemo(speakerID string) string {
+	body, err := json.Marshal(claims{
+		SpeakerID: strings.TrimSpace(speakerID),
+		ExpiresAt: time.Now().Add(t.ttl).Unix(),
+		Audience:  demoAudience,
+	})
+	if err != nil {
+		return ""
+	}
+	return encodeSegment(body) + "." + encodeSegment(t.signDemo(body))
 }
 
 // Verify reports the speaker ID bound to tok when tok carries a valid
@@ -99,16 +123,22 @@ func (t *Token) Verify(tok string) (speakerID string, ok bool) {
 	if err != nil {
 		return "", false
 	}
-	// hmac.Equal compares MACs in constant time so a forged or truncated
-	// signature never leaks timing information about the correct value.
-	if !hmac.Equal(sig, t.sign(body)) {
+	// Authenticate before parsing the body. Normal and demo tokens have
+	// separate derived keys; the demo key is considered only by demo-mode
+	// processes. hmac.Equal keeps both comparisons constant-time.
+	wantAudience := ""
+	switch {
+	case hmac.Equal(sig, t.sign(body)):
+	case demoModeEnabled() && hmac.Equal(sig, t.signDemo(body)):
+		wantAudience = demoAudience
+	default:
 		return "", false
 	}
 	var c claims
 	if err := json.Unmarshal(body, &c); err != nil {
 		return "", false
 	}
-	if c.SpeakerID == "" {
+	if c.SpeakerID == "" || c.Audience != wantAudience {
 		return "", false
 	}
 	if time.Now().Unix() > c.ExpiresAt {
@@ -118,9 +148,21 @@ func (t *Token) Verify(tok string) (speakerID string, ok bool) {
 }
 
 func (t *Token) sign(body []byte) []byte {
-	mac := hmac.New(sha256.New, t.key)
+	return signWithKey(t.key, body)
+}
+
+func (t *Token) signDemo(body []byte) []byte {
+	return signWithKey(t.demoKey, body)
+}
+
+func signWithKey(key, body []byte) []byte {
+	mac := hmac.New(sha256.New, key)
 	mac.Write(body)
 	return mac.Sum(nil)
+}
+
+func demoModeEnabled() bool {
+	return strings.EqualFold(strings.TrimSpace(os.Getenv("APP_MODE")), "demo")
 }
 
 func encodeSegment(b []byte) string {

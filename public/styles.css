@@ -108,11 +108,7 @@
   --min-panel: 20rem;
   --min-metric: 12rem;
   --min-card: 17rem;
-  /* M4: table-wide and agenda-width used to carry several rem of buffer
-     above their grid's own column minimums, which forced the horizontal
-     scroll (and clipped the last column at the panel's right edge) on
-     viewports that had room for the real content. Both now sit close to
-     the sum of their grid's minmax() floors. */
+  /* Wide-layout floors match their minmax grids. */
   --table-wide: 60rem;
   --table-review: 55rem;
   --table-routing: 58rem;
@@ -815,6 +811,195 @@ h3 {
   font-size: var(--type-xs);
 }
 
+/* Judge-facing product tour. */
+.tour-shell {
+  width: 100%;
+  background: var(--color-canvas);
+}
+
+.tour-hero {
+  min-height: calc(100vh - var(--header-height));
+  padding-block: var(--space-3xl);
+  padding-inline: var(--page-gutter);
+  border-bottom: var(--border-strong) solid var(--color-text);
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(var(--min-panel), 0.7fr);
+  align-items: end;
+  gap: var(--space-2xl);
+  background:
+    linear-gradient(var(--color-soft-white), var(--color-soft-white)),
+    var(--color-canvas);
+}
+
+.tour-hero-copy h1 {
+  max-width: 12ch;
+  margin-bottom: var(--space-lg);
+  font-size: var(--type-hero);
+  font-weight: var(--weight-medium);
+  letter-spacing: -0.045em;
+}
+
+.tour-hero-copy .lede {
+  max-width: var(--content-prose);
+}
+
+.tour-field-note {
+  padding: var(--space-lg);
+  border-top: var(--border-strong) solid var(--color-text);
+  border-bottom: var(--border-thin) solid var(--color-line-strong);
+  display: grid;
+  gap: var(--space-sm);
+}
+
+.tour-field-note strong {
+  font-family: var(--font-display);
+  font-size: var(--type-xl);
+  font-weight: var(--weight-medium);
+}
+
+.tour-field-note p:last-child {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--type-sm);
+}
+
+.tour-runway {
+  position: relative;
+  padding-block: var(--space-2xl) var(--space-3xl);
+  padding-inline: var(--page-gutter);
+}
+
+.tour-runway::before {
+  position: absolute;
+  top: 0;
+  bottom: var(--space-3xl);
+  left: calc(var(--page-gutter) + var(--space-lg));
+  width: var(--border-thin);
+  background: var(--color-line-strong);
+  content: "";
+}
+
+.tour-stop {
+  position: relative;
+  padding: var(--space-xl) 0;
+  border-bottom: var(--border-thin) solid var(--color-line-strong);
+  display: grid;
+  grid-template-columns: minmax(8rem, 0.45fr) minmax(0, 1.4fr) minmax(12rem, 0.55fr);
+  align-items: center;
+  gap: var(--space-xl);
+}
+
+.tour-stop::before {
+  position: absolute;
+  left: var(--space-lg);
+  width: var(--space-sm);
+  height: var(--space-sm);
+  border: var(--border-strong) solid var(--color-canvas);
+  border-radius: var(--radius-pill);
+  background: var(--color-accent);
+  box-shadow: 0 0 0 var(--border-thin) var(--color-accent);
+  content: "";
+}
+
+.tour-stop-folio {
+  padding-left: calc(var(--space-lg) + var(--space-xl));
+  display: grid;
+  gap: var(--space-2xs);
+}
+
+.tour-stop-folio span {
+  color: var(--color-accent);
+  font-family: var(--font-mono);
+  font-size: var(--type-lg);
+  font-variant-numeric: tabular-nums;
+}
+
+.tour-stop-folio small {
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--type-xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.tour-stop-copy h2 {
+  margin-bottom: var(--space-xs);
+  font-size: var(--type-2xl);
+  font-weight: var(--weight-medium);
+}
+
+.tour-stop-copy p {
+  max-width: var(--content-prose);
+  margin: 0;
+  color: var(--color-text-secondary);
+}
+
+.tour-stop-link {
+  justify-self: end;
+  padding: var(--space-sm) 0;
+  border-block: var(--border-thin) solid var(--color-line-strong);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-lg);
+  color: var(--color-text);
+  font-size: var(--type-sm);
+  font-weight: var(--weight-semibold);
+  text-decoration: none;
+  transition: color var(--duration-fast) var(--ease-out), border-color var(--duration-fast) var(--ease-out);
+}
+
+.tour-stop-link span {
+  color: var(--color-accent);
+  transition: transform var(--duration-fast) var(--ease-spring);
+}
+
+.tour-stop-link:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent-strong);
+}
+
+.tour-stop-link:hover span {
+  transform: translate(var(--space-3xs), calc(var(--space-3xs) * -1));
+}
+
+.tour-proof {
+  padding-block: var(--space-3xl);
+  padding-inline: var(--page-gutter);
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1fr);
+  gap: var(--space-2xl);
+  color: var(--color-text-inverse);
+  background: var(--color-surface-strong);
+}
+
+.tour-proof h2 {
+  max-width: 14ch;
+  font-size: var(--type-2xl);
+  font-weight: var(--weight-medium);
+}
+
+.tour-proof > p {
+  max-width: var(--content-prose);
+  color: var(--color-inverse-soft);
+}
+
+.tour-proof .eyebrow {
+  color: var(--color-accent-on-ink);
+}
+
+.tour-proof-links {
+  grid-column: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-lg);
+}
+
+.tour-proof-links .text-link {
+  color: var(--color-text-inverse);
+}
+
 /* Organizer shell */
 
 .site-shell:has(.workspace-shell) > .global-header {
@@ -847,9 +1032,7 @@ h3 {
 
 .workspace-event {
   position: relative;
-  /* Reserves room for .sidebar-collapse, which is absolutely positioned
-     over this row's top-right corner: without it, a long event name ran
-     under the button instead of stopping short of it. */
+  /* Reserve the collapse control's top-right space. */
   padding-right: calc(var(--control-height) + var(--space-sm));
   padding-bottom: var(--space-lg);
   border-bottom: var(--border-thin) solid rgb(154 162 148 / 0.3);
@@ -1801,10 +1984,7 @@ code {
   font-size: var(--type-xs);
 }
 
-/* Wide tables scroll inside their panel; a fading edge signals
-   the overflow without any script. The agenda board (M4) shares the same
-   wide-grid-in-a-panel shape as the tables above, so it gets the identical
-   treatment instead of a bare overflow-x with no scroll affordance. */
+/* Wide panels keep a visible, script-free overflow cue. */
 .data-table,
 .submission-table,
 .review-table,
@@ -1931,8 +2111,7 @@ code {
   gap: var(--space-lg);
 }
 
-/* Form builder: each field is a row of set type; its edit
-   controls fold out beneath in a quiet tray. */
+/* Form-builder field and edit tray. */
 .field-builder-list {
   display: grid;
 }
@@ -3307,8 +3486,7 @@ code {
   box-shadow: inset 0 0 0 0.125rem var(--color-accent-bright);
 }
 
-/* Empty cells stay quiet; the affordance surfaces on hover and
-   turns emphatic while a card is over the cell. */
+/* Empty cells reveal their affordance on hover. */
 .drop-hint {
   position: absolute;
   inset: var(--space-xs);
@@ -4512,8 +4690,7 @@ code {
   background: var(--color-canvas);
 }
 
-/* A declared field of an unknown type renders an empty row; hide
-   the tray when no control survived. */
+/* Hide trays whose declared control did not render. */
 .task-field-list:not(:has(input, select, textarea)) {
   display: none;
 }
@@ -5040,6 +5217,30 @@ code {
   font-weight: var(--weight-medium);
 }
 
+.speaker-portrait img {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 34%;
+  filter: saturate(0.86) contrast(1.03);
+  transition: transform var(--duration-slow) var(--ease-out), filter var(--duration-base) var(--ease-out);
+}
+
+.public-speaker-card:hover .speaker-portrait img {
+  transform: scale(1.025);
+  filter: saturate(0.96) contrast(1.02);
+}
+
+.speaker-portrait.has-headshot span,
+.speaker-portrait.has-headshot i,
+.speaker-portrait.has-headshot::before,
+.speaker-portrait.has-headshot::after {
+  display: none;
+}
+
 .speaker-portrait i,
 .speaker-portrait::before,
 .speaker-portrait::after {
@@ -5478,6 +5679,8 @@ code {
 
 @media (max-width: 58rem) {
   .landing-hero,
+  .tour-hero,
+  .tour-proof,
   .split-heading,
   .form-summary-grid,
   .two-column-workspace {
@@ -5528,6 +5731,7 @@ code {
 
   .readiness-dial {
     width: 100%;
+    min-width: 0;
     padding: var(--space-lg) 0 0;
     border-left: 0;
     border-top: var(--border-thin) solid var(--color-line);
@@ -5607,6 +5811,24 @@ code {
     align-items: flex-start;
     flex-direction: column;
   }
+
+  .tour-hero {
+    min-height: auto;
+    align-items: start;
+  }
+
+  .tour-stop {
+    grid-template-columns: minmax(7rem, 0.35fr) minmax(0, 1fr);
+  }
+
+  .tour-stop-link {
+    grid-column: 2;
+    justify-self: start;
+  }
+
+  .tour-proof-links {
+    grid-column: 1 / -1;
+  }
 }
 
 @media (max-width: 42rem) {
@@ -5634,11 +5856,7 @@ code {
     justify-items: start;
   }
 
-  /* M3: the primary nav used to overflow-scroll with every plain-text
-     link (Submit, Public agenda) hidden below 42rem, so a mobile visitor
-     had no way to reach either route. It now wraps to a second row
-     instead, and every link keeps a 44px (--control-height) touch
-     target -- pure CSS, no disclosure script required. */
+  /* Wrap primary links while preserving touch targets. */
   .global-nav {
     width: 100%;
     flex-wrap: wrap;
@@ -5653,6 +5871,34 @@ code {
 
   .landing-hero {
     min-height: auto;
+  }
+
+  .tour-hero-copy h1 {
+    font-size: var(--type-3xl);
+    line-height: var(--leading-display);
+  }
+
+  .tour-runway::before {
+    left: calc(var(--page-gutter) + var(--space-xs));
+  }
+
+  .tour-stop {
+    grid-template-columns: 1fr;
+    gap: var(--space-md);
+  }
+
+  .tour-stop::before {
+    left: var(--space-xs);
+  }
+
+  .tour-stop-folio {
+    padding-left: var(--space-xl);
+  }
+
+  .tour-stop-copy,
+  .tour-stop-link {
+    grid-column: 1;
+    margin-left: var(--space-xl);
   }
 
   .hero-copy h1 {
@@ -5759,9 +6005,7 @@ code {
     display: none;
   }
 
-  /* M3: the portal's Tasks/Schedule/Resources jump nav used to disappear
-     below 42rem with no replacement. It wraps to its own row instead, each
-     link keeping the 44px (--control-height) touch target. */
+  /* Wrap the portal jump nav while preserving touch targets. */
   .portal-header {
     flex-wrap: wrap;
     row-gap: var(--space-2xs);
@@ -5797,6 +6041,16 @@ code {
     grid-column: 1;
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .score-card .panel-header {
+    flex-wrap: wrap;
+  }
+
+  .score-card .status-pill {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    white-space: normal;
   }
 
   .detail-answers > div {
@@ -5906,12 +6160,7 @@ code {
   }
 }
 
-/* M2: The Printed Programme. Scoped to the public agenda and speaker
-   pages (.public-event-shell) -- an organizer or speaker portal print job
-   is out of scope here. A visitor who prints the public schedule gets a
-   paper-white page: no nav chrome, no interactive controls, serif
-   headings intact, and every session's time, room, and track name surviving
-   as plain text once color and the ink surfaces are gone. */
+/* Printed public programme: paper-white, static, and color-independent. */
 @media print {
   .site-shell:has(.public-event-shell) > .global-header,
   .public-event-hero nav,
@@ -5956,10 +6205,7 @@ code {
     color: #000 !important;
   }
 
-  /* Track color coded the left border and the legend dot; print keeps only
-     the track's name, already rendered as text in .public-session-copy > div
-     and .public-speaker-card, so a black-and-white page loses no
-     information. */
+  /* Track names remain as text when color cues disappear. */
   .public-session {
     border-left-color: #000 !important;
   }

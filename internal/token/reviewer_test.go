@@ -73,6 +73,37 @@ func TestNewReviewerDerivesFromEnvironment(t *testing.T) {
 	}
 }
 
+func TestDemoReviewerTokenRequiresDemoMode(t *testing.T) {
+	// Model a demo and live deployment with the same secret and seeded IDs.
+	demoSigner := newReviewerToken("shared-demo-and-live-secret")
+	liveVerifier := newReviewerToken("shared-demo-and-live-secret")
+	t.Setenv("APP_MODE", "demo")
+	signed := demoSigner.SignReviewerDemo("rev_ada")
+	if signed == "" {
+		t.Fatal("SignReviewerDemo returned an empty token")
+	}
+
+	if id, ok := demoSigner.VerifyReviewer(signed); !ok || id != "rev_ada" {
+		t.Fatalf("demo process rejected demo reviewer token: id=%q ok=%v", id, ok)
+	}
+
+	t.Setenv("APP_MODE", "live")
+	if id, ok := liveVerifier.VerifyReviewer(signed); ok || id != "" {
+		t.Fatalf("live process accepted demo reviewer token: id=%q ok=%v", id, ok)
+	}
+}
+
+func TestNormalReviewerTokenRemainsValidAcrossModes(t *testing.T) {
+	tok := newReviewerToken("shared-demo-and-live-secret")
+	signed := tok.SignReviewer("rev_ada")
+	for _, mode := range []string{"live", "demo"} {
+		t.Setenv("APP_MODE", mode)
+		if id, valid := tok.VerifyReviewer(signed); !valid || id != "rev_ada" {
+			t.Fatalf("normal reviewer token rejected in %s mode: id=%q ok=%v", mode, id, valid)
+		}
+	}
+}
+
 // TestSpeakerAndReviewerTokensNeverCrossAuthenticate is the RV-2 isolation
 // guarantee this file exists to prove: a speaker (portal) token can never
 // verify as a reviewer token, and a reviewer token can never verify as a
@@ -92,5 +123,15 @@ func TestSpeakerAndReviewerTokensNeverCrossAuthenticate(t *testing.T) {
 	reviewerToken := reviewer.SignReviewer("rev_ada")
 	if _, ok := speaker.Verify(reviewerToken); ok {
 		t.Fatal("Verify accepted a reviewer-signed token as a portal token")
+	}
+
+	t.Setenv("APP_MODE", "demo")
+	demoSpeakerToken := speaker.SignDemo("spk_maya")
+	if _, ok := reviewer.VerifyReviewer(demoSpeakerToken); ok {
+		t.Fatal("VerifyReviewer accepted a demo speaker token")
+	}
+	demoReviewerToken := reviewer.SignReviewerDemo("rev_ada")
+	if _, ok := speaker.Verify(demoReviewerToken); ok {
+		t.Fatal("Verify accepted a demo reviewer token as a portal token")
 	}
 }

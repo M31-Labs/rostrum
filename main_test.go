@@ -24,9 +24,42 @@ import (
 	"github.com/m31-labs/rostrum/internal/identity"
 	"github.com/m31-labs/rostrum/internal/store"
 	"github.com/m31-labs/rostrum/internal/token"
+	"m31labs.dev/gosx"
 	"m31labs.dev/gosx/auth"
+	"m31labs.dev/gosx/route"
+	"m31labs.dev/gosx/server"
 	"m31labs.dev/gosx/session"
 )
+
+func TestRostrumFileRouterDeclaresEnglishLanguageAndPreservesContract(t *testing.T) {
+	router := route.NewRouter()
+	router.SetLayout(rostrumRouteDocument)
+	router.Add(route.Route{Pattern: "/", Handler: func(ctx *route.RouteContext) gosx.Node {
+		ctx.SetMetadata(server.Metadata{Title: server.Title{Absolute: "Rostrum test"}})
+		ctx.AddHead(gosx.El("meta", gosx.Attrs(gosx.Attr("name", "description"), gosx.Attr("content", "Test page"))))
+		return gosx.El("main", gosx.Text("Ready"))
+	}})
+	handler, err := router.BuildChecked()
+	if err != nil {
+		t.Fatalf("BuildChecked: %v", err)
+	}
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/", nil))
+	html := response.Body.String()
+	for _, want := range []string{
+		`<!DOCTYPE html>`,
+		`<html lang="en" data-gosx-document="true">`,
+		`<meta charset="utf-8">`,
+		`<meta name="viewport" content="width=device-width, initial-scale=1">`,
+		`<title>Rostrum test</title>`,
+		`<body data-gosx-document-body="true" data-gosx-enhancement-layer="html">`,
+		`<main>Ready</main>`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("document missing %q: %s", want, html)
+		}
+	}
+}
 
 // TestMain seeds the package-wide appstate singleton once with an in-memory
 // workspace, the same way main() does, so the handler tests below (which

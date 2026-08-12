@@ -1,337 +1,266 @@
-# Rostrum launch-readiness specification
+---
+description: Evidence-based production-candidate checks for source, deployment, identity, providers, storage, and recovery.
+nav_order: "06 / 07"
+eyebrow: Prove the exact candidate
+---
 
-**Status:** the implementation sweep is complete. Credential-backed and
-live-service acceptance remains operator-owned. This document is the release
-gate for the private Rostrum repository as of 2026-08-11; it does not authorize
-making the repository or a deployment public.
+# Launch-readiness gate
 
-## Release decision
+<!-- markdownlint-disable MD013 -->
 
-Rostrum can proceed to a private production-candidate deployment after the
-operator checklist in this document is completed and evidenced. It is not yet
-declared publicly launch-ready: sending real email, exercising the selected
-database and provider configuration, and approving the deployed release require
-credentials and infrastructure that are outside this repository.
+Rostrum contains a complete credential-free local workflow and the controls
+needed to build a production candidate. A repository test pass is not a public
+launch decision. The exact image, hosted configuration, identity, provider,
+storage, and recovery paths still require operator-owned evidence.
 
-The public-facing review posture is now explicit: production remains
-organizer-gated, while the hosted preview is a separate `APP_MODE=demo`
-deployment containing only the fictional seed. It is anonymous and
-read-only, refuses every mutation/export/import/upload/auth/setup path, uses a
-durable JSON or SQLite volume behind a store-level write barrier, and sends a
-no-index signal. The preview is a demoable back-of-house, not a shared
-playground or a second source of truth; local quickstart runs remain the
-interactive evaluation path.
+## Decision summary
 
-Rostrum is always canonical. JSON, SQLite, and Postgres are alternative
-canonical storage backends. Airtable is a one-way operational projection only;
-it cannot alter review, scheduling, identity, archive, or audit state.
+| Area | Repository posture | Required before production approval |
+| --- | --- | --- |
+| Source distribution | MIT license, evaluator quickstart, CI, community files, and versioned docs | Verify the exact candidate can be cloned anonymously and every public source/docs link resolves |
+| Core program flow | Implemented and covered by unit, race, policy, and rendered-flow checks | Run the operator journey against the immutable candidate |
+| Public read-only preview | Fail-closed `APP_MODE=demo` implementation and Kubernetes baseline | Prove the deployed host is running the intended seed/version and refusing every mutation |
+| Identity | Organizer roles, one-time setup, magic link, OAuth adapters, passkeys, speaker/reviewer signed links | Test the selected sign-in method from an external browser/inbox |
+| Email | Durable outbox plus Resend and SMTP transports | Send through the selected real transport and retain non-secret evidence |
+| Canonical storage | JSON, SQLite WAL, and Postgres implementations share a validated aggregate contract | Restart, backup, and restore the exact selected backend |
+| Accelevents | One-way published-program adapter with dry run and visible run ledger | Test a restricted event if the integration is enabled |
+| Airtable | One-way, explicit, batched projection with dry-run and durable retry state | Test a restricted target base if the integration is enabled |
+| Recovery | Checksummed online workspace import, pre-import backups, full archives, approved-upload bundle | Rehearse structured restore and stopped-process upload recovery |
+| Release identity | `ROSTRUM_VERSION` is exposed by health and accepted by the container build | Record tag/SHA, image digest, health response, operator, and timestamp |
+
+**Current decision:** suitable for a production-candidate deployment after the
+repository gates pass. Not production-approved until every selected external
+surface and the recovery runbook have acceptance evidence.
+
+## Repository gates
+
+Install the pinned tools:
+
+```bash
+go install m31labs.dev/gosx/cmd/gosx@v0.38.1
+go install m31labs.dev/arbiter/cmd/arbiter@v1.9.0
+```
+
+Run:
+
+```bash
+make check
+make smoke
+make size-budget
+```
+
+These commands prove:
+
+- Go and GoSX formatting, Arbiter policy validation, `go vet`, unit tests, and
+  race tests pass for this source tree.
+- A temporary `APP_MODE=demo` process boots with the deterministic seed;
+  organizer, signed persona, CFP, public/embed/API/calendar, header, count,
+  and mutation-refusal contracts pass.
+- The production bundle stays within committed static HTML, island, runtime,
+  server binary, distribution, and per-route client budgets.
+
+They do not prove a remote host, credential, DNS/TLS setup, external database,
+mailbox, Airtable base, backup system, or operator procedure.
 
 ## Implemented launch contract
 
-### Program flow and configuration
+### Program state and decisions
 
-- A CFP submission flows through governed routing, review, acceptance, an
-  unscheduled session bank, conflict-aware scheduling, publication, public
-  API, calendar, and export surfaces.
-- Manual sessions carry a selected format, speakers, and duration. Their custom
-  duration survives scheduling and unscheduling.
-- Organizers can create tracks, rooms, and categories with collision-safe IDs.
-  A new category visibly uses the current policy fallback until a routing rule
-  is added.
-- Changing an event start date rebases scheduled calendar days. Changing an
-  event timezone preserves each scheduled session's wall-clock time.
-- Evidence: agenda, Settings, and domain regression tests; rendered-flow smoke
-  test; policy provenance on governed actions.
+- A proposal can move through policy-backed routing, assigned human review,
+  acceptance, speaker tasks, conflict-aware scheduling, publication, public
+  JSON, calendar, embed, and export surfaces.
+- Manual sessions retain their chosen format, speaker set, and duration while
+  being scheduled and unscheduled.
+- Event date changes rebase scheduled calendar days. Event timezone changes
+  preserve each scheduled session's wall-clock time.
+- Human review coverage and aggregates count attributed human evaluations.
+  Governed final decisions enforce assignment/quorum policy, with an audited
+  chair override path.
 
 ### Canonical storage
 
-- **JSON** is the default validated atomic-file store.
-- **SQLite** uses WAL and a migration ledger.
-- **Postgres** and **postgresql** use the same validated aggregate contract
-  through DATABASE_URL.
-- The store abstraction and SQLite/Postgres contract tests cover these
-  backends. An operator still must test the exact external database endpoint
-  chosen for production.
+- JSON validates a cloned state and atomically replaces its file.
+- SQLite uses WAL and a migration ledger.
+- Postgres and `postgresql` use `DATABASE_URL` and the same aggregate contract.
+- Rostrum remains canonical. Accelevents and Airtable are one-way projections
+  and cannot alter review, scheduling, identity, archive, or audit state.
 
 ### Audit history
 
-- Every governed mutation is recorded in aggregate audit history and appended,
-  fsynced, hash-chained, and rotated in an independent JSON Lines ledger.
-- Existing ledger corruption causes startup to fail rather than silently
-  continuing with a new chain.
-- The ledger is deliberately separate from mutable workspace state, so a
-  workspace import or restore cannot rewrite the receiving instance's
-  pre-existing operational record.
+Every governed mutation records aggregate audit context and appends to an
+operator-owned, fsynced, hash-chained JSON Lines ledger. Existing ledger
+corruption fails startup instead of silently beginning a new chain.
 
-**Boundary:** the canonical state transaction completes before the independent
-ledger append. If the ledger filesystem fails at that point, Rostrum returns an
-error saying the workspace commit already succeeded. Treat it as an incident:
-preserve the error evidence, repair the durable ledger path, and reconcile that
-one successful mutation. This is not a distributed transaction across database
-and filesystem, and the release must not claim that it is.
+The canonical transaction completes before the independent ledger append. If
+the ledger filesystem fails after a state commit, Rostrum returns an error
+that explicitly says the workspace commit succeeded. Preserve the evidence,
+repair the ledger path, and reconcile that mutation. Do not describe this as a
+distributed transaction.
 
-### Export, backup, and import
+### Export, import, and recovery
 
-- Organizers and chairs can export checksummed structured workspace state or a
-  full tar.gz archive containing state, uploads, and active/rotated audit
-  segments.
-- Structured workspace import validates export version, schema version,
-  checksum, and domain invariants before replacement. It makes an exact
-  pre-import backup, retains the newest ten, preserves local organizer
-  principals/passkeys/pending magic links, and rebases upload references to
-  the receiving host.
-- Full archive restore is intentionally a stopped-process recovery procedure
-  in v1. Extract to a private staging directory, restore workspace.json through
-  the validated Settings flow, stop Rostrum, copy staged uploads into the
-  receiving upload directory, then restart and verify files.
-- Keep source audit segments with the recovery record. Do not splice them into
-  the receiving live ledger, whose hash chain belongs to that instance.
+- Organizer/chair workspace export produces a checksummed, versioned envelope.
+- Import validates export/schema version, checksum, and domain invariants,
+  creates an exact pre-import backup, retains the newest ten, preserves local
+  organizer principals and authentication records, and rebases upload paths.
+- Full archive export streams workspace state, private uploads, and active and
+  rotated audit segments.
+- Approved-upload export produces a deterministic ZIP and digest-bearing
+  manifest of approved regular files only, with path, symlink, count, and size
+  defenses.
+- Full upload recovery remains a stopped-process procedure. Source audit
+  segments stay with the recovery record; they are not spliced into the
+  receiving instance's chain.
 
-### Email delivery
-
-- A durable message idempotency key protects confirmation and lifecycle mail.
-- MAIL_DRIVER=resend uses the Resend API with RESEND_API_KEY and MAIL_FROM.
-- MAIL_DRIVER=smtp uses a standards-based SMTP server with SMTP_HOST,
-  SMTP_PORT, SMTP_USER, SMTP_PASSWORD, and MAIL_FROM.
-- With no complete real transport, mail records in the credential-free demo
-  outbox. The outbox is not a production-delivery proof.
-- Evidence: Resend request/idempotency tests, SMTP MIME/calendar tests, and
-  acceptance resend regression tests.
-
-### Airtable projection
-
-- Airtable is an explicit, user-triggered, one-way upsert projection of
-  accepted speakers and scheduled sessions.
-- A credential-free dry run makes no network request. A live synchronization
-  creates durable outbox entries first, writes audit events, batches ten
-  records per request, backs off after failure, and uses stable Rostrum ID
-  values to replay safely.
-- Rostrum never pulls Airtable changes into canonical data and never sends
-  speaker files as Airtable attachments.
-- Required configuration: AIRTABLE_PAT, AIRTABLE_BASE_ID, and optionally
-  AIRTABLE_SPEAKERS_TABLE and AIRTABLE_SESSIONS_TABLE.
-- The target Speakers table needs Rostrum ID, Rostrum Schema, Name, Email,
-  Role, Company, Biography, Website, and LinkedIn. The Sessions table needs
-  Rostrum ID, Rostrum Schema, Title, Description, Starts At, Ends At, Room,
-  Track, and Speaker IDs.
-- Evidence: adapter, outbox, and HTTP contract tests.
-
-### Access, public edge, and release identity
+### Public and identity edge
 
 - Organizer, chair, and observer roles are application-enforced. Speaker and
-  reviewer access remains signed-link scoped. Public APIs expose published
-  material only.
-- Production rejects weak/default session secrets, HTTP public URLs, and
+  reviewer access is signed-link scoped.
+- Public JSON emits only published sessions and their attached speakers.
+- Production refuses weak/default session secrets, non-HTTPS public URLs, and
   in-memory persistence.
-- The exact GoSX preflight is gosx v0.38.1; Make targets reject another
-  version before check or build.
-- ROSTRUM_VERSION is a deployment-owned immutable tag or commit SHA exposed
-  by GET /api/health. The Docker image accepts it as a build argument and
-  local smoke asserts a known health version.
+- The exact GoSX preflight is `gosx v0.38.1`; build/check targets reject a
+  different version.
+- `ROSTRUM_VERSION` is deployment-owned and visible at `/api/health`.
 
-### Hosted preview isolation
+## Hosted preview acceptance
 
-- The demo process must set `APP_MODE=demo`, `SEED=demo`, an absolute durable
-  `DATA_PATH`, `STORE_DRIVER=json` or `sqlite`, and an immutable
-  `ROSTRUM_VERSION`. The deterministic fixture is checked by a full state
-  fingerprint at startup; changed speakers, proposals, reviews, schedule,
-  resources, integrations, communications, audit, or sync records keep the
-  process down.
-- Keep the demo on its own subdomain, process, volume, audit path, and
-  session secret. Never point it at production JSON, SQLite, Postgres,
-  uploads, or identity state.
-- Leave `ORGANIZER_EMAILS` and `RESET_SECRET` empty; use `MAIL_DRIVER=outbox`
-  and no Resend, SMTP, Accelevents, Airtable, or OAuth credentials.
-- Verify `/organizer` is anonymously readable for inspection, while POST,
-  PUT, PATCH, DELETE, `/auth/*`, `/setup`, `/demo/reset`, all exports/imports,
-  and uploads return 403. Verify the read-only banner, login explanation,
-  `X-Robots-Tag`, and the absence of provider calls.
-- If any demo startup invariant fails, keep the process down and fix the
-  deployment configuration; do not weaken the guard or seed live state.
+The preview must be a separate process, hostname, volume, audit path, and
+session secret containing only the deterministic fictional seed. It must use:
 
-## Provider acceptance contracts
+```text
+APP_MODE=demo
+APP_ENV=production
+PUBLIC_URL=https://demo.example.com
+ROSTRUM_VERSION=<immutable-release-or-commit>
+SESSION_SECRET=<unique-random-32+-character-secret>
+SEED=demo
+STORE_DRIVER=sqlite
+DATA_PATH=/app/demo-data/rostrum.sqlite
+AUDIT_LOG_PATH=/app/demo-data/audit.log
+BACKUP_DIR=/app/demo-data/backups
+DEMO_MODE=false
+MAIL_DRIVER=outbox
+ORGANIZER_EMAILS=
+RESET_SECRET=
+```
 
-### Transactional email: choose Resend or SMTP
+Do not provide external database, network mail, Accelevents, Airtable, or OAuth
+credentials to the preview. Startup must fail if the seed fingerprint,
+persistence path, release identity, or credential posture differs.
 
-Set one real transport for the candidate deployment.
+Verify all of the following against the deployed candidate:
 
-For Resend, configure MAIL_DRIVER=resend, RESEND_API_KEY, and a verified
-MAIL_FROM identity. Keep RESEND_API_BASE_URL at its normal production endpoint
-unless deliberately using a compatible test endpoint.
+1. `/api/health` returns `ok=true` and the expected immutable version.
+2. `/api/v1/workspace` returns the M31 Systems Forum seed with non-zero
+   published session/speaker counts.
+3. `/organizer` is anonymously readable; the product tour, CFP, agenda, public
+   agenda, gallery, and public calendar return 200.
+4. `POST`, `PUT`, `PATCH`, and `DELETE` are refused. Authentication/setup,
+   reset, import, export, upload, and private-file paths return 403.
+5. The read-only banner and login explanation are visible.
+6. Every response sends `X-Robots-Tag: noindex, nofollow, noarchive`.
+7. No network provider request occurs.
 
-For SMTP, configure MAIL_DRIVER=smtp, SMTP_HOST, SMTP_PORT, SMTP_USER,
-SMTP_PASSWORD, and MAIL_FROM. This is the standards-based OSS-friendly path;
-do not use a provider API token as an SMTP password.
+Run the exact remote contract from a checkout of the same candidate:
 
-From a real external inbox and deployment:
+```bash
+make smoke \
+  SMOKE_URL=https://demo.example.com \
+  SMOKE_EXPECTED_VERSION=<immutable-release-or-commit>
+```
 
-1. Submit a test CFP.
-2. Verify arrival from the intended domain, a working signed portal link, and
-   no cross-speaker data exposure.
-3. Repeat the triggering action and confirm idempotency avoids duplicate
-   lifecycle delivery.
-4. Record provider message ID/time, recipient, release version, and result in
-   the launch record. Never store a provider token or SMTP password there.
+Remote smoke checks the full anonymous read-only surface—including organizer
+and signed speaker/reviewer persona routes—plus public/embed/API/calendar
+output, deterministic counts, headers, mutation refusal, and exact version.
+Manual browser inspection still verifies presentation quality.
 
-### Airtable
+## Provider acceptance
 
-Create a restricted Airtable Personal Access Token with record-write access
-only to the target base. API keys are retired and must not be used. The current
-provider references are [Personal Access Token guidance](https://support.airtable.com/docs/creating-personal-access-tokens),
-[API-key retirement](https://support.airtable.com/docs/airtable-api-key-deprecation-notice),
-and [API call limits](https://support.airtable.com/managing-api-call-limits-in-airtable).
+### Transactional email
 
-1. Put AIRTABLE_PAT, AIRTABLE_BASE_ID, and any non-default table names in the
-   deployment secret store.
-2. Run Dry run Airtable and verify only expected accepted speakers and
-   scheduled, non-cancelled sessions appear in the plan.
-3. Run Sync Airtable now once. Verify stable Rostrum ID keys, intended fields,
-   and agreement with canonical Rostrum data.
-4. Run it again and verify an upsert/update rather than a duplicate. Check the
-   visible ledger and the independent audit history.
-5. Change one harmless Airtable test row and verify Rostrum does not pull it
-   back. Airtable must remain non-authoritative.
+Choose one transport for the live candidate:
 
-### Storage
+- Resend: `MAIL_DRIVER=resend`, `RESEND_API_KEY`, and a verified `MAIL_FROM`.
+- SMTP: `MAIL_DRIVER=smtp`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`,
+  `SMTP_PASSWORD`, and `MAIL_FROM`.
 
-Choose one canonical backend and exercise that exact deployment configuration.
+From a real external inbox:
 
-- **JSON:** mount a private durable volume for DATA_PATH, data/uploads,
-  AUDIT_LOG_PATH, and BACKUP_DIR. Do not run more than one replica against the
-  same JSON workspace.
-- **SQLite:** boot twice against the same durable path and verify the
-  WAL-backed state persists. Retain the database, WAL files, audit ledger,
-  uploads, and import backups together in the backup policy.
-- **Postgres:** use a non-production test DATABASE_URL, boot and restart,
-  submit/import a fixture, and verify persisted aggregate state and audit
-  history. Complete a separate managed-database backup/restore drill before
-  promotion.
+1. Submit a test proposal.
+2. Verify arrival from the intended domain and a working signed portal link.
+3. Repeat the trigger and confirm idempotency prevents duplicate lifecycle
+   delivery.
+4. Verify a scheduled-session message carries a valid calendar attachment.
+5. Record provider message ID/time, recipient, release version, and result.
+   Never record the token or SMTP password.
+
+The demo outbox is useful product evidence, but it is not delivery proof.
+
+### Accelevents (only when enabled)
+
+Configure a restricted API credential and the target event URL only on the
+live candidate. Rostrum publishes speakers attached to published, scheduled
+sessions first, then those sessions; it never reads changes back.
+
+1. Run the credential-free dry run and inspect the exact speaker/session plan.
+2. Publish into a disposable or staging event and verify the expected six
+   seeded public sessions (or the candidate workspace's published count).
+3. Re-run and verify the provider updates stable Rostrum IDs rather than
+   creating duplicates.
+4. Confirm a draft or cancelled session does not reach the target event.
+5. Preserve the visible run ledger result, timestamp, and release version;
+   never preserve the API token.
+
+### Airtable (only when enabled)
+
+Use a restricted Personal Access Token with record-write access only to the
+target base. Rostrum expects stable `Rostrum ID` fields and the columns listed
+in [the deployment guide](deployment.md#airtable-projection).
+
+1. Run the credential-free dry run and review its exact record plan.
+2. Sync once and verify intended accepted speakers and scheduled sessions.
+3. Sync again and verify upsert/update rather than duplicate records.
+4. Change a harmless Airtable test row and prove Rostrum does not pull it back.
+5. Check the visible sync ledger and independent audit history.
+
+### Selected storage
+
+- **JSON:** mount private durable storage for data, uploads, audit, and backups;
+  keep one application replica.
+- **SQLite:** boot and restart twice against the same path; retain the database,
+  WAL files, uploads, audit, and backups together.
+- **Postgres:** use a non-production endpoint, restart, submit/import a fixture,
+  and prove state plus audit behavior. Complete the managed-database backup and
+  restore drill separately.
 
 ## Release verification runbook
 
 Complete every item against the exact immutable candidate. Attach command
-output, timestamp, release version, image digest, and operator to the release
-record; never attach secrets or signed portal/reviewer tokens.
+output, timestamp, release identifier, image digest, and operator; never attach
+secrets or signed speaker/reviewer tokens.
 
-1. **Source and build.** Keep GitHub private. Run make check, make build, and
-   make smoke. The check includes formatting, policy validation, vet, unit
-   tests, race tests, and the exact GoSX version.
-2. **Package.** Build the container with an immutable ROSTRUM_VERSION
-   build argument. Start it with APP_ENV=production, an HTTPS PUBLIC_URL, a
-   unique 32+ character SESSION_SECRET, and durable mounts.
-3. **Health and edge.** Fetch GET /api/health and verify ok=true plus the
-   expected immutable version. Verify TLS, WebSocket upgrade at /live,
-   intended public cache headers, and no unpublished material in public APIs.
-4. **Rendered smoke.** Run make smoke with SMOKE_URL set to the candidate
-   URL. This remote mode intentionally covers public/login rendering only;
-   use an actual organizer session for privileged acceptance.
-5. **Core operator journey.** Create a test submission; verify its route and
-   audit trace; assign/review/accept it; create or move its session; resolve
-   a deliberate scheduling conflict; publish; and verify public
-   agenda/API/calendar output. Create a manual session and verify its custom
-   duration survives a board move.
-6. **Recovery drill.** Export workspace JSON, import it into a clean staged
-   instance, verify local organizer access remains intact, and verify the
-   automatic pre-import backup. Produce one full archive and rehearse the
-   stopped-process upload recovery on staging.
-7. **Provider drill.** Complete the selected email test and, if enabled, the
-   Airtable dry-run/upsert/replay test. Complete the selected SQLite or
-   Postgres persistence test.
-8. **Approval.** Record pass/fail, any exception with an expiry, image digest,
-   health version, and named operator. Only then separately approve a public
-   launch. Do not change repository visibility as part of this work.
+1. **Source:** record commit SHA and a clean, reviewed diff; from a logged-out
+   environment, clone the repository and open the published documentation.
+2. **Repository gates:** run `make check`, `make smoke`, and
+   `make size-budget`.
+3. **Package:** build the container with immutable `ROSTRUM_VERSION`; verify it
+   runs as UID 10001 with read-only capabilities and durable mounts.
+4. **Health and edge:** verify TLS, expected health version, cache headers,
+   security headers, WebSocket upgrade, and public-data allow-list.
+5. **Core journey:** submit; inspect routing trace; assign and review; make a
+   governed decision; schedule; resolve a deliberate conflict; publish; verify
+   agenda, gallery, API, and calendar.
+6. **Identity:** test the selected organizer sign-in and signed reviewer and
+   speaker links; verify observer and export restrictions.
+7. **Recovery:** export workspace JSON, import into clean staging, verify local
+   organizer access and pre-import backup, then rehearse archive upload restore
+   with the process stopped.
+8. **Providers:** complete selected email, storage, and optional
+   Accelevents/Airtable acceptance.
+9. **Preview:** complete every hosted-preview isolation check if a preview will
+   be published.
+10. **Approval:** record pass/fail, named owner, and any exception with expiry.
 
-## Delivered implementation work
-
-The work packets below are implemented in this private release candidate.
-They remain subject to the credential-backed acceptance steps above; their
-presence does not authorize making the repository or deployment public.
-
-### PT-4: organizer-created speaker tasks
-
-Organizers can create, edit, assign, and retire portal tasks with a delivery
-type (profile, confirmation/form, file, or headshot), due date, required flag,
-and accepted-speakers-only policy. An optional initial bulk assignment includes
-only speakers with an accepted-stage submission; direct assignment rechecks the
-same policy in the state transaction.
-
-Retirement is non-destructive. It removes the task from portals, reminders,
-and new upload/submission authorization while retaining task completions for
-audit, archive, and exports. The portal action and upload route both use the
-same lifecycle-and-assignment predicate, so an old task URL cannot leak a task
-or accept work from another speaker. File uploads are restricted to file and
-headshot task types; normal task submission validates required fields and
-declared select options server-side.
-
-### PT-5: approved-upload bundle
-
-`GET /organizer/export/approved-uploads.zip` is an organizer/chair-only,
-audited download. It builds a deterministic ZIP containing a timestamp-free
-`manifest.json` followed by only approved completion files that are regular
-files under Rostrum's private upload directory. Every manifest entry contains
-the completion, task, and speaker IDs, original filename, content type,
-archive path, byte count, and SHA-256.
-
-The bundle uses fixed ZIP metadata and stored entries, stable ordering, a
-5,000-file / 512 MiB limit, rejects path escapes and symlinks, and rechecks
-the file digest while streaming. An approved profile/form response with no
-stored file is simply absent; a state reference to a missing or unsafe stored
-file fails closed rather than producing a silently incomplete archive.
-
-### CM-2, CM-4, and CM-6: durable communications
-
-The persisted email outbox now owns scheduled task/session reminders,
-administrator notifications, delivery leasing, idempotency, retry/backoff,
-cancellation, and opt-out suppression. Startup and a periodic wakeup merely
-drive durable due work; no delivery decision depends solely on an in-process
-timer. Templates are merge-field validated, editable with retained revisions,
-and system templates remain undeletable. Notification rules define trigger,
-recipient, retry, and suppression policy and enqueue through the same outbox.
-
-### RV-3: review-plan and reviewer editing
-
-Chairs can create and revise plans, structured rubrics, review targets,
-deadline/state, anonymity, attachments, reminders, and reviewer rosters.
-Only one plan may be open at once. A scored rubric is immutable: changing
-criteria, weights, or score ranges requires a new round, preserving the
-meaning of earlier evaluations.
-
-Reviewers are added, edited, or retired rather than deleted. Retirement and
-roster removal preserve evaluations, deactivate only future assignment
-eligibility, and create audit history. Explicit review assignments carry
-source (manual, automatic, or legacy), actor, Arbiter rule/trace, assignment
-time, and non-destructive removal reason. The balanced assignment operation
-backfills legacy score provenance, distributes work by current load, excludes
-company conflicts through the review-governance policy, and is idempotent.
-Managed plans require an active assignment for both organizer-entered and
-signed-link reviewer scores. The organizer view exposes active assignments,
-unfilled targets, conflicts, and recorded-score impact before roster changes.
-
-### FB-2, FB-4, and FB-6: CFP lifecycle
-
-An event owns named CFP variants with separately addressable public routes,
-open/closed lifecycle state, attribution, routing, and a shared downstream
-review/scheduling workflow. The form editor accepts only constrained
-equals/show conditional rules, rejects chaining/unknown/locked targets, and
-records versioned audited changes. Speakers can save signed, owner-bound
-drafts and withdraw eligible proposals; withdrawal removes active review-plan
-membership, cancels linked public sessions, retains historical evaluations,
-and suppresses public exposure.
-
-### Managed interaction contract
-
-Interactive forms use GoSX `ActionForm`, managed `Form`, or the equivalent
-explicit `data-gosx-form` protocol used by the agenda island. Successful
-mutations use managed soft navigation and local result projection rather than
-a document POST/refresh. This includes login magic-link request, workspace
-import, task/review/communications operations, uploads, and the agenda drag
-and unschedule flows. A repository test scans every `.gsx` source form and
-fails if a raw form lacks the managed protocol.
-
-## Exit condition for this sweep
-
-This implementation and specification sweep is complete when this document,
-the repository tests, and a clean-clone build are reviewed. The next required
-action is operator-owned credential and infrastructure acceptance, beginning
-with the selected Resend or SMTP transport. No repository visibility change is
-part of that action.
+The [judging guide](judging-guide.md) is the presentation path. This document
+is the operational go/no-go path.

@@ -1,0 +1,49 @@
+name: Feature request
+description: Propose an organizer, reviewer, speaker, attendee, or operator improvement.
+title: "proposal: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Who encounters the problem, and during which part of the program?
+    validations:
+      required: true
+  - type: dropdown
+    id: persona
+    attributes:
+      label: Primary persona
+      options:
+        - Organizer or chair
+        - Observer
+        - Reviewer
+        - Speaker
+        - Attendee
+        - Operator or integrator
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: Describe success without prescribing an implementation if possible.
+    validations:
+      required: true
+  - type: textarea
+    id: boundary
+    attributes:
+      label: Trust or data implications
+      description: Note identity, authorization, policy, public data, storage, audit, provider, or recovery effects.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Current workaround or alternatives
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope check
+      options:
+        - label: This proposal supports the current single-workspace product scope, or explains why that scope should change.
+          required: true

@@ -205,13 +205,16 @@ func Page() Node {
 				</span>
 				<span>
 					<i aria-hidden="true">✓</i>
-					Two-round review
+					{data.form.reviewProcess}
 				</span>
 			</div>
 		</aside>
 		<section class="submission-form-panel">
 			<header>
-				<p class="panel-kicker">2026 call for speakers</p>
+				<p class="panel-kicker">
+					{data.event.year}
+					call for speakers
+				</p>
 				<h2>Tell us what you have learned.</h2>
 				<p>{data.form.body}</p>
 			</header>

@@ -49,6 +49,7 @@ func landingData(state domain.State) map[string]any {
 		"workspace": present.WorkspaceIdentity(state),
 		"event": map[string]any{
 			"name":     state.Event.Name,
+			"year":     state.Event.StartsAt.Format("2006"),
 			"location": state.Event.Location,
 			"dates":    state.Event.StartsAt.Format("Jan 02") + "–" + state.Event.EndsAt.Format("02, 2006"),
 		},
@@ -59,7 +60,7 @@ func landingData(state domain.State) map[string]any {
 		},
 		"surfaces": []map[string]string{
 			{"number": "01", "title": "Collect", "body": "Conditional CFPs route every proposal into a visible, owned queue.", "href": "/organizer/forms"},
-			{"number": "02", "title": "Decide", "body": "Multi-round rubrics keep human and optional AI review comparable and attributable.", "href": "/organizer/review"},
+			{"number": "02", "title": "Decide", "body": "Multi-round rubrics keep every human review comparable, attributable, and governed.", "href": "/organizer/review"},
 			{"number": "03", "title": "Publish", "body": "Conflict-aware scheduling feeds speaker portals, embeds, calendar files, and Accelevents.", "href": "/organizer/agenda"},
 		},
 		"updated": state.UpdatedAt.In(time.Local).Format("15:04 MST"),

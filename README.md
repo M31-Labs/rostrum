@@ -1,226 +1,239 @@
 # Rostrum
 
-**Run your event's speaker program from one calm workspace.**
+<!-- markdownlint-disable MD013 -->
 
-Rostrum is a self-hosted, open-source tool for event speaker programs. It
-carries a proposal from an open call, through review and scheduling, to a
-published agenda. Every routing and scheduling decision shows its rule and a
-readable reason.
+[![CI](https://github.com/M31-Labs/rostrum/actions/workflows/ci.yml/badge.svg)](https://github.com/M31-Labs/rostrum/actions/workflows/ci.yml)
+[![Documentation](https://img.shields.io/badge/docs-field_guide-8a5b1c)](https://m31-labs.github.io/rostrum/)
+[![Go 1.26](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go&logoColor=white)](go.mod)
+[![MIT license](https://img.shields.io/badge/license-MIT-8a5b1c)](LICENSE)
 
-**Hosted preview:** [rostrum.m31labs.dev](https://rostrum.m31labs.dev). The
-preview uses fictional M31 Systems Forum 2026 data and exposes the organizer
-back-of-house as an anonymous, read-only inspection surface. It never accepts
-submissions, sign-ins, uploads, exports, imports, resets, or provider
-credentials. To try mutations, run the local quickstart below.
+**Run the whole speaker program from one calm, accountable workspace.**
 
-## What Rostrum does today
+Rostrum is a self-hosted, MIT-licensed operating system for event speaker
+programs. A proposal moves from an open call through governed routing, human
+review, speaker readiness, conflict-aware scheduling, and public publishing.
+The decisions that matter keep their rule, reason, and audit context.
 
-- **Call for proposals (CFP).** A hosted public form collects proposals.
-  Conditional questions appear only when they apply; for example, workshop
-  logistics appear only for workshop proposals. A routing policy assigns each
-  proposal a queue, an owner, and a track, and stores a readable trace.
-- **Form builder.** Add, edit, reorder, and remove form fields from the
-  organizer workspace. Open or close the call, set a close date the server
-  enforces, and edit the success page.
-- **Speaker portal.** Each submitter gets a portal through a signed link. No
-  account, no password. Speakers update their profile, complete tasks, and
-  upload slides and headshots. Uploads are capped at 10 MiB and limited to an
-  allow-list of file types.
-- **Multi-round review.** Each round has a weighted rubric. Reviewers open a
-  signed review link and score their own assignments. An organizer can also
-  record a score on a reviewer's behalf. Human scores alone set coverage and
-  aggregates.
-- **Conflict-aware agenda.** Drag sessions from an unscheduled bank onto the
-  board, or use the keyboard move controls. Switch among list, day, week,
-  track, and room views. Hard conflicts (a double-booked speaker or room)
-  block publication. Warnings (same-track overlap) explain themselves.
-- **Onboarding dashboard.** A live matrix shows each speaker's outstanding
-  tasks. Uploads wait for organizer approval. The view refreshes over a
-  WebSocket as speakers complete work.
-- **Communications.** A template library with merge fields, a per-recipient
-  preview, Gmail and Outlook compose links, a demo outbox, and a sent/queued
-  ledger. Each submission creates a confirmation message carrying the
-  speaker's portal link; configured Resend or SMTP delivery sends it as email.
-  Each speaker has a private iCalendar file.
-- **Publishing.** A public agenda with a personal itinerary stored on the
-  visitor's device, a speaker gallery, embeddable widgets, public JSON, and a
-  CSV (comma-separated values) export for organizers.
-- **Accelevents export.** A one-way publisher sends speakers, then published
-  sessions. A dry run needs no credential. A live sync needs an API key and
-  records each run in a visible ledger.
+![Rostrum's guided five-persona product tour](docs/images/product-tour.webp)
 
-## Try the live demo
+## Evaluator fast path
 
-1. Open the [public call](https://rostrum.m31labs.dev/submit/systems-forum-cfp)
-   and choose the "Workshop" format to inspect its conditional question. The
-   hosted preview intentionally refuses the final submit action.
-2. Open the [organizer workspace](https://rostrum.m31labs.dev/organizer) to
-   inspect the seeded routing trace, review rounds, task matrix, and audit
-   context without signing in.
-3. Open the [agenda](https://rostrum.m31labs.dev/organizer/agenda) to inspect
-   the seeded conflict explanation. Controls remain visible for discoverability
-   but every action is disabled at the deployment boundary.
-4. End at the [public agenda](https://rostrum.m31labs.dev/public/m31-systems-forum-2026/agenda)
-   and the [speaker gallery](https://rostrum.m31labs.dev/public/m31-systems-forum-2026/speakers).
+The repository is the authoritative evaluation artifact. Choose the path that
+matches what you want to test:
 
-## Quickstart
+| Path | Best for | Mutations | Setup |
+| --- | --- | --- | --- |
+| **Local judge demo — recommended first** | Verified visual/persona tour of the exact source tree | No; deliberately read-only | Go 1.26, Make, `curl`, and a POSIX shell; one command |
+| **Local interactive run** | Full feature scoring and end-to-end testing | Yes | Go 1.26; about one minute |
+| **Hosted preview** | A quick visual tour when the deployment preflight passes | No; deliberately read-only | None |
 
-Requirements: Go 1.26 or newer. No database, no Node toolchain, no external
-credential.
+### Launch the deterministic judge demo
 
 ```bash
-git clone https://github.com/m31-labs/rostrum
+git clone https://github.com/M31-Labs/rostrum.git
 cd rostrum
-cp .env.example .env
-go run .
+make judge-demo
 ```
 
-Open [http://localhost:8080](http://localhost:8080). The first run creates
-`data/rostrum.json` with a fully seeded demo event. For a disposable
-in-memory workspace that resets on restart:
+The helper builds into a disposable directory, boots the exact fictional
+read-only fixture, runs the full hosted-demo smoke contract, and prints every
+evaluation URL. Start at the guided [product tour](http://127.0.0.1:8080/tour).
+Press `Ctrl-C` to remove the process and fixture.
+
+### Run the complete product locally
 
 ```bash
+git clone https://github.com/M31-Labs/rostrum.git
+cd rostrum
+cp .env.example .env
 DEMO_MODE=memory go run .
 ```
 
-Entry points:
+Rostrum prints a one-time first-organizer URL to the terminal:
 
-- Organizer workspace: [http://localhost:8080/organizer](http://localhost:8080/organizer)
-- Public CFP: [http://localhost:8080/submit/systems-forum-cfp](http://localhost:8080/submit/systems-forum-cfp)
-- Public agenda: [http://localhost:8080/public/m31-systems-forum-2026/agenda](http://localhost:8080/public/m31-systems-forum-2026/agenda)
-- Speaker portal: submit a proposal; the confirmation email and the success
-  page both carry a signed link into your portal.
+```text
+Rostrum has no organizer yet. Finish setup at: http://localhost:8080/setup?token=...
+```
 
-In the organizer workspace, press `Ctrl/Cmd K` for the search switcher, or
-press `G` plus a route key to jump to any surface.
+Open that exact URL, enter a name and email address, and Rostrum creates the
+first organizer and signs that browser in. No email provider or external
+credential is needed. `DEMO_MODE=memory` makes the evaluation disposable; use
+plain `go run .` to persist the seeded workspace to `data/rostrum.json`.
 
-The hosted preview is a separate `APP_MODE=demo` deployment. It is not the
-local quickstart: the local process is deliberately interactive so you can
-submit, review, schedule, and reset fictional data while evaluating the app.
+Then visit:
 
-## How a program moves through Rostrum
+- [Guided product tour](http://localhost:8080/tour)
+- [Organizer workspace](http://localhost:8080/organizer)
+- [Public call for speakers](http://localhost:8080/submit/systems-forum-cfp)
+- [Public agenda](http://localhost:8080/public/m31-systems-forum-2026/agenda)
+- [Public API directory](http://localhost:8080/api/v1/workspace)
 
-1. **Submit.** A speaker completes the public form. The routing policy
-   assigns a queue, an owner, and a track. Rostrum sends a confirmation email
-   and opens the speaker's portal.
-2. **Review.** Organizers run one or more weighted rubric rounds. Reviewers
-   score through signed links; scores stay attributed to their author.
-3. **Schedule.** Organizers drag accepted sessions onto the agenda. Hard
-   conflicts block publication until an organizer resolves them.
-4. **Publish.** The committed schedule feeds the public agenda, the speaker
-   gallery, portals, calendar files, the JSON API, embeds, and the
-   Accelevents export. One record drives all of them.
+Press `Ctrl/Cmd K` inside the workspace for the switcher, or press `G` followed
+by a route key such as `A` for Agenda or `R` for Review.
 
-## Built for self-hosters
+### Use the hosted preview
 
-- **Passwordless access.** Speakers and reviewers authenticate with signed,
-  expiring links. There are no passwords to store, reset, or leak.
-- **Decisions you can defend.** Routing and scheduling rules live in
-  versioned policy files under `rules/`. Every decision keeps its rule name
-  and a human-readable reason.
-- **Your program in one file.** The whole workspace lives in one JSON file
-  with validated, atomic writes. SQLite (WAL) and Postgres use the same
-  aggregate contract when an operator needs a database backend.
-- **Independent audit history.** Every durable workspace mutation is also
-  appended and fsynced to an operator-owned JSON Lines ledger, so a workspace
-  restore cannot rewrite the operational history that preceded it.
-- **One binary.** A single Go process serves every page, the live dashboard,
-  and the API. No database and no background workers.
-- **A careful public edge.** Public JSON serves only published sessions and
-  their speakers. It never includes email addresses, proposal text, review
-  data, or drafts. Rate limits guard the public form.
+The intended preview is
+[rostrum.m31labs.dev](https://rostrum.m31labs.dev). It is a separate,
+fictional, anonymous, read-only deployment. Because a hosted deployment can
+lag the repository, run this preflight before relying on it:
 
-## Identity model
+```bash
+curl -fsS https://rostrum.m31labs.dev/api/health
+curl -fsS https://rostrum.m31labs.dev/api/v1/workspace
+```
 
-- Speakers hold signed, expiring portal links. A valid link binds the browser
-  session to that one speaker.
-- Reviewers hold signed review links that an organizer copies from the Review
-  page. Each link authenticates one reviewer on every request.
-- Rostrum enforces its own organizer roles: `organizer`, `chair`, and
-  `observer`. Configure `ORGANIZER_EMAILS` before first boot, or use the
-  one-time `/setup` break-glass link to establish the first organizer.
-  Organizers can sign in with a magic link, configured GitHub or Google OAuth,
-  or a registered passkey. See [docs/deployment.md](docs/deployment.md).
+A judge-ready preview reports an immutable Rostrum version (not `dev`), the
+event slug `m31-systems-forum-2026`, and non-zero published session and speaker
+counts. Its `/organizer` route opens without sign-in and responses include
+`X-Robots-Tag: noindex, nofollow, noarchive`. If any check differs, use the
+[local interactive path](#run-the-complete-product-locally); it exercises the
+same repository with mutations enabled.
+
+The complete five-minute route and expected evidence are in the
+[judging guide](docs/judging-guide.md).
+
+## See the handoffs, not a feature maze
+
+The `/tour` route follows five people through the same record: organizer,
+submitter, reviewer, speaker, and attendee. In a correctly configured read-only
+demo it also issues signed, persona-scoped links so judges can inspect the
+reviewer desk and speaker portal while the independent demo gate still rejects
+every mutation.
+
+| Organizer command center | Published speaker experience |
+| --- | --- |
+| ![Rostrum organizer overview with pipeline, readiness, and schedule risk](docs/images/organizer-overview.webp) | ![Rostrum public speaker gallery with approved portraits and session details](docs/images/speaker-gallery.webp) |
+
+Every capture is generated from the deterministic fictional fixture. The
+approved seed portraits are synthetic fictional assets, never real speaker
+data; their initials fallbacks also demonstrate the publication-consent gate.
+
+## One record, the whole program
+
+1. **Collect.** Run one or more calls for speakers with editable fields,
+   constrained conditional questions, drafts, withdrawal, and server-enforced
+   open/close state.
+2. **Route and review.** Arbiter policies assign queue, owner, and track with a
+   readable trace. Weighted, multi-round human review keeps scores attributed
+   and enforces assignment and quorum rules.
+3. **Prepare and schedule.** Signed speaker portals collect profiles, tasks,
+   headshots, and files. Organizers schedule accepted sessions while hard room
+   and speaker collisions block publication.
+4. **Publish and operate.** The committed schedule powers the public agenda,
+   speaker gallery, personal itinerary, calendars, embeds, public JSON, and
+   organizer exports.
+
+## Capability map
+
+| Surface | What is implemented now |
+| --- | --- |
+| Forms and routing | Multiple CFPs, editable/reorderable fields, equals/show conditions, close dates, drafts, withdrawal, versioned Arbiter policies, readable routing traces |
+| Review | Multi-round weighted rubrics, reviewer rosters, signed reviewer links, balanced assignments, company-conflict exclusions, quorum-governed decisions |
+| Speakers and portal | Signed passwordless links, profiles, scoped tasks, file/headshot upload, approval, private downloads, per-speaker calendar |
+| Agenda | Unscheduled bank, manual sessions, drag and keyboard movement, day/week/track/room views, hard conflicts, warnings, publication gate |
+| Communications | Editable templates and revisions, merge preview, durable outbox, retry/backoff, suppression, Gmail/Outlook handoff, Resend or SMTP transport |
+| Public output | Agenda, gallery, device-local itinerary, embeddable public pages, read-only JSON API, whole-event calendar |
+| Operations | JSON, SQLite WAL, or Postgres storage; checksummed export/import; full archives; approved-upload bundle; independent hash-chained audit ledger |
+| External publishing | Credential-free Accelevents and Airtable dry runs; explicit one-way publishing with a visible run ledger; Rostrum remains canonical |
+
+See the [capability and evidence matrix](docs/judging-guide.md#capability-and-evidence-matrix)
+for routes, tests, and the boundary of each claim.
+
+## People and access
+
+| Persona | Access model |
+| --- | --- |
+| Organizer | Application session with the `organizer` role; full workspace access |
+| Chair | Organizer-facing access plus governed final-decision and sensitive export authority |
+| Observer | Read-only organizer-facing access; no mutation or PII-bearing export |
+| Reviewer | Signed, expiring link scoped to that reviewer |
+| Speaker | Signed, expiring link scoped to that speaker and their portal |
+| Attendee | Public agenda, gallery, itinerary, and published JSON only |
+
+Organizers can bootstrap once through `/setup`, then sign in with a magic link,
+a configured GitHub or Google OAuth provider, or a registered passkey. See
+[deployment: identity and access](docs/deployment.md#identity-and-access).
+
+## Trust is part of the feature
+
+- **Explainable policy.** Routing, review governance, form visibility, and
+  schedule-conflict rules live in versioned files under [`rules/`](rules/).
+- **Public means published.** Public JSON includes only published sessions and
+  their speakers—not emails, proposal text, review data, drafts, or provider
+  configuration.
+- **Defensive persistence.** State is validated before replacement. JSON uses
+  atomic writes; SQLite uses WAL; Postgres uses the same aggregate contract.
+- **Independent history.** Durable mutations are also written to a separate,
+  fsynced, hash-chained JSON Lines ledger. The state write and ledger append
+  are deliberately documented as two operations, not a distributed
+  transaction.
+- **Small public edge.** CSRF protection, signed sessions, role checks, upload
+  allow-lists, request-body limits, public-form rate limits, route-aware CSP,
+  and production startup guards are covered by tests.
+
+Read the [architecture and security notes](docs/architecture.md) for the full
+boundary and current limitations.
 
 ## Public interfaces
 
-| Endpoint | Purpose | Cache |
-|---|---|---|
-| `GET /api/health` | Application name, version, timestamp | 30 seconds |
-| `GET /api/v1/workspace` | Public discovery links and counts | 60 seconds |
-| `GET /api/v1/schedule` | Published sessions only | 60 seconds |
-| `GET /api/v1/speakers` | Speakers on published sessions only | 60 seconds |
-| `GET /calendar/{speaker}.ics` | Private per-speaker calendar file | private, 60 seconds |
-| `GET /organizer/export/submissions.csv` | Organizer CSV export | private, no-store |
-| `GET /organizer/export/workspace.json` | Checksummed organizer workspace export | private, no-store |
-| `GET /organizer/export/archive.tar.gz` | Workspace, uploads, and audit archive | private, no-store |
+| Endpoint | Returns | Cache |
+| --- | --- | --- |
+| `GET /api/health` | App name, deployment-owned version, UTC timestamp | public, 30 seconds |
+| `GET /api/v1/workspace` | Event metadata, published counts, discovery links | public, 60 seconds |
+| `GET /api/v1/schedule` | Published sessions only | public, 60 seconds |
+| `GET /api/v1/speakers` | Speakers attached to published sessions only | public, 60 seconds |
+| `GET /public-calendar/{event}.ics` | Complete published program calendar | public, 60 seconds |
+| `GET /calendar/{speaker}.ics` | Private signed/bound speaker calendar | private, 60 seconds |
+| `GET /organizer/export/submissions.csv` | Organizer/chair submission export | private, no-store |
+| `GET /organizer/export/workspace.json` | Checksummed workspace envelope | private, no-store |
+| `GET /organizer/export/archive.tar.gz` | Workspace, uploads, and audit segments | private, no-store |
 
-## Optional integrations
+Examples and response contracts live in [docs/api.md](docs/api.md).
 
-Rostrum runs complete with zero credentials. Add these when you want them:
+## Development and verification
 
-- **Transactional email.** Set `MAIL_DRIVER=resend` with `RESEND_API_KEY`, or
-  set `MAIL_DRIVER=smtp` with `SMTP_HOST`, to send real confirmation mail.
-  SMTP remains a standards-based self-hosted option; without a configured
-  driver, messages record to a visible demo outbox.
-- **Accelevents.** Set `ACCELEVENTS_API_KEY` and `ACCELEVENTS_EVENT_URL` to
-  unlock live publishing. Dry runs work without either.
-- **Airtable.** Set `AIRTABLE_PAT` and `AIRTABLE_BASE_ID` to enable a
-  one-way, batched upsert projection. Rostrum remains the canonical store;
-  Airtable receives accepted-speaker and scheduled-session records keyed by
-  stable `Rostrum ID` values. Dry runs work without a token.
-- **Storage.** Set `STORE_DRIVER=sqlite` for a local WAL-backed database, or
-  `STORE_DRIVER=postgres` with `DATABASE_URL` for Postgres. Set
-  `AUDIT_LOG_PATH` when the independent audit ledger should live outside the
-  default `data/` directory, and `BACKUP_DIR` to locate the newest-ten
-  pre-import backups.
-
-See [.env.example](.env.example) for every setting.
-
-## Scope today
-
-One Rostrum instance runs one organization's program: one event workspace and
-one process. Organizer, chair, and observer roles are scoped to that single
-workspace; this release has no multi-tenant account model.
-
-## Development
-
-Install the GoSX CLI and Arbiter for the full check suite:
+The runtime needs only Go. The full contributor gate also pins GoSX and
+Arbiter:
 
 ```bash
 go install m31labs.dev/gosx/cmd/gosx@v0.38.1
 go install m31labs.dev/arbiter/cmd/arbiter@v1.9.0
-```
 
-Then run:
-
-```bash
-make check          # gofmt, template format, policy validation, vet, tests, race
+make check          # formatting, policy validation, vet, tests, race tests
 make build          # production bundle in dist/
-make smoke          # rendered HTML smoke test against a temporary local server
-make release-check  # check plus the committed size budgets
+make smoke          # verify the deterministic read-only demo contract
+make judge-demo     # verify, launch, print judge URLs, clean up on Ctrl-C
+make release-check  # check, size-budget build, and full demo smoke
 ```
 
-## Technical notes
+The app is server-rendered with GoSX. It ships no hand-written browser
+JavaScript; focused GoSX islands supply the workspace switcher, agenda board,
+conditional form fields, link-copy helpers, and public itinerary. The build
+enforces [`size-budget.json`](size-budget.json) and
+[`perf-budget.json`](perf-budget.json).
 
-- Rostrum is built with GoSX, a server-rendered Go component framework. Every
-  route renders complete HTML and works without JavaScript. The application
-  ships no bespoke browser JavaScript of its own.
-- Scheduling and routing rules are Arbiter policy files in `rules/`; the UI
-  shows each fired rule and its reason.
-- The build enforces committed size budgets ([size-budget.json](size-budget.json))
-  and runtime budgets ([perf-budget.json](perf-budget.json)).
+## Documentation
 
-## Deploy
+- [Published documentation site](https://m31-labs.github.io/rostrum/)
+- [Documentation home](docs/index.md)
+- [Judge and organizer guide](docs/judging-guide.md)
+- [Architecture, security, and limitations](docs/architecture.md)
+- [API reference](docs/api.md)
+- [Deployment guide](docs/deployment.md)
+- [Launch-readiness gate](docs/launch-readiness.md)
+- [Visual system](docs/visual-system.md)
+- [Contributing](.github/CONTRIBUTING.md) · [Security](.github/SECURITY.md) ·
+  [Support](.github/SUPPORT.md)
 
-The included Dockerfile packages the verified `dist/` bundle and runs as a
-non-root user. See [docs/deployment.md](docs/deployment.md) for the container
-run command, the persistent volume, production secret requirements, and the
-reverse-proxy boundary.
+## Current scope
 
-The current release gate, external-provider setup, and intentionally deferred
-follow-up work are recorded in [docs/launch-readiness.md](docs/launch-readiness.md).
+One Rostrum instance operates one organization's event workspace. It is not a
+multi-tenant SaaS control plane. The hosted preview is inspection-only; use a
+local run for mutations. Real email delivery, external databases, and live
+Accelevents/Airtable publishing require operator-owned credentials and
+acceptance testing.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+[MIT](LICENSE) © 2026 M31 Labs contributors.

@@ -67,7 +67,7 @@ func liveSync(ctx *action.Context) error {
 	syncErr := client.Sync(ctx.Request.Context(), eventURL, payloads)
 	finishedAt := time.Now().UTC()
 	runStatus := "complete"
-	summary := "Published speakers and scheduled sessions to Accelevents. Rostrum remains the source of truth."
+	summary := "Published speaker profiles and sessions to Accelevents. Rostrum remains the source of truth."
 	lastStatus := "Live sync complete"
 	if syncErr != nil {
 		runStatus = "failed"

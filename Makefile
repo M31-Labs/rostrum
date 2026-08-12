@@ -1,12 +1,21 @@
-.PHONY: dev check test build smoke size-budget perf-budget release-check check-gosx
+.PHONY: dev judge-demo check test build smoke size-budget perf-budget release-check check-gosx
 
 GOSX ?= gosx
 GOSX_VERSION ?= 0.38.1
 PERF_URLS ?= http://localhost:8080/ http://localhost:8080/organizer http://localhost:8080/organizer/agenda http://localhost:8080/organizer/portal http://localhost:8080/public/m31-systems-forum-2026/agenda
 SMOKE_URL ?=
+SMOKE_EXPECTED_VERSION ?=
+JUDGE_DEMO_PORT ?= 8080
 
 dev:
 	DEMO_MODE=memory go run .
+
+# Launch the exact deterministic, read-only fixture used by the hosted preview.
+# The helper builds into a disposable directory, proves the complete demo
+# contract with scripts/smoke.sh, prints the canonical evaluation URLs, and
+# removes the process and fixture on exit.
+judge-demo:
+	JUDGE_DEMO_PORT="$(JUDGE_DEMO_PORT)" scripts/judge-demo.sh
 
 test:
 	go list ./... | grep -v '/dist' | xargs go test
@@ -39,7 +48,7 @@ build: check-gosx
 	find dist/app -type f -name '*.go' -delete
 
 smoke:
-	scripts/smoke.sh $(SMOKE_URL)
+	SMOKE_EXPECTED_VERSION="$(SMOKE_EXPECTED_VERSION)" scripts/smoke.sh "$(SMOKE_URL)"
 
 size-budget: build
 	GOSX=$(GOSX) go run ./cmd/sizecheck -root .
@@ -47,4 +56,4 @@ size-budget: build
 perf-budget:
 	$(GOSX) perf --mobile pixel7 --throttle 4 --coverage --budget perf-budget.json $(PERF_URLS)
 
-release-check: check size-budget
+release-check: check size-budget smoke

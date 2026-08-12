@@ -140,7 +140,7 @@ func WorkspaceChrome() Node {
 						href="/organizer/review"
 						data-gosx-link
 						data-command-entry
-						hidden={needle.Get() != "" && !"review score rubric evaluation ai reviewer".contains(needle.Get())}
+						hidden={needle.Get() != "" && !"review score rubric evaluation human reviewer".contains(needle.Get())}
 					>
 						<span>Review</span>
 						<kbd>G R</kbd>
@@ -229,7 +229,7 @@ func WorkspaceChrome() Node {
 				</nav>
 				<p
 					class="command-empty"
-					hidden={needle.Get() == "" || "overview home today command center health forms routing cfp intake conditional rules submissions proposal inventory applicants status export review score rubric evaluation ai reviewer speakers people participant profiles readiness agenda schedule sessions rooms tracks conflicts calendar communications email messages reminder gmail outlook portal tasks approvals onboarding wiki resources live embeds public iframe gallery code integrations accelevents sync dry run external api settings event configuration timezone venue production new submit attendee itinerary".contains(needle.Get())}
+					hidden={needle.Get() == "" || "overview home today command center health forms routing cfp intake conditional rules submissions proposal inventory applicants status export review score rubric evaluation human reviewer speakers people participant profiles readiness agenda schedule sessions rooms tracks conflicts calendar communications email messages reminder gmail outlook portal tasks approvals onboarding wiki resources live embeds public iframe gallery code integrations accelevents sync dry run external api settings event configuration timezone venue production new submit attendee itinerary".contains(needle.Get())}
 				>No destination matches that search.</p>
 				<footer>
 					<span>

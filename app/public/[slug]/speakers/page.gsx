@@ -17,12 +17,22 @@ func Page() Node {
 			<nav aria-label="Event">
 				<a href={data.event.agendaURL} data-gosx-link>Agenda</a>
 				<a class="active" href={data.event.speakersURL} data-gosx-link>Speakers</a>
+				<a href={data.event.calendarURL}>Calendar ↓</a>
 			</nav>
 		</header>
 		<section class="public-speaker-grid">
 			<Each of={data.speakers} as="speaker">
 				<article class="public-speaker-card">
-					<div class="speaker-portrait">
+					<div class={speaker.portraitClass}>
+						<If cond={speaker.hasHeadshot}>
+							<img
+								src={speaker.headshotURL}
+								alt={"Portrait of " + speaker.name}
+								loading="lazy"
+								width="900"
+								height="900"
+							></img>
+						</If>
 						<span>{speaker.initials}</span>
 						<i aria-hidden="true"></i>
 					</div>

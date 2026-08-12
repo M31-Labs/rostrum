@@ -19,6 +19,44 @@ const icsTimestamp = "20060102T150405Z"
 // stamped CONFIRMED.
 const statusPublished = "published"
 
+// EventCalendar builds the public, subscribe-style calendar for the complete
+// published program. It carries no speaker identity or private workspace
+// state: only scheduled sessions already eligible for the public agenda are
+// emitted. The stable session IDs become stable VEVENT UIDs, so importing an
+// updated feed refreshes existing entries instead of duplicating them.
+func EventCalendar(state domain.State, slug string) ([]byte, string, error) {
+	if strings.TrimSpace(slug) == "" || state.Event.Slug != slug {
+		return nil, "", fmt.Errorf("event %s not found", slug)
+	}
+	var builder strings.Builder
+	writeLine(&builder, "BEGIN:VCALENDAR")
+	writeLine(&builder, "VERSION:2.0")
+	writeLine(&builder, "PRODID:-//M31 Labs//Rostrum//EN")
+	writeLine(&builder, "CALSCALE:GREGORIAN")
+	writeLine(&builder, "METHOD:PUBLISH")
+	writeLine(&builder, "X-WR-CALNAME:"+escape(state.Event.Name))
+	stamp := time.Now().UTC()
+	for _, item := range state.Sessions {
+		if item.Status != statusPublished || !item.Scheduled() {
+			continue
+		}
+		room, _ := state.Room(item.RoomID)
+		writeEvent(&builder, eventFields{
+			uid:         item.ID + "@rostrum.local",
+			stamp:       stamp,
+			starts:      item.StartsAt,
+			ends:        item.EndsAt,
+			summary:     item.Title,
+			description: item.Description,
+			location:    joinLocation(room.Name, state.Event.Location),
+			sequence:    0,
+			status:      "CONFIRMED",
+		})
+	}
+	writeLine(&builder, "END:VCALENDAR")
+	return []byte(builder.String()), domain.Slugify(state.Event.Name) + "-program.ics", nil
+}
+
 // SpeakerCalendar builds a subscribe-style calendar feed (METHOD:PUBLISH)
 // listing every published session in which speakerID appears. A draft
 // session is excluded entirely — it never reaches the feed a speaker might

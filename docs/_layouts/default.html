@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="{{ site.lang | default: 'en-US' }}">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#1e2a24">
+    <meta name="color-scheme" content="light">
+    {% seo %}
+    <link rel="icon" href="{{ '/assets/favicon.svg' | relative_url }}" type="image/svg+xml">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&amp;family=Instrument+Sans:wght@400;500;600&amp;family=Spline+Sans+Mono:wght@400;500&amp;display=swap"
+    >
+    <link rel="stylesheet" href="{{ '/assets/css/site.css' | relative_url }}">
+  </head>
+  <body{% if page.home %} class="page-home"{% endif %}>
+    <a class="skip-link" href="#main-content">Skip to documentation</a>
+
+    <header class="site-header">
+      <a class="brand" href="{{ '/' | relative_url }}" aria-label="Rostrum documentation home">
+        <span class="brand-mark" aria-hidden="true">R</span>
+        <span class="brand-copy">
+          <strong>Rostrum</strong>
+          <small>Operator field guide</small>
+        </span>
+      </a>
+
+      <nav class="primary-nav" aria-label="Primary navigation">
+        <a href="{{ '/judging-guide.html' | relative_url }}">Evaluate</a>
+        <a href="{{ '/architecture.html' | relative_url }}">Understand</a>
+        <a href="{{ '/deployment.html' | relative_url }}">Operate</a>
+      </nav>
+
+      <a class="source-action" href="{{ site.github.repository_url }}">
+        View source <span aria-hidden="true">↗</span>
+      </a>
+    </header>
+
+    <div class="site-frame">
+      <aside class="side-rail" aria-label="Documentation sections">
+        <div class="rail-heading">
+          <span class="folio">Field guide</span>
+          <span class="rail-rule" aria-hidden="true"></span>
+        </div>
+
+        <nav class="doc-nav" aria-label="All documentation">
+          <a{% if page.url == '/' %} class="active" aria-current="page"{% endif %} href="{{ '/' | relative_url }}">
+            <span>01</span> Overview
+          </a>
+          <a{% if page.url contains '/judging-guide' %} class="active" aria-current="page"{% endif %} href="{{ '/judging-guide.html' | relative_url }}">
+            <span>02</span> Judge &amp; organizer
+          </a>
+          <a{% if page.url contains '/architecture' %} class="active" aria-current="page"{% endif %} href="{{ '/architecture.html' | relative_url }}">
+            <span>03</span> Architecture
+          </a>
+          <a{% if page.url contains '/api' %} class="active" aria-current="page"{% endif %} href="{{ '/api.html' | relative_url }}">
+            <span>04</span> Public API
+          </a>
+          <a{% if page.url contains '/deployment' %} class="active" aria-current="page"{% endif %} href="{{ '/deployment.html' | relative_url }}">
+            <span>05</span> Deployment
+          </a>
+          <a{% if page.url contains '/launch-readiness' %} class="active" aria-current="page"{% endif %} href="{{ '/launch-readiness.html' | relative_url }}">
+            <span>06</span> Launch readiness
+          </a>
+          <a{% if page.url contains '/visual-system' %} class="active" aria-current="page"{% endif %} href="{{ '/visual-system.html' | relative_url }}">
+            <span>07</span> Visual system
+          </a>
+        </nav>
+
+        <section class="judge-card" aria-labelledby="judge-card-title">
+          <p class="folio">Fastest proof</p>
+          <h2 id="judge-card-title">One command. Every persona.</h2>
+          <code>make judge-demo</code>
+          <a href="{{ '/judging-guide.html#five-minute-demo-script' | relative_url }}">
+            Follow the five-minute route <span aria-hidden="true">→</span>
+          </a>
+        </section>
+      </aside>
+
+      <main id="main-content" class="content-shell">
+        <header class="content-folio">
+          <p>{{ page.eyebrow | default: 'Rostrum documentation' | escape }}</p>
+          <span>{{ page.nav_order | default: 'Field note' | escape }}</span>
+        </header>
+
+        <article class="prose">
+          {{ content }}
+        </article>
+
+        <footer class="site-footer">
+          <p>
+            Rostrum is MIT licensed. Repository behavior is authoritative;
+            provider and deployment claims require operator-owned evidence.
+          </p>
+          <div>
+            <a href="{{ site.github.repository_url }}/blob/main/README.md">README</a>
+            <a href="{{ site.github.repository_url }}/issues">Issues</a>
+            <a href="{{ site.github.repository_url }}/blob/main/.github/SECURITY.md">Security</a>
+          </div>
+        </footer>
+      </main>
+    </div>
+
+    {% if page.mermaid %}
+      <script type="module">
+        const diagrams = document.querySelectorAll("pre > code.language-mermaid");
+        if (diagrams.length) {
+          const { default: mermaid } = await import("https://cdn.jsdelivr.net/npm/mermaid@11.12.0/dist/mermaid.esm.min.mjs");
+          const styles = getComputedStyle(document.documentElement);
+          mermaid.initialize({
+            startOnLoad: false,
+            securityLevel: "strict",
+            theme: "base",
+            themeVariables: {
+              background: styles.getPropertyValue("--color-surface").trim(),
+              primaryColor: styles.getPropertyValue("--color-accent-soft").trim(),
+              primaryTextColor: styles.getPropertyValue("--color-text").trim(),
+              primaryBorderColor: styles.getPropertyValue("--color-accent").trim(),
+              lineColor: styles.getPropertyValue("--color-text-muted").trim(),
+              secondaryColor: styles.getPropertyValue("--color-surface-muted").trim(),
+              tertiaryColor: styles.getPropertyValue("--color-canvas").trim(),
+              fontFamily: styles.getPropertyValue("--font-body").trim()
+            }
+          });
+          diagrams.forEach((diagram) => {
+            const host = document.createElement("div");
+            host.className = "mermaid";
+            host.textContent = diagram.textContent;
+            diagram.parentElement.replaceWith(host);
+          });
+          await mermaid.run({ nodes: document.querySelectorAll(".mermaid") });
+        }
+      </script>
+    {% endif %}
+  </body>
+</html>

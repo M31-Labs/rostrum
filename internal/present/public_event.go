@@ -47,6 +47,7 @@ func PublicAgenda(state domain.State, slug string, embedded bool) (map[string]an
 		"workspace":    WorkspaceIdentity(state),
 		"event":        publicEvent(state),
 		"tracks":       tracks,
+		"trackSummary": Pluralize(len(tracks), "track", "tracks"),
 		"sessions":     sessions,
 		"sessionCount": len(sessions),
 	}, nil
@@ -78,19 +79,24 @@ func PublicSpeakers(state domain.State, slug string, embedded bool) (map[string]
 			}
 		}
 		headshotURL := publicHeadshotURL(state, headshot, speaker.ID)
+		portraitClass := "speaker-portrait"
+		if headshotURL != "" {
+			portraitClass += " has-headshot"
+		}
 		speakers = append(speakers, map[string]any{
-			"id":          speaker.ID,
-			"name":        speaker.Name(),
-			"initials":    speaker.Initials(),
-			"role":        speaker.Role,
-			"company":     speaker.Company,
-			"biography":   speaker.Biography,
-			"city":        speaker.City,
-			"website":     speaker.WebsiteURL,
-			"linkedin":    speaker.LinkedInURL,
-			"talks":       talks,
-			"headshotURL": headshotURL,
-			"hasHeadshot": headshotURL != "",
+			"id":            speaker.ID,
+			"name":          speaker.Name(),
+			"initials":      speaker.Initials(),
+			"role":          speaker.Role,
+			"company":       speaker.Company,
+			"biography":     speaker.Biography,
+			"city":          speaker.City,
+			"website":       speaker.WebsiteURL,
+			"linkedin":      speaker.LinkedInURL,
+			"talks":         talks,
+			"headshotURL":   headshotURL,
+			"hasHeadshot":   headshotURL != "",
+			"portraitClass": portraitClass,
 		})
 	}
 	sort.Slice(speakers, func(i, j int) bool { return speakers[i]["name"].(string) < speakers[j]["name"].(string) })
@@ -140,6 +146,7 @@ func publicEvent(state domain.State) map[string]any {
 		"location":    state.Event.Location,
 		"agendaURL":   "/public/" + state.Event.Slug + "/agenda",
 		"speakersURL": "/public/" + state.Event.Slug + "/speakers",
+		"calendarURL": "/public-calendar/" + state.Event.Slug + ".ics",
 	}
 }
 
@@ -192,6 +199,16 @@ func publicHeadshotURL(state domain.State, headshotTask *domain.Task, speakerID 
 	item, found := completion(state, headshotTask.ID, speakerID)
 	if !found || item.Status != domain.TaskApproved || item.FileName == "" {
 		return ""
+	}
+	// The deterministic fictional seed ships compact editorial portraits in an
+	// immutable demo-only directory so a local replacement upload cannot delete
+	// a tracked source asset. Once a real upload has StoredPath, its approved
+	// copy and safe extension below always take precedence.
+	if state.Event.ID == "evt_m31_forum_2026" && strings.TrimSpace(item.StoredPath) == "" {
+		switch speakerID {
+		case "spk_maya", "spk_theo", "spk_priya":
+			return "/demo-headshots/" + speakerID + ".webp"
+		}
 	}
 	return "/headshots/" + speakerID + fileExtension(item.FileName)
 }

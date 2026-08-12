@@ -241,7 +241,7 @@ func main() {
 		// the GoSX navigation runtime explicitly at the document boundary.
 		ctx.AddHead(server.NavigationScript())
 		configureRouteRuntime(ctx)
-		return server.HTMLDocument(ctx.Title("Rostrum"), ctx.Head(), body)
+		return rostrumRouteDocument(ctx, body)
 	})
 	if err := router.AddDir(filepath.Join(root, "app"), route.FileRoutesOptions{}); err != nil {
 		log.Fatal(err)
@@ -292,6 +292,7 @@ func main() {
 	// so gate it to organizer-facing roles in live mode. The isolated demo
 	// explicitly uses the same read-only stream as an inspection surface.
 	app.Mount("/live", liveDashboardHandler())
+	app.Mount("/public-calendar/", http.HandlerFunc(publicCalendarDownload))
 	app.Mount("/calendar/", http.HandlerFunc(calendarDownload))
 	app.Mount("/portal-upload/", http.HandlerFunc(portalUpload(root)))
 	app.Mount("/portal-file/", http.HandlerFunc(portalFile(root)))
@@ -334,6 +335,17 @@ func main() {
 
 	log.Printf("Rostrum listening on %s (data: %s)", publicBase, workspace.Path())
 	log.Fatal(app.ListenAndServe(":" + port))
+}
+
+func rostrumRouteDocument(ctx *route.RouteContext, body gosx.Node) gosx.Node {
+	// File routes render their own complete document beneath server.App, so the
+	// language belongs here rather than on the outer app's unused page shell.
+	// Start with GoSX's document to preserve its stream-tail marker, nonce, and
+	// navigation attributes, then add the English-language declaration at the
+	// actual HTML boundary.
+	document := server.HTMLDocumentWithNonce(ctx.Title("Rostrum"), ctx.Nonce(), ctx.Head(), body)
+	html := gosx.RenderHTML(document)
+	return gosx.RawHTML(strings.Replace(html, "<html", `<html lang="en"`, 1))
 }
 
 // startOutboxRunner invokes the persisted outbox at startup and at a modest
@@ -1260,6 +1272,35 @@ func workspaceActor(r *http.Request) string {
 		return "organizer:" + user.ID
 	}
 	return "organizer"
+}
+
+// publicCalendarDownload serves the same published, non-sensitive program
+// shown by the public agenda as an RFC 5545 calendar. It is intentionally a
+// separate route from the signed speaker calendar below: a public feed never
+// needs a speaker ID, portal session, or bearer token.
+func publicCalendarDownload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		w.Header().Set("Allow", "GET, HEAD")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	slug := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/public-calendar/"), ".ics")
+	data, filename, err := programcalendar.EventCalendar(appstate.MustGet().Snapshot(), slug)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Cache-Control", "public, max-age=60")
+	w.Header().Set("Content-Type", "text/calendar; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(http.StatusOK)
+	if r.Method == http.MethodHead {
+		return
+	}
+	if _, err := w.Write(data); err != nil {
+		log.Printf("write public calendar: %v", err)
+	}
 }
 
 // calendarDownload serves GET /calendar/{speaker}.ics.

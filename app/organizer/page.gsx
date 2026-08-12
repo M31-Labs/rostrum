@@ -85,7 +85,7 @@ func Page() Node {
 		<section class="panel schedule-preview">
 			<header class="panel-header">
 				<div>
-					<p class="panel-kicker">October 15</p>
+					<p class="panel-kicker">{data.event.agendaDate}</p>
 					<h2>Agenda pulse</h2>
 				</div>
 				<a href="/organizer/agenda" data-gosx-link>Open scheduler</a>

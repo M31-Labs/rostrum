@@ -8,6 +8,34 @@ import (
 	"github.com/m31-labs/rostrum/internal/domain"
 )
 
+func TestEventCalendarContainsOnlyPublishedScheduledProgram(t *testing.T) {
+	state := domain.Seed(time.Now().UTC())
+	data, name, err := EventCalendar(state, state.Event.Slug)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(data)
+	if name != "m31-systems-forum-2026-program.ics" {
+		t.Fatalf("unexpected filename: %s", name)
+	}
+	if !strings.Contains(content, "METHOD:PUBLISH\r\n") || !strings.Contains(content, "SUMMARY:Memory Without Mystery") {
+		t.Fatalf("public calendar omitted a published session:\n%s", content)
+	}
+	if strings.Contains(content, "Evaluation Plans That Survive Reality") {
+		t.Fatalf("public calendar leaked a draft session:\n%s", content)
+	}
+	if got := strings.Count(content, "BEGIN:VEVENT\r\n"); got != 6 {
+		t.Fatalf("public calendar emitted %d sessions, want 6", got)
+	}
+}
+
+func TestEventCalendarRejectsUnknownSlug(t *testing.T) {
+	state := domain.Seed(time.Now().UTC())
+	if _, _, err := EventCalendar(state, "another-event"); err == nil {
+		t.Fatal("EventCalendar accepted an unknown event slug")
+	}
+}
+
 func TestSpeakerCalendarContainsAssignedSessions(t *testing.T) {
 	state := domain.Seed(time.Now().UTC())
 	data, name, err := SpeakerCalendar(state, "spk_maya")

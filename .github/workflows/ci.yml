@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Go, policies, rendered flows, and budgets
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Go from go.mod
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install pinned build tools
+        run: |
+          go install m31labs.dev/gosx/cmd/gosx@v0.38.1
+          go install m31labs.dev/arbiter/cmd/arbiter@v1.9.0
+
+      - name: Run formatting, policy, vet, unit, and race checks
+        run: make check
+
+      - name: Exercise rendered headline flows
+        run: make smoke
+
+      - name: Build and enforce distribution budgets
+        run: make size-budget

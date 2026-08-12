@@ -1,7 +1,9 @@
 package publicapi
 
 import (
+	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/m31-labs/rostrum/internal/domain"
 )
@@ -46,12 +48,46 @@ func Speakers(state domain.State) map[string]any {
 		rows = append(rows, map[string]any{
 			"id": speaker.ID, "name": speaker.Name(), "pronouns": speaker.Pronouns,
 			"role": speaker.Role, "company": speaker.Company, "biography": speaker.Biography,
-			"headshotUrl": speaker.HeadshotURL, "websiteUrl": speaker.WebsiteURL,
+			"headshotUrl": approvedHeadshotURL(state, speaker.ID), "websiteUrl": speaker.WebsiteURL,
 			"linkedInUrl": speaker.LinkedInURL, "city": speaker.City, "sessionIds": sessionIDs,
 		})
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i]["name"].(string) < rows[j]["name"].(string) })
 	return map[string]any{"eventId": state.Event.ID, "speakers": rows}
+}
+
+// approvedHeadshotURL mirrors the public gallery's consent boundary. The
+// speaker model carries an authenticated portal-file link for its owner; the
+// public API must instead expose the static copy created only after organizer
+// approval, or no URL at all.
+func approvedHeadshotURL(state domain.State, speakerID string) string {
+	headshotTaskID := ""
+	for _, task := range state.Tasks {
+		if task.Active() && (task.Type == "headshot" || task.ID == "task_headshot") {
+			headshotTaskID = task.ID
+			break
+		}
+	}
+	if headshotTaskID == "" {
+		return ""
+	}
+	for _, completion := range state.TaskCompletions {
+		if completion.TaskID != headshotTaskID || completion.SpeakerID != speakerID || completion.Status != domain.TaskApproved || strings.TrimSpace(completion.FileName) == "" {
+			continue
+		}
+		if state.Event.ID == "evt_m31_forum_2026" && strings.TrimSpace(completion.StoredPath) == "" {
+			switch speakerID {
+			case "spk_maya", "spk_theo", "spk_priya":
+				return "/demo-headshots/" + speakerID + ".webp"
+			}
+		}
+		extension := strings.ToLower(filepath.Ext(completion.FileName))
+		if extension == "" {
+			extension = ".jpg"
+		}
+		return "/headshots/" + speakerID + extension
+	}
+	return ""
 }
 
 func Schedule(state domain.State) map[string]any {

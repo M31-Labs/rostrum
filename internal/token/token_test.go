@@ -1,6 +1,7 @@
 package token
 
 import (
+	"encoding/json"
 	"strings"
 	"sync"
 	"testing"
@@ -70,5 +71,55 @@ func TestNewDerivesFromEnvironment(t *testing.T) {
 	signed := first.Sign("spk_maya")
 	if _, ok := first.Verify(signed); !ok {
 		t.Fatal("process-wide signer could not verify its own token")
+	}
+}
+
+func TestDemoSpeakerTokenRequiresDemoMode(t *testing.T) {
+	// Model a demo and live deployment with the same secret and seeded IDs.
+	// The process mode, not deployment hygiene, must enforce the boundary.
+	demoSigner := newToken("shared-demo-and-live-secret")
+	liveVerifier := newToken("shared-demo-and-live-secret")
+	t.Setenv("APP_MODE", "demo")
+	signed := demoSigner.SignDemo("spk_maya")
+	if signed == "" {
+		t.Fatal("SignDemo returned an empty token")
+	}
+
+	if id, ok := demoSigner.Verify(signed); !ok || id != "spk_maya" {
+		t.Fatalf("demo process rejected demo token: id=%q ok=%v", id, ok)
+	}
+
+	t.Setenv("APP_MODE", "live")
+	if id, ok := liveVerifier.Verify(signed); ok || id != "" {
+		t.Fatalf("live process accepted demo token: id=%q ok=%v", id, ok)
+	}
+}
+
+func TestNormalSpeakerTokenRemainsValidAcrossModes(t *testing.T) {
+	tok := newToken("shared-demo-and-live-secret")
+	signed := tok.Sign("spk_maya")
+
+	// omitempty preserves the original sid+exp wire shape for ordinary links.
+	bodySegment, _, ok := strings.Cut(signed, ".")
+	if !ok {
+		t.Fatalf("normal token has unexpected shape: %q", signed)
+	}
+	body, err := decodeSegment(bodySegment)
+	if err != nil {
+		t.Fatalf("decode normal token: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("decode normal claims: %v", err)
+	}
+	if _, present := payload["aud"]; present {
+		t.Fatalf("normal token unexpectedly changed wire shape: %s", body)
+	}
+
+	for _, mode := range []string{"live", "demo"} {
+		t.Setenv("APP_MODE", mode)
+		if id, valid := tok.Verify(signed); !valid || id != "spk_maya" {
+			t.Fatalf("normal token rejected in %s mode: id=%q ok=%v", mode, id, valid)
+		}
 	}
 }

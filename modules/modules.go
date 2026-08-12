@@ -20,4 +20,5 @@ import (
 	_ "github.com/m31-labs/rostrum/app/review"
 	_ "github.com/m31-labs/rostrum/app/setup"
 	_ "github.com/m31-labs/rostrum/app/submit"
+	_ "github.com/m31-labs/rostrum/app/tour"
 )

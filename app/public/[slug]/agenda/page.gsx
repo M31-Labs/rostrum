@@ -79,6 +79,7 @@ func Page() Node {
 			<nav aria-label="Event">
 				<a class="active" href={data.event.agendaURL} data-gosx-link>Agenda</a>
 				<a href={data.event.speakersURL} data-gosx-link>Speakers</a>
+				<a href={data.event.calendarURL}>Calendar ↓</a>
 			</nav>
 		</header>
 		<section class="public-agenda-intro">
@@ -86,7 +87,9 @@ func Page() Node {
 				<h2>Build your day.</h2>
 				<p>
 					{data.sessionCount}
-					sessions across four tracks. Add any session to a personal itinerary stored on this device.
+					sessions across
+					{data.trackSummary}
+					. Add any session to a personal itinerary stored on this device.
 				</p>
 			</div>
 			<div class="track-legend">

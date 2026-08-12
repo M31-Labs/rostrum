@@ -22,7 +22,10 @@ import (
 // under this key never verifies against the portal Token's key (and a
 // portal token never verifies against this one), even when both processes
 // read the identical SESSION_SECRET value.
-const reviewerKeyPurpose = "rostrum.reviewer.token.v1:"
+const (
+	reviewerKeyPurpose     = "rostrum.reviewer.token.v1:"
+	reviewerDemoKeyPurpose = "rostrum.reviewer.demo-token.v1:"
+)
 
 // ReviewerToken signs and verifies reviewer identity tokens for one
 // process. It mirrors Token's HMAC-SHA256, URL-safe base64, body.sig shape
@@ -31,8 +34,9 @@ const reviewerKeyPurpose = "rostrum.reviewer.token.v1:"
 // *Token and a *ReviewerToken are different things, and the derived key
 // enforces it again at the byte level.
 type ReviewerToken struct {
-	key []byte
-	ttl time.Duration
+	key     []byte
+	demoKey []byte
+	ttl     time.Duration
 }
 
 var (
@@ -56,7 +60,8 @@ func newReviewerToken(secret string) *ReviewerToken {
 		secret = developmentSecret
 	}
 	sum := sha256.Sum256([]byte(reviewerKeyPurpose + secret))
-	return &ReviewerToken{key: sum[:], ttl: TTL}
+	demoSum := sha256.Sum256([]byte(reviewerDemoKeyPurpose + secret))
+	return &ReviewerToken{key: sum[:], demoKey: demoSum[:], ttl: TTL}
 }
 
 // reviewerClaims is the signed payload for a reviewer token. Its field name
@@ -67,6 +72,7 @@ func newReviewerToken(secret string) *ReviewerToken {
 type reviewerClaims struct {
 	ReviewerID string `json:"rvid"`
 	ExpiresAt  int64  `json:"exp"`
+	Audience   string `json:"aud,omitempty"`
 }
 
 // SignReviewer returns a signed, expiring token that binds reviewerID to
@@ -78,10 +84,25 @@ func (t *ReviewerToken) SignReviewer(reviewerID string) string {
 		ExpiresAt:  time.Now().Add(t.ttl).Unix(),
 	})
 	if err != nil {
-		// reviewerClaims has two primitive fields and never fails to marshal.
+		// reviewerClaims contains only primitive fields and never fails to marshal.
 		return ""
 	}
 	return encodeSegment(body) + "." + encodeSegment(t.sign(body))
+}
+
+// SignReviewerDemo returns a demo-only reviewer token for a persona link on
+// /tour. A live process rejects it even when it has the same SESSION_SECRET
+// and reviewer records as the demo process.
+func (t *ReviewerToken) SignReviewerDemo(reviewerID string) string {
+	body, err := json.Marshal(reviewerClaims{
+		ReviewerID: strings.TrimSpace(reviewerID),
+		ExpiresAt:  time.Now().Add(t.ttl).Unix(),
+		Audience:   demoAudience,
+	})
+	if err != nil {
+		return ""
+	}
+	return encodeSegment(body) + "." + encodeSegment(t.signDemo(body))
 }
 
 // VerifyReviewer reports the reviewer ID bound to tok when tok carries a
@@ -103,16 +124,21 @@ func (t *ReviewerToken) VerifyReviewer(tok string) (reviewerID string, ok bool) 
 	if err != nil {
 		return "", false
 	}
-	// hmac.Equal compares MACs in constant time so a forged or truncated
-	// signature never leaks timing information about the correct value.
-	if !hmac.Equal(sig, t.sign(body)) {
+	// Authenticate before parsing the body. Demo signatures are considered
+	// only by a process explicitly running in demo mode.
+	wantAudience := ""
+	switch {
+	case hmac.Equal(sig, t.sign(body)):
+	case demoModeEnabled() && hmac.Equal(sig, t.signDemo(body)):
+		wantAudience = demoAudience
+	default:
 		return "", false
 	}
 	var c reviewerClaims
 	if err := json.Unmarshal(body, &c); err != nil {
 		return "", false
 	}
-	if c.ReviewerID == "" {
+	if c.ReviewerID == "" || c.Audience != wantAudience {
 		return "", false
 	}
 	if time.Now().Unix() > c.ExpiresAt {
@@ -122,7 +148,9 @@ func (t *ReviewerToken) VerifyReviewer(tok string) (reviewerID string, ok bool) 
 }
 
 func (t *ReviewerToken) sign(body []byte) []byte {
-	mac := hmac.New(sha256.New, t.key)
-	mac.Write(body)
-	return mac.Sum(nil)
+	return signWithKey(t.key, body)
+}
+
+func (t *ReviewerToken) signDemo(body []byte) []byte {
+	return signWithKey(t.demoKey, body)
 }

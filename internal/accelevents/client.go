@@ -51,15 +51,10 @@ type Client struct {
 func BuildPayloads(state domain.State) Payloads {
 	activeSpeakers := make(map[string]struct{})
 	for _, item := range state.Sessions {
-		for _, speakerID := range item.SpeakerIDs {
-			activeSpeakers[speakerID] = struct{}{}
-		}
-	}
-	for _, submission := range state.Submissions {
-		if submission.Status != domain.SubmissionAccepted && submission.Status != domain.SubmissionAcceptedQueue {
+		if item.Status != "published" || !item.Scheduled() {
 			continue
 		}
-		for _, speakerID := range submission.SpeakerIDs {
+		for _, speakerID := range item.SpeakerIDs {
 			activeSpeakers[speakerID] = struct{}{}
 		}
 	}
@@ -75,7 +70,7 @@ func BuildPayloads(state domain.State) Payloads {
 	}
 	sessions := make([]SessionPayload, 0, len(state.Sessions))
 	for _, item := range state.Sessions {
-		if !item.Scheduled() || item.Status == "cancelled" {
+		if !item.Scheduled() || item.Status != "published" {
 			continue
 		}
 		room, _ := state.Room(item.RoomID)

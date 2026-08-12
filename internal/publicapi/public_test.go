@@ -42,3 +42,46 @@ func TestScheduleIncludesOnlyPublishedSessions(t *testing.T) {
 		}
 	}
 }
+
+func TestSpeakersExposeOnlyApprovedPublicHeadshotProjection(t *testing.T) {
+	state := domain.Seed(time.Now().UTC())
+	for index := range state.Speakers {
+		state.Speakers[index].HeadshotURL = "/portal-file/private-completion"
+	}
+	payload := Speakers(state)
+	rows := payload["speakers"].([]map[string]any)
+	byID := make(map[string]map[string]any, len(rows))
+	for _, row := range rows {
+		byID[row["id"].(string)] = row
+	}
+	if got := byID["spk_maya"]["headshotUrl"]; got != "/demo-headshots/spk_maya.webp" {
+		t.Fatalf("approved public headshot URL = %q", got)
+	}
+	if got := byID["spk_lina"]["headshotUrl"]; got != "" {
+		t.Fatalf("declined headshot leaked as %q", got)
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "/portal-file/") {
+		t.Fatalf("public speaker API exposed authenticated portal URL: %s", data)
+	}
+}
+
+func TestSpeakersApprovedReplacementOverridesSeedPortrait(t *testing.T) {
+	state := domain.Seed(time.Now().UTC())
+	for index := range state.TaskCompletions {
+		completion := &state.TaskCompletions[index]
+		if completion.TaskID == "task_headshot" && completion.SpeakerID == "spk_maya" {
+			completion.FileName = "maya-replacement.PNG"
+			completion.StoredPath = "/private/uploads/maya-replacement"
+		}
+	}
+	rows := Speakers(state)["speakers"].([]map[string]any)
+	for _, row := range rows {
+		if row["id"] == "spk_maya" && row["headshotUrl"] != "/headshots/spk_maya.png" {
+			t.Fatalf("replacement headshotUrl = %q, want approved upload", row["headshotUrl"])
+		}
+	}
+}

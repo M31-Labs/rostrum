@@ -11,13 +11,18 @@ import (
 	"github.com/m31-labs/rostrum/internal/domain"
 )
 
-func TestBuildPayloadsUsesScheduledProgram(t *testing.T) {
+func TestBuildPayloadsUsesOnlyPublishedProgram(t *testing.T) {
 	payloads := BuildPayloads(domain.Seed(time.Now().UTC()))
-	if len(payloads.Sessions) != 8 || len(payloads.Speakers) != 8 {
+	if len(payloads.Sessions) != 6 || len(payloads.Speakers) != 6 {
 		t.Fatalf("unexpected payload counts: %d sessions, %d speakers", len(payloads.Sessions), len(payloads.Speakers))
 	}
-	if payloads.Sessions[0].Title == "" || payloads.Sessions[0].StartTime == "" {
-		t.Fatalf("incomplete session payload: %#v", payloads.Sessions[0])
+	for _, session := range payloads.Sessions {
+		if session.Title == "" || session.StartTime == "" {
+			t.Fatalf("incomplete session payload: %#v", session)
+		}
+		if session.ExternalID == "ses_eval" {
+			t.Fatalf("draft session leaked into payload: %#v", session)
+		}
 	}
 }
 

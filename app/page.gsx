@@ -46,7 +46,7 @@ func Page() Node {
 			<aside class="event-ticket" aria-label={data.demoMode ? "Demo event" : "Event"}>
 				<div class="ticket-topline">
 					<span>Live workspace</span>
-					<span>2026</span>
+					<span>{data.event.year}</span>
 				</div>
 				<div class="ticket-orbit" aria-hidden="true">
 					<span></span>
@@ -91,9 +91,12 @@ func Page() Node {
 				Routing, review, and scheduling each leave a visible trace. When someone asks why a talk landed where it did, the answer is one click away — not in someone’s inbox.
 			</p>
 			<div class="mission-links">
+				<a href="/tour" data-gosx-link>Take the product tour</a>
 				<a href="/organizer/agenda" data-gosx-link>See the scheduling rules</a>
 				<a href="/organizer/forms" data-gosx-link>See the routing rules</a>
 				<a href="/api/v1/workspace">Open the JSON API</a>
+				<a href="https://m31-labs.github.io/rostrum/" target="_blank" rel="noreferrer">Read the field guide ↗</a>
+				<a href="https://github.com/M31-Labs/rostrum" target="_blank" rel="noreferrer">Browse the source ↗</a>
 			</div>
 			<p class="colophon">
 				Open-source, self-hostable, one binary. Built with GoSX.

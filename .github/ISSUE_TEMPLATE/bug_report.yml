@@ -1,0 +1,74 @@
+name: Bug report
+description: Report a reproducible Rostrum defect using fictional or redacted data.
+title: "bug: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve Rostrum. Do not include credentials, setup
+        tokens, signed links, real speaker data, exports, uploads, or audit logs.
+        Report suspected vulnerabilities privately under `.github/SECURITY.md`.
+  - type: input
+    id: version
+    attributes:
+      label: Commit or Rostrum version
+      description: Commit SHA or the redacted `/api/health` version value.
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Surface
+      options:
+        - Local interactive run
+        - Hosted read-only preview
+        - Production-like deployment
+        - Tests or build tooling
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Go version, browser if relevant, and storage driver.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction
+      description: Minimal numbered steps using the fictional seed where possible.
+      placeholder: |
+        1. Start with …
+        2. Open …
+        3. Choose …
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: observed
+    attributes:
+      label: Observed behavior
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Safe evidence
+      description: Redacted logs or screenshots containing fictional data only.
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety check
+      options:
+        - label: I removed secrets, signed links, setup tokens, and real event data.
+          required: true
+        - label: This is not a vulnerability report.
+          required: true

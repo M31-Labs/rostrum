@@ -27,11 +27,11 @@ func TestPublicSpeakersHeadshotRequiresApproval(t *testing.T) {
 	tests := []struct {
 		id, want string
 	}{
-		{"spk_maya", "/headshots/spk_maya.jpg"},   // TaskApproved, maya-chen-headshot.jpg
-		{"spk_theo", "/headshots/spk_theo.png"},   // TaskApproved, theo-okafor.png
-		{"spk_priya", "/headshots/spk_priya.jpg"}, // TaskApproved, priya-nair.jpg
-		{"spk_lina", ""},                          // TaskDeclined
-		{"spk_elliot", ""},                        // TaskSubmitted, not yet approved
+		{"spk_maya", "/demo-headshots/spk_maya.webp"},   // Approved fictional seed portrait.
+		{"spk_theo", "/demo-headshots/spk_theo.webp"},   // Approved fictional seed portrait.
+		{"spk_priya", "/demo-headshots/spk_priya.webp"}, // Approved fictional seed portrait.
+		{"spk_lina", ""},   // TaskDeclined
+		{"spk_elliot", ""}, // TaskSubmitted, not yet approved
 	}
 	for _, test := range tests {
 		speaker, found := byID[test.id]
@@ -43,6 +43,26 @@ func TestPublicSpeakersHeadshotRequiresApproval(t *testing.T) {
 		}
 		if got := speaker["hasHeadshot"].(bool); got != (test.want != "") {
 			t.Fatalf("%s hasHeadshot = %v, want %v", test.id, got, test.want != "")
+		}
+	}
+}
+
+func TestPublicSpeakersApprovedReplacementOverridesSeedPortrait(t *testing.T) {
+	state := domain.Seed(time.Now().UTC())
+	for index := range state.TaskCompletions {
+		completion := &state.TaskCompletions[index]
+		if completion.TaskID == "task_headshot" && completion.SpeakerID == "spk_maya" {
+			completion.FileName = "maya-replacement.PNG"
+			completion.StoredPath = "/private/uploads/maya-replacement"
+		}
+	}
+	view, err := PublicSpeakers(state, state.Event.Slug, false)
+	if err != nil {
+		t.Fatalf("PublicSpeakers: %v", err)
+	}
+	for _, speaker := range view["speakers"].([]map[string]any) {
+		if speaker["id"] == "spk_maya" && speaker["headshotURL"] != "/headshots/spk_maya.png" {
+			t.Fatalf("replacement headshotURL = %q, want approved upload", speaker["headshotURL"])
 		}
 	}
 }

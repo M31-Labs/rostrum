@@ -88,10 +88,11 @@ func Overview(state domain.State) map[string]any {
 		"demoMode":  DemoMode(),
 		"workspace": WorkspaceIdentity(state),
 		"event": map[string]any{
-			"name":     state.Event.Name,
-			"phase":    "Program build",
-			"dates":    state.Event.StartsAt.Format("Jan 02") + "–" + state.Event.EndsAt.Format("02, 2006"),
-			"location": state.Event.Location,
+			"name":       state.Event.Name,
+			"phase":      "Program build",
+			"dates":      state.Event.StartsAt.Format("Jan 02") + "–" + state.Event.EndsAt.Format("02, 2006"),
+			"agendaDate": state.Event.StartsAt.Format("January 02"),
+			"location":   state.Event.Location,
 		},
 		"metrics": []map[string]any{
 			{"label": "Submissions", "value": len(state.Submissions), "detail": fmt.Sprintf("%d routed automatically", len(state.Submissions)), "href": "/organizer/submissions"},
