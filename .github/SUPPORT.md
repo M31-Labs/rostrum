@@ -11,6 +11,8 @@ availability SLA.
   report using the repository issue template.
 - For feature proposals, open a feature request and describe the organizer or
   speaker problem before the proposed implementation.
+- For project conversation, collaboration, or implementation help, contact
+  [M31 Labs](https://m31labs.dev/build).
 - For vulnerabilities or anything containing real event data, follow the
   [security policy](SECURITY.md) and use a private channel.
 

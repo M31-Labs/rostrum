@@ -7,9 +7,11 @@ working secrets, signed links, setup tokens, real speaker data, or exploit data
 in a public thread.
 
 Use GitHub's private vulnerability reporting for this repository when it is
-available. If that option is unavailable, contact the repository owner through
-the private channel supplied with your evaluation or collaboration access.
-Include:
+available. If that option is unavailable, ask
+[M31 Labs](https://m31labs.dev/build) for a private security channel. Put only
+contact details and a safe, high-level description in that first message; do
+not paste exploit data, secrets, signed links, or real event data into the
+contact form. In the private report, include:
 
 - affected commit or release identifier;
 - affected route or component;

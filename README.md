@@ -226,6 +226,9 @@ enforces [`size-budget.json`](size-budget.json) and
 - [Contributing](.github/CONTRIBUTING.md) · [Security](.github/SECURITY.md) ·
   [Support](.github/SUPPORT.md)
 
+Questions, collaboration, or implementation work belong with
+[M31 Labs](https://m31labs.dev/build), not a maintainer's personal inbox.
+
 ## Current scope
 
 One Rostrum instance operates one organization's event workspace. It is not a

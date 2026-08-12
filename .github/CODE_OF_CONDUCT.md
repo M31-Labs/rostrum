@@ -23,9 +23,10 @@ are not acceptable.
 ## Scope and enforcement
 
 This standard applies in repository discussions, reviews, issues, and project
-spaces where someone represents Rostrum. Report conduct concerns privately to
-the repository owner through the channel supplied with your collaboration or
-evaluation access. Do not expose a target or reporter in a public issue.
+spaces where someone represents Rostrum. Ask
+[M31 Labs](https://m31labs.dev/build) for a private conduct-reporting channel;
+put only contact details and a safe, high-level description in the first
+message. Do not expose a target or reporter in a public issue or contact form.
 
 Maintainers may edit or remove content, pause a discussion, restrict
 participation, or remove access when needed to protect the community. Reports
