@@ -23,6 +23,15 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v6
 
+      - name: Set up TinyGo-compatible Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: 1.25.9
+          cache: false
+
+      - name: Record TinyGo-compatible SDK
+        run: echo "GOSX_TINYGO_GOROOT=$(go env GOROOT)" >> "$GITHUB_ENV"
+
       - name: Set up Go from go.mod
         uses: actions/setup-go@v7
         with:
@@ -42,6 +51,20 @@ jobs:
           tar --extract --gzip --file "$archive" --directory "$RUNNER_TEMP"
           echo "$RUNNER_TEMP/tinygo/bin" >> "$GITHUB_PATH"
           "$RUNNER_TEMP/tinygo/bin/tinygo" version
+
+      - name: Install pinned wasm optimizer
+        env:
+          BINARYEN_VERSION: 125
+          BINARYEN_SHA256: 7c3bc16599c8274a04d34a504fe4be2047884f900e0e2da2f6fb9cd667183be4
+        run: |
+          archive="$RUNNER_TEMP/binaryen.tar.gz"
+          curl --fail --location --retry 3 --silent --show-error \
+            --output "$archive" \
+            "https://github.com/WebAssembly/binaryen/releases/download/version_${BINARYEN_VERSION}/binaryen-version_${BINARYEN_VERSION}-x86_64-linux.tar.gz"
+          echo "${BINARYEN_SHA256}  ${archive}" | sha256sum --check --strict
+          tar --extract --gzip --file "$archive" --directory "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/binaryen-version_${BINARYEN_VERSION}/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/binaryen-version_${BINARYEN_VERSION}/bin/wasm-opt" --version
 
       - name: Install pinned Go build tools
         run: |
