@@ -1,1 +1,8 @@
 blank_issues_enabled: false
+contact_links:
+  - name: Talk to M31 Labs
+    url: https://m31labs.dev/build
+    about: Discuss collaboration, implementation help, or a project that needs Rostrum.
+  - name: Report a vulnerability privately
+    url: https://github.com/M31-Labs/rostrum/security/advisories/new
+    about: Share security reports through GitHub's private vulnerability channel.
