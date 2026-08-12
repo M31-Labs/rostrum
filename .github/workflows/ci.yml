@@ -29,7 +29,21 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Install pinned build tools
+      - name: Install pinned TinyGo
+        env:
+          TINYGO_VERSION: 0.40.1
+          TINYGO_SHA256: 064fc0c07f4d71f7369b168c337caa88ef32a6b00b16449cea44790ccadfc2b4
+        run: |
+          archive="$RUNNER_TEMP/tinygo.tar.gz"
+          curl --fail --location --retry 3 --silent --show-error \
+            --output "$archive" \
+            "https://github.com/tinygo-org/tinygo/releases/download/v${TINYGO_VERSION}/tinygo${TINYGO_VERSION}.linux-amd64.tar.gz"
+          echo "${TINYGO_SHA256}  ${archive}" | sha256sum --check --strict
+          tar --extract --gzip --file "$archive" --directory "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/tinygo/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/tinygo/bin/tinygo" version
+
+      - name: Install pinned Go build tools
         run: |
           go install m31labs.dev/gosx/cmd/gosx@v0.38.1
           go install m31labs.dev/arbiter/cmd/arbiter@v1.9.0
