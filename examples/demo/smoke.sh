@@ -155,9 +155,9 @@ assert_body_lacks_markup() {
 assert_observer_page() {
 	label=$1
 	if grep -Eq '<form[^>]*method="post"' "$BODY"; then
-		fail "$label still renders a mutation form in observer mode"
+		fail "$label still renders a server mutation form in observer mode"
 	else
-		pass "$label renders no mutation form"
+		pass "$label renders no server mutation form"
 	fi
 	if grep -Eq '<input[^>]*type="file"' "$BODY"; then
 		fail "$label still renders a file input in observer mode"
@@ -437,8 +437,14 @@ assert_page "/login" "identity explanation" "Sign-in and identity setup are disa
 assert_body_text "identity explanation" "Explore the full organizer workspace with fictional data."
 assert_page "/submit/systems-forum-cfp" "submitter CFP" "Submission journey preview."
 assert_observer_page "submitter CFP"
-assert_body_lacks_text "submitter CFP" "Save draft"
-assert_body_lacks_text "submitter CFP" "Submit proposal"
+assert_body_text "submitter CFP" "Save draft"
+assert_body_text "submitter CFP" "Submit proposal"
+assert_body_text "submitter CFP" "client-only walkthrough"
+if grep -Eq '<form[^>]*(method="post"|action="[^"]*__actions/)' "$BODY"; then
+	fail "submitter CFP exposes a backend mutation form in observer mode"
+else
+	pass "submitter CFP actions stay client-only in observer mode"
+fi
 
 # The product tour is also the safe credential-free bridge into the two
 # signed-link personas. Extract its generated URLs rather than hardcoding a

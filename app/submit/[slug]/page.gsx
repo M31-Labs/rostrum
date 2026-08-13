@@ -174,6 +174,125 @@ func ConditionalFormatFields(props any) Node {
 	</div>
 }
 
+//gosx:island
+func PreviewSubmissionForm(props any) Node {
+	status := signal.New("")
+	saveDraft := func() {
+		status.Set("Demo only: your draft is staged in this walkthrough. Nothing was sent or saved.")
+	}
+	submitProposal := func() {
+		status.Set("Demo only: your proposal is ready for review. Nothing was sent or saved.")
+	}
+	return <form
+		class="public-form preview-form-interactive"
+		method="get"
+		action=""
+		onSubmit={submitProposal}
+		aria-describedby="preview-submission-status"
+		data-preview-only="true"
+	>
+		<p class="form-status" id="preview-submission-status" role="status" aria-live="polite">{status.Get()}</p>
+		<fieldset>
+			<legend>
+				<span>01</span>
+				Proposal
+			</legend>
+			<Each of={props.proposalFields} as="field">
+				<label class="field-row">
+					<span>
+						{field.label}
+						<If cond={field.required}>
+							<b>Required</b>
+						</If>
+					</span>
+					<If cond={field.isTextarea}>
+						<textarea
+							name={field.id}
+							maxlength={field.maxLength}
+							placeholder={field.placeholder}
+							required={field.required}
+						></textarea>
+					</If>
+					<If cond={field.isSelect}>
+						<select name={field.id} required={field.required}>
+							<option value="">{"Choose " + field.label}</option>
+							<Each of={field.options} as="option">
+								<option value={option.value}>{option.label}</option>
+							</Each>
+						</select>
+					</If>
+					<If cond={field.isInput}>
+						<input
+							type={field.inputType}
+							name={field.id}
+							maxlength={field.maxLength}
+							placeholder={field.placeholder}
+							required={field.required}
+						></input>
+					</If>
+					<If cond={field.help != ""}>
+						<small>{field.help}</small>
+					</If>
+				</label>
+			</Each>
+		</fieldset>
+		<fieldset>
+			<legend>
+				<span>02</span>
+				Participant
+			</legend>
+			<Each of={props.participantFields} as="field">
+				<label class="field-row">
+					<span>
+						{field.label}
+						<If cond={field.required}>
+							<b>Required</b>
+						</If>
+					</span>
+					<If cond={field.isTextarea}>
+						<textarea
+							name={field.id}
+							maxlength={field.maxLength}
+							placeholder={field.placeholder}
+							required={field.required}
+						></textarea>
+					</If>
+					<If cond={field.isSelect}>
+						<select name={field.id} required={field.required}>
+							<option value="">{"Choose " + field.label}</option>
+							<Each of={field.options} as="option">
+								<option value={option.value}>{option.label}</option>
+							</Each>
+						</select>
+					</If>
+					<If cond={field.isInput}>
+						<input
+							type={field.inputType}
+							name={field.id}
+							maxlength={field.maxLength}
+							placeholder={field.placeholder}
+							required={field.required}
+						></input>
+					</If>
+					<If cond={field.help != ""}>
+						<small>{field.help}</small>
+					</If>
+				</label>
+			</Each>
+		</fieldset>
+		<footer>
+			<p>
+				This is a client-only walkthrough. Try the fields and actions; no request, email, or workspace record is created.
+			</p>
+			<button class="button" type="button" onClick={saveDraft}>Save draft</button>
+			<button class="button button-primary" type="submit">
+				Submit proposal
+				<span aria-hidden="true">→</span>
+			</button>
+		</footer>
+	</form>
+}
+
 func Page() Node {
 	return <main id="main-content" class="submission-flow">
 		<aside class="submission-context">
@@ -226,7 +345,7 @@ func Page() Node {
 				<div class="closed-notice" role="status">
 					<strong>Submission journey preview.</strong>
 					<p>
-						The live call’s questions and conditional structure are visible below; draft and submit controls are not shown.
+						Try the live call’s questions and conditional structure below. Save draft and Submit proposal are simulated in your browser only; nothing is sent or saved.
 					</p>
 				</div>
 			</If>
@@ -307,42 +426,7 @@ func Page() Node {
 				</ActionForm>
 			</If>
 			<If cond={data.form.open && data.readOnlyPreview}>
-				<div class="public-form preview-form-snapshot">
-					<fieldset>
-						<legend>
-							<span>01</span>
-							Proposal
-						</legend>
-						<Each of={data.proposalFields} as="field">
-							<div class="field-row">
-								<strong>{field.label}</strong>
-								<If cond={field.required}>
-									<small>Required</small>
-								</If>
-								<If cond={field.help != ""}>
-									<p>{field.help}</p>
-								</If>
-							</div>
-						</Each>
-					</fieldset>
-					<fieldset>
-						<legend>
-							<span>02</span>
-							Participant
-						</legend>
-						<Each of={data.participantFields} as="field">
-							<div class="field-row">
-								<strong>{field.label}</strong>
-								<If cond={field.required}>
-									<small>Required</small>
-								</If>
-								<If cond={field.help != ""}>
-									<p>{field.help}</p>
-								</If>
-							</div>
-						</Each>
-					</fieldset>
-				</div>
+				<PreviewSubmissionForm proposalFields={data.proposalFields} participantFields={data.participantFields}></PreviewSubmissionForm>
 			</If>
 		</section>
 	</main>

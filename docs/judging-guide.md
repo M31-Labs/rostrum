@@ -18,7 +18,7 @@ the repository evidence lives.
 | --- | --- | --- |
 | Local judge demo | Deterministic, smoke-verified visual and persona inspection | Mutations; it deliberately reproduces the hosted read-only posture |
 | Fresh interactive run | Organizer bootstrap and mutation testing from a clean starter CFP | Fictional proposals, people, reviews, or schedule records |
-| Hosted preview | Visual inspection of a known fictional workspace after preflight | Sign-in, submission, upload, import/export, reset, or any mutation |
+| Hosted preview | Visual inspection of a known fictional workspace after preflight; the CFP also has a client-only submit walkthrough | Sign-in, persisted submission, upload, import/export, reset, or any mutation |
 
 ### Local judge demo (recommended first)
 
@@ -121,11 +121,14 @@ agenda, and it keeps governed decisions explainable.
 ### 0:40–1:25 — Intake that explains itself
 
 Open **Forms & routing**, then the public CFP. Choose `Workshop` and show the
-conditional logistics question. Return to a fictional example submission and
-show its queue, owner, track, fired rule, and readable trace.
+conditional logistics question. Type into the proposal fields and click **Save
+draft** or **Submit proposal** to show the client-only receipt; no network
+write occurs. Return to a fictional example submission and show its queue,
+owner, track, fired rule, and readable trace.
 
 **Claim to make:** form visibility and proposal routing are policy-backed and
 server-validated; the interface does not hide why a proposal went somewhere.
+The hosted CFP interaction is a safe visual walkthrough, not a stored intake.
 
 ### 1:25–2:10 — Human review with provenance
 

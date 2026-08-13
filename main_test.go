@@ -387,9 +387,10 @@ func TestManagedMagicLinkRequestAcceptsFormDataWithoutDocumentRedirect(t *testin
 
 // Interactive forms must use GoSX's managed-form protocol. The only raw
 // lowercase forms left in source are agenda island forms carrying the same
-// explicit data-gosx-form contract; all other form elements are <Form> or
-// <ActionForm>. This protects the launch UX guarantee that ordinary actions
-// do not trigger a document refresh after JavaScript has loaded.
+// explicit data-gosx-form contract and the hosted CFP's client-only preview
+// form, which has no server action by design. This protects the launch UX
+// guarantee that ordinary actions do not trigger a document refresh after
+// JavaScript has loaded.
 func TestInteractiveFormsUseManagedProtocol(t *testing.T) {
 	err := filepath.WalkDir("app", func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -414,7 +415,7 @@ func TestInteractiveFormsUseManagedProtocol(t *testing.T) {
 				t.Fatalf("%s contains an unterminated raw form tag", path)
 			}
 			tag := remaining[:end+1]
-			if !strings.Contains(tag, "data-gosx-form") {
+			if !strings.Contains(tag, "data-gosx-form") && !strings.Contains(tag, `data-preview-only="true"`) {
 				t.Fatalf("%s has an unmanaged raw form tag: %s", path, tag)
 			}
 			remaining = remaining[end+1:]
@@ -1349,6 +1350,13 @@ func TestFocusedGoSXIslandInventory(t *testing.T) {
 		if !strings.Contains(text, "//gosx:island\n"+declaration) {
 			t.Errorf("%s does not declare the expected local island %q", path, declaration)
 		}
+	}
+	submitSource, err := os.ReadFile(filepath.Join("app", "submit", "[slug]", "page.gsx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(submitSource), "//gosx:island\nfunc PreviewSubmissionForm(props any) Node") {
+		t.Error("submission CFP is missing the client-only preview form island")
 	}
 	reviewSource, err := os.ReadFile(filepath.Join("app", "organizer", "review", "page.gsx"))
 	if err != nil {

@@ -190,12 +190,14 @@ policy, and HSTS on HTTPS.
 
 - One instance represents one organization's event workspace. There is no
   multi-tenant SaaS account plane.
-- The anonymous hosted preview is intentionally non-mutating; safe navigation,
-  filtering, and persona inspection remain interactive. Fresh live mode is the
-  evaluation path for mutations.
+- The anonymous hosted preview is intentionally non-mutating. Safe navigation,
+  filtering, and persona inspection remain interactive, and the public CFP
+  renders a client-only submit walkthrough so judges can type, save a draft,
+  and submit a proposal without creating a request, email, or workspace record.
+  Fresh live mode is the evaluation path for real mutations.
 - Provider unit/contract tests do not prove real email, Accelevents, or
-  Airtable delivery.
-  Operators must test the exact credentials and endpoint they select.
+  Airtable delivery. Operators must run the provider acceptance steps in the
+  self-hosting manual with the exact credentials and endpoint they select.
 - Rate-limit counters and the WebSocket hub are process-local.
 - Full-archive upload recovery is a stopped-process procedure. Structured
   workspace JSON import is validated online, but archive extraction is not.

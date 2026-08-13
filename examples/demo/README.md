@@ -46,6 +46,12 @@ public projections, observer-only organizer pages, signed example personas,
 approved portraits, and mutation rejection before it sends representative
 blocked-action probes.
 
+The public CFP is the one deliberate presentation exception: it renders real
+fields plus **Save draft** and **Submit proposal** buttons so a judge can try
+the intake flow. Those actions are a client-only walkthrough that updates an
+in-page status message; they never send a request, email, or workspace
+mutation.
+
 ## What lives here
 
 | Path | Purpose |
