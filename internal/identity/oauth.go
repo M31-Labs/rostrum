@@ -79,8 +79,44 @@ func allowlistResolver(inner auth.OAuthUserResolver) auth.OAuthUserResolver {
 		if err != nil {
 			return auth.User{}, err
 		}
+		if strings.EqualFold(strings.TrimSpace(provider.Name), "github") {
+			if err := requireGitHubVerifiedEmail(ctx, client, token.AccessToken, user.Email); err != nil {
+				return auth.User{}, err
+			}
+		}
 		return GrantRoles(ctx, user)
 	})
+}
+
+func requireGitHubVerifiedEmail(ctx context.Context, client *http.Client, accessToken, email string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/user/emails", nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	res, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("github email verification failed: %w", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode >= 400 {
+		return fmt.Errorf("github email verification failed with status %d", res.StatusCode)
+	}
+	var emails []struct {
+		Email    string `json:"email"`
+		Primary  bool   `json:"primary"`
+		Verified bool   `json:"verified"`
+	}
+	if err := json.NewDecoder(io.LimitReader(res.Body, 64*1024)).Decode(&emails); err != nil {
+		return fmt.Errorf("github email verification response: %w", err)
+	}
+	for _, candidate := range emails {
+		if candidate.Primary && candidate.Verified && strings.EqualFold(strings.TrimSpace(candidate.Email), strings.TrimSpace(email)) {
+			return nil
+		}
+	}
+	return fmt.Errorf("github account has no verified primary email")
 }
 
 // googleUserInfoResolver fetches the verified identity from Google's
