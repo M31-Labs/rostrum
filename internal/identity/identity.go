@@ -79,6 +79,34 @@ func AllowedEmails() []string {
 	return out
 }
 
+// AllowedGitHubHandles parses AUTH_GITHUB_HANDLES, a comma-separated list of
+// GitHub login handles that may bootstrap organizer access through the GitHub
+// OAuth provider. Handles are normalized case-insensitively because GitHub
+// login names are case-insensitive. This is intentionally separate from the
+// email allowlist: a private GitHub email need not be copied into deployment
+// configuration just to grant the account access.
+func AllowedGitHubHandles() []string {
+	raw := strings.TrimSpace(os.Getenv("AUTH_GITHUB_HANDLES"))
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	seen := make(map[string]struct{}, len(parts))
+	for _, part := range parts {
+		handle := normalizeGitHubHandle(part)
+		if handle == "" {
+			continue
+		}
+		if _, duplicate := seen[handle]; duplicate {
+			continue
+		}
+		seen[handle] = struct{}{}
+		out = append(out, handle)
+	}
+	return out
+}
+
 // PrincipalRoleGrant is one deployment-owned organizer-surface identity.
 // Roles contains only organizer, chair, or observer after
 // ParsePrincipalRoles returns successfully. An empty Roles slice represents
@@ -307,7 +335,7 @@ func hasStoredOrganizer() bool {
 func ResolveEmail(_ context.Context, rawEmail string) (auth.User, error) {
 	email := strings.ToLower(strings.TrimSpace(rawEmail))
 	user := auth.User{ID: email, Email: email}
-	roles, allowed, err := resolveAccessRoles(email, "")
+	roles, allowed, err := resolveAccessRoles(email, "", false)
 	if err != nil || !allowed {
 		return user, nil
 	}
@@ -325,7 +353,7 @@ func GrantRoles(_ context.Context, user auth.User) (auth.User, error) {
 	if email == "" {
 		return auth.User{}, errNoEmail
 	}
-	roles, allowed, err := resolveAccessRoles(email, user.Name)
+	roles, allowed, err := resolveAccessRoles(email, user.Name, githubHandleAllowed(user))
 	if err != nil {
 		return auth.User{}, err
 	}
@@ -348,7 +376,7 @@ var (
 // observer, or explicit no-access grant even when that same address remains
 // on the legacy organizer allowlist. The allowlist is consulted only when no
 // Principal record exists for the address.
-func resolveAccessRoles(email, name string) ([]string, bool, error) {
+func resolveAccessRoles(email, name string, providerAllowlisted bool) ([]string, bool, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
 	if email == "" {
 		return nil, false, nil
@@ -358,6 +386,9 @@ func resolveAccessRoles(email, name string) ([]string, bool, error) {
 		return nil, false, err
 	}
 	allowlisted := organizerEmailAllowed(email)
+	if providerAllowlisted {
+		allowlisted = true
+	}
 	name = strings.TrimSpace(name)
 	now := time.Now().UTC()
 	var resolved []string
@@ -415,6 +446,65 @@ func organizerEmailAllowed(email string) bool {
 		}
 	}
 	return false
+}
+
+func githubHandleAllowed(user auth.User) bool {
+	handle := githubHandle(user)
+	if handle == "" {
+		return false
+	}
+	for _, allowed := range AllowedGitHubHandles() {
+		if handle == allowed {
+			return true
+		}
+	}
+	return false
+}
+
+// githubHandle extracts the verified GitHub login retained by GoSX's GitHub
+// resolver. The resolver exposes the canonical profile URL in Meta["profile"]
+// (and future versions may expose Meta["login"] directly); only a github.com
+// profile URL is accepted, so a display name or arbitrary provider metadata
+// cannot accidentally match the handle allowlist.
+func githubHandle(user auth.User) string {
+	if user.Meta == nil {
+		return ""
+	}
+	provider, _ := user.Meta["provider"].(string)
+	if !strings.EqualFold(strings.TrimSpace(provider), "github") {
+		return ""
+	}
+	if login, ok := user.Meta["login"].(string); ok {
+		if normalized := normalizeGitHubHandle(login); normalized != "" {
+			return normalized
+		}
+	}
+	profile, ok := user.Meta["profile"].(string)
+	if !ok {
+		return ""
+	}
+	parsed, err := url.Parse(strings.TrimSpace(profile))
+	if err != nil || !strings.EqualFold(parsed.Scheme, "https") || !strings.EqualFold(parsed.Host, "github.com") {
+		return ""
+	}
+	segments := strings.Split(strings.Trim(parsed.Path, "/"), "/")
+	if len(segments) != 1 {
+		return ""
+	}
+	return normalizeGitHubHandle(segments[0])
+}
+
+func normalizeGitHubHandle(raw string) string {
+	handle := strings.ToLower(strings.TrimSpace(raw))
+	if handle == "" || len(handle) > 39 {
+		return ""
+	}
+	for _, character := range handle {
+		if (character < 'a' || character > 'z') && (character < '0' || character > '9') && character != '-' {
+			return ""
+		}
+	}
+	return handle
 }
 
 func principalAccessRoles(roles []string) []string {

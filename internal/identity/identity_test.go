@@ -86,6 +86,99 @@ func TestParsePrincipalRolesIsStrictAndNormalizes(t *testing.T) {
 	}
 }
 
+func TestAllowedGitHubHandlesNormalizesAndDeduplicates(t *testing.T) {
+	t.Setenv("AUTH_GITHUB_HANDLES", " OctoCat,maintainer,octocat, ,bad_handle,maintainer-2 ")
+	got := AllowedGitHubHandles()
+	want := []string{"octocat", "maintainer", "maintainer-2"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("AllowedGitHubHandles() = %#v, want %#v", got, want)
+	}
+}
+
+func TestGitHubHandleAllowlistGrantsAndPersistsOAuthOrganizer(t *testing.T) {
+	newTestWorkspace(t)
+	t.Setenv("ORGANIZER_EMAILS", "")
+	t.Setenv("AUTH_GITHUB_HANDLES", "octocat")
+
+	granted, err := GrantRoles(context.Background(), auth.User{
+		ID:    "github:1",
+		Email: "private@example.com",
+		Name:  "The Octocat",
+		Meta: map[string]any{
+			"provider": "github",
+			"profile":  "https://github.com/OctoCat",
+		},
+	})
+	if err != nil {
+		t.Fatalf("GrantRoles(handle allowlist): %v", err)
+	}
+	if !hasRole(granted, RoleOrganizer) {
+		t.Fatalf("GitHub handle grant roles = %v, want %s", granted.Roles, RoleOrganizer)
+	}
+	principal := principalForEmail(t, "private@example.com")
+	if !hasRole(principalToUser(principal), RoleOrganizer) {
+		t.Fatalf("GitHub handle principal roles = %v, want %s", principal.Roles, RoleOrganizer)
+	}
+}
+
+func TestGitHubHandleAllowlistDoesNotTrustDisplayNamesOrOtherProviders(t *testing.T) {
+	newTestWorkspace(t)
+	t.Setenv("ORGANIZER_EMAILS", "")
+	t.Setenv("AUTH_GITHUB_HANDLES", "octocat")
+
+	for name, user := range map[string]auth.User{
+		"display name only": {
+			Email: "display@example.com",
+			Name:  "OctoCat",
+			Meta:  map[string]any{"provider": "github"},
+		},
+		"other provider profile": {
+			Email: "other@example.com",
+			Meta: map[string]any{
+				"provider": "google",
+				"profile":  "https://github.com/octocat",
+			},
+		},
+		"unsafe profile host": {
+			Email: "unsafe@example.com",
+			Meta: map[string]any{
+				"provider": "github",
+				"profile":  "https://github.com.evil.example/octocat",
+			},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := GrantRoles(context.Background(), user); err == nil {
+				t.Fatal("unverified handle metadata was accepted")
+			}
+		})
+	}
+}
+
+func TestGitHubHandleAllowlistDoesNotOverrideDurableRevocation(t *testing.T) {
+	newTestWorkspace(t)
+	t.Setenv("ORGANIZER_EMAILS", "")
+	t.Setenv("AUTH_GITHUB_HANDLES", "octocat")
+	if err := ApplyPrincipalRoles("owner@example.com=organizer,private@example.com=none"); err != nil {
+		t.Fatalf("ApplyPrincipalRoles: %v", err)
+	}
+
+	_, err := GrantRoles(context.Background(), auth.User{
+		Email: "private@example.com",
+		Meta: map[string]any{
+			"provider": "github",
+			"profile":  "https://github.com/octocat",
+		},
+	})
+	if err == nil {
+		t.Fatal("GitHub handle allowlist overrode durable revocation")
+	}
+}
+
+func principalToUser(principal domain.Principal) auth.User {
+	return auth.User{Email: principal.Email, Roles: principal.Roles}
+}
+
 func TestApplyPrincipalRolesProvisionsExactRolesAndAuditsOnce(t *testing.T) {
 	newTestWorkspace(t)
 	raw := "owner@example.com=organizer+chair,chair@example.com=chair,view@example.com=observer"

@@ -293,7 +293,20 @@ If a real mail transport is already acceptance-tested, set
 `ORGANIZER_EMAILS` to a comma-separated, case-insensitive allowlist and use
 the magic-link form at `/login`. Alternatively, configure both variables in a
 GitHub or Google OAuth pair and use that provider without mail. OAuth still
-requires the verified provider email to match the same allowlist.
+requires a verified provider identity. For GitHub specifically, you can use a
+handle allowlist instead of putting private GitHub email addresses in config:
+
+```dotenv
+AUTH_GITHUB_HANDLES=octocat,program-chair
+```
+
+Handles are matched case-insensitively against GitHub's verified `login`
+profile field. Rostrum also requests the `user:email` scope and requires a
+verified account email so the accepted sign-in can be stored as a durable
+Principal. The handle list is a bootstrap allowlist: once accepted, the
+durable email Principal governs future access and role reconciliation. Remove
+access explicitly with `PRINCIPAL_ROLES=email=none`, rather than relying on
+removing a handle from the bootstrap list.
 
 Do not configure an allowlist on a fresh host with only the outbox transport:
 the allowlist suppresses break-glass setup, while the outbox cannot deliver a
@@ -399,6 +412,7 @@ for recovery.
 | `ORGANIZER_EMAILS` | Comma-separated organizer allowlist for magic-link and OAuth grants. Leave empty for first-host break-glass setup. |
 | `PRINCIPAL_ROLES` | Strict `email=role+role,...` provisioning for organizer, chair, and observer access; `email=none` explicitly revokes access. A non-empty mapping must retain an organizer. |
 | `AUTH_GITHUB_CLIENT_ID` / `AUTH_GITHUB_CLIENT_SECRET` | Set both to enable GitHub. Callback: `{PUBLIC_URL}/auth/oauth/github/callback`. |
+| `AUTH_GITHUB_HANDLES` | Optional comma-separated, case-insensitive GitHub login handles allowed to bootstrap organizer access. This applies only to verified GitHub OAuth callbacks; durable email principals and `PRINCIPAL_ROLES` govern later access and revocation. |
 | `AUTH_GOOGLE_CLIENT_ID` / `AUTH_GOOGLE_CLIENT_SECRET` | Set both to enable Google. Callback: `{PUBLIC_URL}/auth/oauth/google/callback`. Google email must be verified. |
 
 ### Email delivery
@@ -610,8 +624,10 @@ https://program.example.com/auth/oauth/google/callback
 ```
 
 Provider email is still checked against `ORGANIZER_EMAILS` or a stored
-principal provisioned through `PRINCIPAL_ROLES`. Stored roles replace any
-provider claims; OAuth is not a bypass around Rostrum authorization.
+principal provisioned through `PRINCIPAL_ROLES`. GitHub may additionally use
+`AUTH_GITHUB_HANDLES`; it still requires the provider's verified account email
+for durable principal storage. Stored roles replace any provider claims; OAuth
+is not a bypass around Rostrum authorization.
 
 Passkeys need no separate environment credential. They use `PUBLIC_URL` as
 the WebAuthn origin and can be registered only from an already authenticated

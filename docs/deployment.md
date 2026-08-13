@@ -227,6 +227,23 @@ or OAuth (Open Authorization) sign-in from one of these addresses is
 granted the organizer role and recorded as a workspace Principal, so the
 grant survives a restart even if you later change the allowlist.
 
+For GitHub OAuth, you may instead allow verified GitHub login handles without
+copying private email addresses into deployment configuration:
+
+```dotenv
+AUTH_GITHUB_HANDLES=octocat,program-chair
+```
+
+Handles are case-insensitive and apply only to the GitHub provider. Rostrum
+still requests GitHub's `user:email` scope and requires a verified account
+email so the successful sign-in can create a durable Principal and participate
+in role reconciliation. After the first accepted sign-in, the durable email
+Principal is authoritative: removing a handle from this bootstrap list does
+not silently revoke an existing grant. Use `PRINCIPAL_ROLES` with
+`email=none` for an explicit revocation, or assign the exact organizer/chair/
+observer roles there. A handle is never accepted from a display name or an
+arbitrary profile URL.
+
 ### Chairs and observers
 
 Use `PRINCIPAL_ROLES` when access needs to be narrower or explicitly
@@ -266,7 +283,9 @@ Set both variables in a pair to show that provider's button on `/login`.
 Each provider's redirect URL derives from `PUBLIC_URL`:
 
 - GitHub: `AUTH_GITHUB_CLIENT_ID`, `AUTH_GITHUB_CLIENT_SECRET`. Redirect URL
-  `{PUBLIC_URL}/auth/oauth/github/callback`.
+  `{PUBLIC_URL}/auth/oauth/github/callback`. Optional
+  `AUTH_GITHUB_HANDLES` is a comma-separated, case-insensitive bootstrap
+  allowlist of GitHub login handles.
 - Google: `AUTH_GOOGLE_CLIENT_ID`, `AUTH_GOOGLE_CLIENT_SECRET`. Redirect URL
   `{PUBLIC_URL}/auth/oauth/google/callback`.
 

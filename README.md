@@ -160,6 +160,11 @@ Organizers can bootstrap once through `/setup`, then sign in with a magic link,
 a configured GitHub or Google OAuth provider, or a registered passkey. See
 [deployment: identity and access](docs/deployment.md#identity-and-access).
 
+For GitHub OAuth, operators may use `AUTH_GITHUB_HANDLES` as a
+case-insensitive bootstrap allowlist of GitHub login handles; durable email
+principals and `PRINCIPAL_ROLES` remain authoritative for later access and
+revocation.
+
 ## Trust is part of the feature
 
 - **Explainable policy.** Routing, review governance, form visibility, and
