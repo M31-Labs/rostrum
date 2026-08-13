@@ -65,6 +65,32 @@ func TestRostrumFileRouterDeclaresEnglishLanguageAndPreservesContract(t *testing
 	}
 }
 
+func TestSessionOptionsEncryptCookiePayloads(t *testing.T) {
+	localOptions := sessionOptions(true)
+	if !localOptions.Encrypt || localOptions.Secure || !localOptions.AllowInsecure {
+		t.Fatalf("local session options = %+v", localOptions)
+	}
+	publicOptions := sessionOptions(false)
+	if !publicOptions.Encrypt || !publicOptions.Secure || publicOptions.AllowInsecure {
+		t.Fatalf("public session options = %+v", publicOptions)
+	}
+
+	manager, err := session.New("encrypted-session-test-secret-at-least-32-bytes", localOptions)
+	if err != nil {
+		t.Fatalf("session.New: %v", err)
+	}
+	handler := manager.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		session.Current(r).Set("email", "organizer@example.com")
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/", nil))
+	cookies := response.Result().Cookies()
+	if len(cookies) != 1 || !strings.HasPrefix(cookies[0].Value, "v2.") {
+		t.Fatalf("expected one encrypted v2 session cookie, got %+v", cookies)
+	}
+}
+
 // TestMain seeds the package-wide appstate singleton once with an in-memory
 // workspace, the same way main() does, so the handler tests below (which
 // call appstate.MustGet() the same way the real handlers do) have state to

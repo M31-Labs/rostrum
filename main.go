@@ -178,10 +178,7 @@ func main() {
 	appstate.Set(workspace)
 
 	overHTTP := strings.HasPrefix(publicBase, "http://")
-	sessions, err := session.New(sessionSecret, session.Options{
-		Secure:        !overHTTP,
-		AllowInsecure: overHTTP,
-	})
+	sessions, err := session.New(sessionSecret, sessionOptions(overHTTP))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -375,6 +372,14 @@ func main() {
 
 	log.Printf("Rostrum listening on %s (data: %s)", publicBase, workspace.Path())
 	log.Fatal(app.ListenAndServe(":" + port))
+}
+
+func sessionOptions(overHTTP bool) session.Options {
+	return session.Options{
+		Secure:        !overHTTP,
+		AllowInsecure: overHTTP,
+		Encrypt:       true,
+	}
 }
 
 func rostrumRouteDocument(ctx *route.RouteContext, body gosx.Node) gosx.Node {
