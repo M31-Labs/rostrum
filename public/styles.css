@@ -1848,6 +1848,12 @@ h3 {
   border-color: rgb(138 100 16 / 0.45);
 }
 
+.status-preview {
+  color: var(--color-accent-strong);
+  background: var(--color-accent-soft);
+  border-color: var(--color-accent-bright);
+}
+
 .status-critical {
   color: var(--color-danger);
   background: var(--color-danger-soft);
@@ -3216,6 +3222,17 @@ code {
   margin-bottom: var(--space-sm);
 }
 
+.agenda-bank-head > p {
+  flex: 1;
+}
+
+.agenda-preview-tools {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  flex-shrink: 0;
+}
+
 .agenda-bank-head h2 {
   margin: 0;
   font-size: var(--type-md);
@@ -3484,12 +3501,17 @@ code {
   transition: background var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out);
 }
 
-.agenda-cell.drag-over {
+.agenda-board-island.is-dragging .agenda-cell.drag-over {
   background: var(--color-accent-soft);
   box-shadow: inset 0 0 0 0.125rem var(--color-accent-bright);
 }
 
-/* Empty cells reveal their affordance on hover. */
+.agenda-board-island.is-dragging .agenda-cell.drag-blocked {
+  background: color-mix(in srgb, var(--color-danger) 9%, var(--color-surface));
+  box-shadow: inset 0 0 0 0.125rem var(--color-danger);
+}
+
+/* Drop affordances only exist while a movable card is in flight. */
 .drop-hint {
   position: absolute;
   inset: var(--space-xs);
@@ -3507,14 +3529,34 @@ code {
   transition: opacity var(--duration-fast) var(--ease-out);
 }
 
-.agenda-cell:not(:has(.agenda-card)):hover .drop-hint {
+.agenda-board-island.is-dragging .agenda-cell:not(:has(.agenda-card)):hover .drop-hint,
+.agenda-board-island.is-dragging .agenda-cell.drag-over .drop-hint {
   opacity: 0.65;
 }
 
-.agenda-cell.drag-over .drop-hint {
+.agenda-board-island.is-dragging .agenda-cell.drag-over .drop-hint {
   border-color: var(--color-accent-bright);
   color: var(--color-accent);
   opacity: 1;
+}
+
+.agenda-board-island.is-dragging .agenda-cell.drag-blocked .drop-hint {
+  border-color: var(--color-danger);
+  color: var(--color-danger);
+}
+
+.agenda-preview-status {
+	position: fixed;
+	inset: auto var(--space-md) var(--space-md);
+	z-index: 10;
+	margin: 0;
+	padding: var(--space-sm) var(--space-md);
+  border: var(--border-thin) solid var(--color-line-strong);
+  border-left: var(--border-strong) solid var(--color-accent-bright);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  background: var(--color-accent-soft);
+  font-size: var(--type-sm);
 }
 
 .agenda-card {
@@ -3546,6 +3588,17 @@ code {
 .agenda-card[draggable="false"]:hover {
   transform: none;
   box-shadow: var(--shadow-lift);
+}
+
+.agenda-card[hidden] {
+  display: none;
+}
+
+.agenda-card.preview-moved-card {
+  border-style: dashed;
+  border-color: var(--color-accent-bright);
+  background: var(--color-accent-soft);
+  box-shadow: var(--shadow-float);
 }
 
 .agenda-card.track-teal {

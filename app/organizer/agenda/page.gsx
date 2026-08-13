@@ -107,6 +107,10 @@ func AgendaBoard(props any) Node {
 	dropStart := signal.New("")
 	overRoom := signal.New("")
 	overStart := signal.New("")
+	previewMoveID := signal.New("")
+	previewMoveRoom := signal.New("")
+	previewMoveStart := signal.New("")
+	previewMoveLabel := signal.New("")
 	status := signal.New("")
 	startDrag := func() {
 		draggedID.Set(eventData != "" ? eventData : data["sessionId"])
@@ -116,8 +120,8 @@ func AgendaBoard(props any) Node {
 	}
 	endDrag := func() {
 		draggedID.Set("")
-		draggedTrack.Set("")
-		draggedTitle.Set("")
+		draggedTrack.Set(props.readOnly ? draggedTrack.Get() : "")
+		draggedTitle.Set(props.readOnly ? draggedTitle.Get() : "")
 		overRoom.Set("")
 		overStart.Set("")
 	}
@@ -134,12 +138,35 @@ func AgendaBoard(props any) Node {
 		browser.PreventDefault(draggedID.Get() != "")
 		dropRoom.Set(draggedID.Get() != "" ? data["dropRoom"] : dropRoom.Get())
 		dropStart.Set(draggedID.Get() != "" ? data["dropStart"] : dropStart.Get())
-		status.Set(draggedID.Get() != "" ? "Moving " + draggedTitle.Get() + "…" : status.Get())
+		previewMoveID.Set(props.readOnly && data["occupied"] == "" ? draggedID.Get() : previewMoveID.Get())
+		previewMoveRoom.Set(props.readOnly && data["occupied"] == "" ? data["dropRoom"] : previewMoveRoom.Get())
+		previewMoveStart.Set(props.readOnly && data["occupied"] == "" ? data["dropStart"] : previewMoveStart.Get())
+		previewMoveLabel.Set(props.readOnly && data["occupied"] == "" ? data["dropLabel"] : previewMoveLabel.Get())
+		status.Set(
+			props.readOnly && data["occupied"] != ""
+				? "That room is occupied at " + data["dropLabel"] + ". Try an open cell."
+				: props.readOnly
+					? "Moved " + draggedTitle.Get() + " to " + data["dropRoomName"] + " at " + data["dropLabel"] + ". This preview is not saved."
+					: draggedID.Get() != "" ? "Moving " + draggedTitle.Get() + "…" : status.Get()
+		)
 		overRoom.Set("")
 		overStart.Set("")
-		browser.Submit(draggedID.Get() != "", "#agenda-drag-form")
+		browser.Submit(!props.readOnly && draggedID.Get() != "", "#agenda-drag-form")
 	}
-	return <div class="agenda-board-island">
+	resetPreview := func() {
+		draggedID.Set("")
+		overRoom.Set("")
+		overStart.Set("")
+		previewMoveID.Set("")
+		previewMoveRoom.Set("")
+		previewMoveStart.Set("")
+		previewMoveLabel.Set("")
+		status.Set("Board reset to the published snapshot. Nothing was saved.")
+	}
+	return <div
+		class={"agenda-board-island" + (draggedID.Get() != "" ? " is-dragging" : "") + (props.readOnly ? " is-preview" : "")}
+		data-preview-only={props.readOnly}
+	>
 		<aside class="agenda-bank" aria-label="Unscheduled sessions">
 			<header class="agenda-bank-head">
 				<h2>Unscheduled</h2>
@@ -150,19 +177,33 @@ func AgendaBoard(props any) Node {
 				</If>
 				<If cond={props.readOnly}>
 					<p>
-						Read-only schedule snapshot. Use the local interactive run to place sessions.
+						Client-only rehearsal. Drag a card onto an open cell to preview a move; nothing is saved.
 					</p>
 				</If>
+				<If cond={props.readOnly}>
+					<div class="agenda-preview-tools">
+						<span class="status-pill status-preview">Local only</span>
+						<button class="button button-compact" type="button" onClick={resetPreview}>Reset board</button>
+					</div>
+				</If>
+				<p
+					class={props.readOnly ? "agenda-preview-status" : "sr-only"}
+					role="status"
+					aria-live="polite"
+					hidden={props.readOnly && status.Get() == ""}
+				>
+					{status.Get()}
+				</p>
 			</header>
 			<div class="agenda-bank-list">
 				<Each of={props.bank} as="session">
 					<article
 						class={"agenda-card agenda-bank-card track-" + session.trackTone}
-						draggable={props.readOnly || session.statusValue == "cancelled" ? "false" : "true"}
-						aria-disabled={props.readOnly || session.statusValue == "cancelled"}
+						draggable={session.statusValue == "cancelled" ? "false" : "true"}
+						aria-disabled={session.statusValue == "cancelled"}
+						hidden={props.readOnly && previewMoveID.Get() == session.id}
 						aria-grabbed={draggedID.Get() == session.id}
 						data-gosx-event-value={session.id}
-						data-session-id={session.id}
 						data-session-title={session.title}
 						data-track-id={session.trackID}
 						onDragStart={startDrag}
@@ -196,9 +237,12 @@ func AgendaBoard(props any) Node {
 					<time class="agenda-time">{slot.label}</time>
 					<Each of={slot.cells} as="cell">
 						<div
-							class={"agenda-cell" + (overRoom.Get() == cell.roomID && overStart.Get() == cell.start ? " drag-over" : "")}
+							class={"agenda-cell" + (draggedID.Get() != "" && overRoom.Get() == cell.roomID && overStart.Get() == cell.start ? " drag-over" : "") + (draggedID.Get() != "" && cell.occupied ? " drag-blocked" : "")}
 							data-drop-room={cell.roomID}
 							data-drop-start={cell.start}
+							data-drop-room-name={cell.roomName}
+							data-drop-label={slot.label}
+							data-occupied={cell.occupied ? "true" : ""}
 							aria-label={"Drop into " + cell.roomName + " at " + slot.label}
 							onDragOver={dragOver}
 							onDragLeave={dragLeave}
@@ -207,11 +251,11 @@ func AgendaBoard(props any) Node {
 							<Each of={cell.sessions} as="session">
 								<article
 									class={"agenda-card track-" + session.trackTone}
-									draggable={props.readOnly || session.statusValue == "cancelled" ? "false" : "true"}
-									aria-disabled={props.readOnly || session.statusValue == "cancelled"}
+									draggable={session.statusValue == "cancelled" ? "false" : "true"}
+									aria-disabled={session.statusValue == "cancelled"}
+									hidden={props.readOnly && previewMoveID.Get() == session.id}
 									aria-grabbed={draggedID.Get() == session.id}
 									data-gosx-event-value={session.id}
-									data-session-id={session.id}
 									data-session-title={session.title}
 									data-track-id={session.trackID}
 									onDragStart={startDrag}
@@ -258,7 +302,17 @@ func AgendaBoard(props any) Node {
 									</details>
 								</article>
 							</Each>
-							<span class="drop-hint" hidden={props.readOnly}>Drop here</span>
+							<If							cond={props.readOnly && previewMoveID.Get() != "" && previewMoveRoom.Get() == cell.roomID && previewMoveStart.Get() == cell.start}>
+								<article class="agenda-card preview-moved-card">
+									<div class="agenda-card-top">
+										<span class="mono">{previewMoveLabel.Get()}</span>
+										<span class="status-pill status-preview">Preview move</span>
+									</div>
+									<h3>{draggedTitle.Get()}</h3>
+									<small>Not saved · reset to try another slot</small>
+								</article>
+							</If>
+							<span class="drop-hint">Drop here</span>
 						</div>
 					</Each>
 				</div>
@@ -286,7 +340,6 @@ func AgendaBoard(props any) Node {
 				<p class="form-status agenda-drag-status" role="alert" aria-live="assertive" tabindex="-1">{props.actionMessage}</p>
 			</form>
 		</If>
-		<p class="sr-only" role="status" aria-live="polite">{status.Get()}</p>
 	</div>
 }
 
@@ -360,7 +413,7 @@ func Page() Node {
 				Drag a card or open its keyboard-accessible move controls.
 			</p>
 			<p hidden={!data.workspace.readOnlyPreview}>
-				Schedule controls are available in the local interactive run.
+				Try the agenda rehearsal: drag a card to an open cell. The hosted preview changes only in your browser.
 			</p>
 		</div>
 		<If cond={!data.workspace.readOnlyPreview}>

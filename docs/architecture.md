@@ -194,6 +194,9 @@ policy, and HSTS on HTTPS.
   filtering, and persona inspection remain interactive, and the public CFP
   renders a client-only submit walkthrough so judges can type, save a draft,
   and submit a proposal without creating a request, email, or workspace record.
+  The organizer agenda also offers a client-only drag rehearsal: cards can be
+  moved between open cells and blocked room drops explain the conflict without
+  creating an action request or changing workspace state.
   Fresh live mode is the evaluation path for real mutations.
 - Provider unit/contract tests do not prove real email, Accelevents, or
   Airtable delivery. Operators must run the provider acceptance steps in the

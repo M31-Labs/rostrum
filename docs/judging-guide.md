@@ -18,7 +18,7 @@ the repository evidence lives.
 | --- | --- | --- |
 | Local judge demo | Deterministic, smoke-verified visual and persona inspection | Mutations; it deliberately reproduces the hosted read-only posture |
 | Fresh interactive run | Organizer bootstrap and mutation testing from a clean starter CFP | Fictional proposals, people, reviews, or schedule records |
-| Hosted preview | Visual inspection of a known fictional workspace after preflight; the CFP also has a client-only submit walkthrough | Sign-in, persisted submission, upload, import/export, reset, or any mutation |
+| Hosted preview | Visual inspection of a known fictional workspace after preflight; the CFP and agenda offer client-only interaction rehearsals | Sign-in, persisted submission, upload, import/export, reset, or any mutation |
 
 ### Local judge demo (recommended first)
 
@@ -142,10 +142,11 @@ auditable. Do not claim automated or model-generated scoring.
 ### 2:10–3:10 — Scheduling with a publication gate
 
 Open **Agenda**. Show the unscheduled bank, alternate views, and the fictional
-speaker/room conflict explanation. The preview deliberately omits drag,
-keyboard-move, and publish controls; point to the visible conflict inspector
-and explain that the fresh live path exposes those controls while hard
-collisions still block publication.
+speaker/room conflict explanation. In the preview, drag a card to an open cell,
+try an occupied room to show the visible conflict feedback, then click **Reset
+board**. These rehearsal moves stay in the browser. The fresh live path exposes
+the server-validated keyboard and publish controls, while hard collisions still
+block publication.
 
 **Claim to make:** the agenda protects the public schedule from known hard
 conflicts while preserving an organizer-readable reason.
@@ -231,7 +232,8 @@ read-only example only after the contract passes.
 - One instance operates one event workspace; there is no multi-tenant account
   plane.
 - The hosted preview is read-only by design and is not the path for feature
-  mutations.
+  mutations. Its CFP fields/buttons and agenda drag rehearsal are client-only
+  demonstrations; neither creates a request or changes workspace state.
 - Real email, external Postgres, and live Accelevents/Airtable publishing need
   operator-owned credentials and separate acceptance evidence.
 - Rate limits are process-local and reset on restart.

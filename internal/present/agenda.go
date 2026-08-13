@@ -80,6 +80,7 @@ func Agenda(state domain.State, view string, dayParam string) (map[string]any, e
 				"roomID":   room.ID,
 				"roomName": room.Name,
 				"start":    start.Format("2006-01-02T15:04"),
+				"occupied": len(cards) > 0,
 				"sessions": cards,
 			})
 		}

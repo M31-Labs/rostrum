@@ -25,7 +25,7 @@ matches what you want to test:
 | --- | --- | --- | --- |
 | **Local judge demo — recommended first** | Verified visual/persona tour of the exact source tree | No; deliberately read-only | Go 1.26, Make, `curl`, and a POSIX shell; one command |
 | **Fresh interactive run** | Organizer setup and end-to-end feature testing from a clean workspace | Yes | Go 1.26 and Make; about one minute |
-| **Hosted preview** | A quick visual tour when the deployment preflight passes | No; deliberately read-only | None |
+| **Hosted preview** | A quick visual tour with CFP and agenda interaction rehearsals when the deployment preflight passes | No; deliberately read-only; rehearsals never leave the browser | None |
 
 ### Launch the deterministic judge demo
 

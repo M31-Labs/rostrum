@@ -152,6 +152,16 @@ assert_body_lacks_markup() {
 	fi
 }
 
+assert_body_contains_markup() {
+	label=$1
+	wanted=$2
+	if grep -Fq "$wanted" "$BODY"; then
+		pass "$label contains markup '$wanted'"
+	else
+		fail "$label is missing markup '$wanted'"
+	fi
+}
+
 assert_observer_page() {
 	label=$1
 	if grep -Eq '<form[^>]*method="post"' "$BODY"; then
@@ -412,16 +422,18 @@ assert_body_text "organizer speakers seed" "10 shown of 10"
 assert_page "/organizer/agenda" "organizer agenda" "Conflict-aware scheduling"
 assert_observer_page "organizer agenda"
 assert_body_text "organizer agenda seed" "8 sessions"
-assert_body_text "organizer agenda observer view" "Read-only schedule snapshot."
-assert_body_text "organizer agenda observer view" "Schedule controls are available in the local interactive run."
+assert_body_text "organizer agenda observer view" "Client-only rehearsal."
+assert_body_text "organizer agenda observer view" "Try the agenda rehearsal"
+assert_body_text "organizer agenda observer view" "Reset board"
 assert_body_text "organizer agenda observer view" "Conflict inspector"
+assert_body_contains_markup "organizer agenda observer view" 'data-preview-only="true"'
 assert_body_lacks_text "organizer agenda observer view" "Publish agenda"
 assert_body_lacks_text "organizer agenda observer view" "Add a manual session"
 assert_body_lacks_text "organizer agenda observer view" "Check & move"
 assert_body_lacks_text "organizer agenda observer view" "Return to bank"
 assert_body_lacks_text "organizer agenda observer view" "Move a session without drag and drop"
-assert_body_lacks_markup "organizer agenda observer view" 'draggable="true"'
 assert_body_lacks_markup "organizer agenda observer view" 'id="agenda-drag-form"'
+assert_body_lacks_markup "organizer agenda observer view" 'method="post"'
 assert_page "/organizer/communications" "organizer communications" "Reusable templates"
 assert_observer_page "organizer communications"
 assert_page "/organizer/portal" "organizer portal operations" "Live completion matrix"

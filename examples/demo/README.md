@@ -52,6 +52,12 @@ the intake flow. Those actions are a client-only walkthrough that updates an
 in-page status message; they never send a request, email, or workspace
 mutation.
 
+The organizer agenda has the same carefully bounded rehearsal treatment. A
+judge can drag a card onto an open cell, see the card move locally, try an
+occupied room to see the conflict explanation, and reset the board. The
+agenda rehearsal is browser-only: it does not submit the move action, write
+storage, or alter the deterministic fixture.
+
 ## What lives here
 
 | Path | Purpose |
