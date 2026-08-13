@@ -22,6 +22,21 @@ func Page() Node {
 				<p>{data.form.body}</p>
 			</div>
 		</div>
+		<If cond={data.confirmationStatus == "sent"}>
+			<p>
+				Your confirmation was accepted by the configured delivery service.
+			</p>
+		</If>
+		<If cond={data.confirmationStatus == "failed"}>
+			<p>
+				We could not deliver the confirmation just now. Your proposal is safely stored, and the program team can follow up.
+			</p>
+		</If>
+		<If cond={data.confirmationStatus == "enabled"}>
+			<p>
+				Keep an eye on the email address you submitted for any confirmation and next steps.
+			</p>
+		</If>
 		<If cond={data.hasPortal}>
 			<p>
 				We will take you to your portal in about 10 seconds.
@@ -29,11 +44,10 @@ func Page() Node {
 			<a class="button button-primary" href={data.portalURL} data-gosx-link>Go to your portal now</a>
 		</If>
 		<If cond={!data.hasPortal}>
-			<p>
-				Check your email for your portal link, or return to the
-				<a href={"/submit/" + data.formSlug} data-gosx-link>call for speakers</a>
-				.
-			</p>
+			<If cond={data.confirmationStatus == "disabled"}>
+				<p>Your submission is complete.</p>
+			</If>
+			<a href={"/submit/" + data.formSlug} data-gosx-link>Return to the call for speakers</a>
 		</If>
 	</main>
 }

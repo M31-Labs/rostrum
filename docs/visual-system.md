@@ -1,6 +1,6 @@
 ---
 description: The Paper & Ink typography, color, spacing, motion, component, and accessibility contract.
-nav_order: "07 / 07"
+nav_order: "08 / 08"
 eyebrow: Preserve Paper & Ink
 ---
 

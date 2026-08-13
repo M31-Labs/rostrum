@@ -3,6 +3,7 @@ package ratelimit
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -76,5 +77,56 @@ func TestClientIPHandlesMissingPort(t *testing.T) {
 	request.RemoteAddr = "203.0.113.5"
 	if got := ClientIP(request); got != "203.0.113.5" {
 		t.Fatalf("expected the raw remote address when it has no port, got %q", got)
+	}
+}
+
+func TestClientIPIgnoresForwardingFromUntrustedPeer(t *testing.T) {
+	t.Setenv("TRUSTED_PROXY_CIDRS", "127.0.0.1/32")
+	request := httptest.NewRequest(http.MethodPost, "/submit", nil)
+	request.RemoteAddr = "203.0.113.5:54321"
+	request.Header.Set("X-Forwarded-For", "198.51.100.8")
+	if got := ClientIP(request); got != "203.0.113.5" {
+		t.Fatalf("untrusted forwarding identity = %q, want direct peer", got)
+	}
+}
+
+func TestClientIPWalksTrustedForwardingChain(t *testing.T) {
+	t.Setenv("TRUSTED_PROXY_CIDRS", "127.0.0.0/8, 10.42.0.0/16")
+	request := httptest.NewRequest(http.MethodPost, "/submit", nil)
+	request.RemoteAddr = "127.0.0.1:54321"
+	request.Header.Set("X-Forwarded-For", "192.0.2.99, 203.0.113.8, 10.42.1.7")
+	if got := ClientIP(request); got != "203.0.113.8" {
+		t.Fatalf("trusted forwarding identity = %q, want closest untrusted hop", got)
+	}
+}
+
+func TestClientIPIgnoresMalformedAttackerControlledPrefix(t *testing.T) {
+	t.Setenv("TRUSTED_PROXY_CIDRS", "127.0.0.1/32")
+	request := httptest.NewRequest(http.MethodPost, "/submit", nil)
+	request.RemoteAddr = "127.0.0.1:54321"
+	request.Header.Set("X-Forwarded-For", "definitely-not-an-ip, 198.51.100.8")
+	if got := ClientIP(request); got != "198.51.100.8" {
+		t.Fatalf("forwarding identity = %q, want appended observed client", got)
+	}
+}
+
+func TestClientIPBoundsForwardedHopWalk(t *testing.T) {
+	t.Setenv("TRUSTED_PROXY_CIDRS", "127.0.0.0/8")
+	request := httptest.NewRequest(http.MethodPost, "/submit", nil)
+	request.RemoteAddr = "127.0.0.1:54321"
+	request.Header.Set("X-Forwarded-For", strings.Repeat("127.0.0.2,", 64)+"127.0.0.3")
+	if got := ClientIP(request); got != "127.0.0.2" {
+		t.Fatalf("bounded trusted chain identity = %q, want last inspected hop", got)
+	}
+}
+
+func TestValidateTrustedProxyCIDRs(t *testing.T) {
+	for _, value := range []string{"", "127.0.0.1/32", "10.42.0.0/16, fd00::/8"} {
+		if err := ValidateTrustedProxyCIDRs(value); err != nil {
+			t.Fatalf("valid trusted proxy value %q rejected: %v", value, err)
+		}
+	}
+	if err := ValidateTrustedProxyCIDRs("127.0.0.1"); err == nil {
+		t.Fatal("address without an explicit prefix was accepted")
 	}
 }

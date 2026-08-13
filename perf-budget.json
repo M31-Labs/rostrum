@@ -73,6 +73,6 @@
     {"url": "/organizer", "profile": "workspace-entry"},
     {"url": "/organizer/agenda", "profile": "agenda-warm"},
     {"url": "/organizer/portal", "profile": "workspace-warm"},
-    {"url": "/public/m31-systems-forum-2026/agenda", "profile": "public-agenda-warm"}
+    {"url": "/public/your-event/agenda", "profile": "public-agenda-warm"}
   ]
 }

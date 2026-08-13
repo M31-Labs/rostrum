@@ -2,7 +2,7 @@
 # normalized facts, while Arbiter decides whether a score or final decision
 # may proceed and leaves a named, replayable trace.
 
-feature review from "programma" {
+feature review from "rostrum" {
     operation: string
     company_conflict: bool
     human_evaluations: number

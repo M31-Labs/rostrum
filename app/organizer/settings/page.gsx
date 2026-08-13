@@ -87,60 +87,115 @@ func Page() Node {
 		</header>
 		<p class="flash-message">{flash.notice}</p>
 		<div class="settings-grid">
-			<ActionForm class="panel settings-form" actionName="saveEvent">
-				<input type="hidden" name="csrf_token" value={csrf.token}></input>
-				<p class="form-status" role="alert" aria-live="assertive">{actions.saveEvent.message}</p>
-				<header class="panel-header">
-					<div>
-						<p class="panel-kicker">Core details</p>
-						<h2>Event identity</h2>
-					</div>
-				</header>
-				<If cond={actions.saveEvent.name != ""}>
-					<SettingsFields
-						name={actions.saveEvent.values.name}
-						slug={actions.saveEvent.values.slug}
-						type={actions.saveEvent.values.type}
-						website={actions.saveEvent.values.website}
-						location={actions.saveEvent.values.location}
-						timezone={actions.saveEvent.values.timezone}
-						starts={actions.saveEvent.values.starts_at}
-						ends={actions.saveEvent.values.ends_at}
-						theme={actions.saveEvent.values.theme}
-						description={actions.saveEvent.values.description}
-						nameError={actions.saveEvent.fieldErrors.name}
-						slugError={actions.saveEvent.fieldErrors.slug}
-						locationError={actions.saveEvent.fieldErrors.location}
-						timezoneError={actions.saveEvent.fieldErrors.timezone}
-						startsError={actions.saveEvent.fieldErrors.starts_at}
-						endsError={actions.saveEvent.fieldErrors.ends_at}
-					></SettingsFields>
-				</If>
-				<If cond={actions.saveEvent.name == ""}>
-					<SettingsFields
-						name={data.event.name}
-						slug={data.event.slug}
-						type={data.event.type}
-						website={data.event.website}
-						location={data.event.location}
-						timezone={data.event.timezone}
-						starts={data.event.starts}
-						ends={data.event.ends}
-						theme={data.event.theme}
-						description={data.event.description}
-						nameError=""
-						slugError=""
-						locationError=""
-						timezoneError=""
-						startsError=""
-						endsError=""
-					></SettingsFields>
-				</If>
-				<p class="form-note">
-					Moving the event start date shifts every scheduled agenda item by the same calendar amount. Changing timezone preserves each session’s local wall-clock time.
-				</p>
-				<button class="button button-primary" type="submit">Save settings</button>
-			</ActionForm>
+			<If cond={data.workspace.readOnlyPreview}>
+				<section class="panel settings-form">
+					<header class="panel-header">
+						<div>
+							<p class="panel-kicker">Core details</p>
+							<h2>Event identity</h2>
+						</div>
+						<span class="status-pill status-neutral">Observer snapshot</span>
+					</header>
+					<dl class="detail-answers">
+						<div>
+							<dt>Event name</dt>
+							<dd>{data.event.name}</dd>
+						</div>
+						<div>
+							<dt>Slug</dt>
+							<dd class="mono">{data.event.slug}</dd>
+						</div>
+						<div>
+							<dt>Event type</dt>
+							<dd>{data.event.type}</dd>
+						</div>
+						<div>
+							<dt>Website</dt>
+							<dd>{data.event.website}</dd>
+						</div>
+						<div>
+							<dt>Location</dt>
+							<dd>{data.event.location}</dd>
+						</div>
+						<div>
+							<dt>Timezone</dt>
+							<dd class="mono">{data.event.timezone}</dd>
+						</div>
+						<div>
+							<dt>Starts</dt>
+							<dd>{data.event.starts}</dd>
+						</div>
+						<div>
+							<dt>Ends</dt>
+							<dd>{data.event.ends}</dd>
+						</div>
+						<div>
+							<dt>Theme</dt>
+							<dd>{data.event.theme}</dd>
+						</div>
+						<div>
+							<dt>Description</dt>
+							<dd>{data.event.description}</dd>
+						</div>
+					</dl>
+				</section>
+			</If>
+			<If cond={!data.workspace.readOnlyPreview}>
+				<ActionForm class="panel settings-form" actionName="saveEvent">
+					<input type="hidden" name="csrf_token" value={csrf.token}></input>
+					<p class="form-status" role="alert" aria-live="assertive">{actions.saveEvent.message}</p>
+					<header class="panel-header">
+						<div>
+							<p class="panel-kicker">Core details</p>
+							<h2>Event identity</h2>
+						</div>
+					</header>
+					<If cond={actions.saveEvent.name != ""}>
+						<SettingsFields
+							name={actions.saveEvent.values.name}
+							slug={actions.saveEvent.values.slug}
+							type={actions.saveEvent.values.type}
+							website={actions.saveEvent.values.website}
+							location={actions.saveEvent.values.location}
+							timezone={actions.saveEvent.values.timezone}
+							starts={actions.saveEvent.values.starts_at}
+							ends={actions.saveEvent.values.ends_at}
+							theme={actions.saveEvent.values.theme}
+							description={actions.saveEvent.values.description}
+							nameError={actions.saveEvent.fieldErrors.name}
+							slugError={actions.saveEvent.fieldErrors.slug}
+							locationError={actions.saveEvent.fieldErrors.location}
+							timezoneError={actions.saveEvent.fieldErrors.timezone}
+							startsError={actions.saveEvent.fieldErrors.starts_at}
+							endsError={actions.saveEvent.fieldErrors.ends_at}
+						></SettingsFields>
+					</If>
+					<If cond={actions.saveEvent.name == ""}>
+						<SettingsFields
+							name={data.event.name}
+							slug={data.event.slug}
+							type={data.event.type}
+							website={data.event.website}
+							location={data.event.location}
+							timezone={data.event.timezone}
+							starts={data.event.starts}
+							ends={data.event.ends}
+							theme={data.event.theme}
+							description={data.event.description}
+							nameError=""
+							slugError=""
+							locationError=""
+							timezoneError=""
+							startsError=""
+							endsError=""
+						></SettingsFields>
+					</If>
+					<p class="form-note">
+						Moving the event start date shifts every scheduled agenda item by the same calendar amount. Changing timezone preserves each session’s local wall-clock time.
+					</p>
+					<button class="button button-primary" type="submit">Save settings</button>
+				</ActionForm>
+			</If>
 			<aside class="settings-side">
 				<section class="panel">
 					<header class="panel-header">
@@ -161,33 +216,35 @@ func Page() Node {
 							</article>
 						</Each>
 					</div>
-					<ActionForm class="settings-add-form" actionName="addTrack">
-						<input type="hidden" name="csrf_token" value={csrf.token}></input>
-						<p class="form-status" role="status" aria-live="polite">{actions.addTrack.message}</p>
-						<label>
-							<span>New track name</span>
-							<input name="name" required></input>
-							<p class="form-error" data-gosx-field-error="name" aria-live="polite"></p>
-						</label>
-						<div class="form-grid-two">
+					<If cond={!data.workspace.readOnlyPreview}>
+						<ActionForm class="settings-add-form" actionName="addTrack">
+							<input type="hidden" name="csrf_token" value={csrf.token}></input>
+							<p class="form-status" role="status" aria-live="polite">{actions.addTrack.message}</p>
 							<label>
-								<span>Color</span>
-								<select name="color" required>
-									<option value="blue">Blue</option>
-									<option value="teal">Teal</option>
-									<option value="violet">Violet</option>
-									<option value="ochre">Ochre</option>
-								</select>
-								<p class="form-error" data-gosx-field-error="color" aria-live="polite"></p>
+								<span>New track name</span>
+								<input name="name" required></input>
+								<p class="form-error" data-gosx-field-error="name" aria-live="polite"></p>
 							</label>
-							<label>
-								<span>Description</span>
-								<input name="description" maxlength="500"></input>
-								<p class="form-error" data-gosx-field-error="description" aria-live="polite"></p>
-							</label>
-						</div>
-						<button class="button" type="submit">Add track</button>
-					</ActionForm>
+							<div class="form-grid-two">
+								<label>
+									<span>Color</span>
+									<select name="color" required>
+										<option value="blue">Blue</option>
+										<option value="teal">Teal</option>
+										<option value="violet">Violet</option>
+										<option value="ochre">Ochre</option>
+									</select>
+									<p class="form-error" data-gosx-field-error="color" aria-live="polite"></p>
+								</label>
+								<label>
+									<span>Description</span>
+									<input name="description" maxlength="500"></input>
+									<p class="form-error" data-gosx-field-error="description" aria-live="polite"></p>
+								</label>
+							</div>
+							<button class="button" type="submit">Add track</button>
+						</ActionForm>
+					</If>
 				</section>
 				<section class="panel">
 					<header class="panel-header">
@@ -208,23 +265,25 @@ func Page() Node {
 							</article>
 						</Each>
 					</div>
-					<ActionForm class="settings-add-form" actionName="addRoom">
-						<input type="hidden" name="csrf_token" value={csrf.token}></input>
-						<p class="form-status" role="status" aria-live="polite">{actions.addRoom.message}</p>
-						<div class="form-grid-two">
-							<label>
-								<span>New room name</span>
-								<input name="name" required></input>
-								<p class="form-error" data-gosx-field-error="name" aria-live="polite"></p>
-							</label>
-							<label>
-								<span>Seated capacity</span>
-								<input type="number" name="capacity" min="1" max="100000" required></input>
-								<p class="form-error" data-gosx-field-error="capacity" aria-live="polite"></p>
-							</label>
-						</div>
-						<button class="button" type="submit">Add room</button>
-					</ActionForm>
+					<If cond={!data.workspace.readOnlyPreview}>
+						<ActionForm class="settings-add-form" actionName="addRoom">
+							<input type="hidden" name="csrf_token" value={csrf.token}></input>
+							<p class="form-status" role="status" aria-live="polite">{actions.addRoom.message}</p>
+							<div class="form-grid-two">
+								<label>
+									<span>New room name</span>
+									<input name="name" required></input>
+									<p class="form-error" data-gosx-field-error="name" aria-live="polite"></p>
+								</label>
+								<label>
+									<span>Seated capacity</span>
+									<input type="number" name="capacity" min="1" max="100000" required></input>
+									<p class="form-error" data-gosx-field-error="capacity" aria-live="polite"></p>
+								</label>
+							</div>
+							<button class="button" type="submit">Add room</button>
+						</ActionForm>
+					</If>
 				</section>
 				<section class="panel">
 					<header class="panel-header">
@@ -247,49 +306,92 @@ func Page() Node {
 									</small>
 								</div>
 							</article>
+							<If cond={!data.workspace.readOnlyPreview}>
+								<details class="field-manage-details">
+									<summary>{"Edit " + category.Name}</summary>
+									<ActionForm class="settings-add-form" actionName="updateCategory">
+										<input type="hidden" name="csrf_token" value={csrf.token}></input>
+										<input type="hidden" name="category_id" value={category.ID}></input>
+										<p class="form-status" role="status" aria-live="polite">{actions.updateCategory.message}</p>
+										<label>
+											<span>Category name</span>
+											<input name="name" value={category.Name} required></input>
+											<p class="form-error" data-gosx-field-error="name" aria-live="polite"></p>
+										</label>
+										<div class="form-grid-two">
+											<label>
+												<span>Category owner (optional)</span>
+												<input name="owner_name" value={category.OwnerName}></input>
+											</label>
+											<label>
+												<span>Owner email (optional)</span>
+												<input type="email" name="owner_email" value={category.OwnerEmail}></input>
+												<p class="form-error" data-gosx-field-error="owner_email" aria-live="polite"></p>
+											</label>
+										</div>
+										<label>
+											<span>Default program track (optional)</span>
+											<select name="track_id">
+												<option value="" selected={category.TrackID == ""}>No default track</option>
+												<Each of={data.tracks} as="track">
+													<option value={track.ID} selected={track.ID == category.TrackID}>{track.Name}</option>
+												</Each>
+											</select>
+											<p class="form-error" data-gosx-field-error="track_id" aria-live="polite"></p>
+										</label>
+										<button class="button" type="submit">Save category</button>
+									</ActionForm>
+									<ActionForm class="field-remove-form" actionName="retireCategory">
+										<input type="hidden" name="csrf_token" value={csrf.token}></input>
+										<input type="hidden" name="category_id" value={category.ID}></input>
+										<p class="form-error" data-gosx-field-error="category" aria-live="polite"></p>
+										<p class="form-status" role="status" aria-live="polite">{actions.retireCategory.message}</p>
+										<button class="button button-compact" type="submit">Retire unused category</button>
+									</ActionForm>
+								</details>
+							</If>
 						</Each>
 					</div>
-					<ActionForm class="settings-add-form" actionName="addCategory">
-						<input type="hidden" name="csrf_token" value={csrf.token}></input>
-						<p class="form-status" role="status" aria-live="polite">{actions.addCategory.message}</p>
-						<label>
-							<span>New category name</span>
-							<input name="name" required></input>
-							<p class="form-error" data-gosx-field-error="name" aria-live="polite"></p>
-						</label>
-						<div class="form-grid-two">
+					<If cond={!data.workspace.readOnlyPreview}>
+						<ActionForm class="settings-add-form" actionName="addCategory">
+							<input type="hidden" name="csrf_token" value={csrf.token}></input>
+							<p class="form-status" role="status" aria-live="polite">{actions.addCategory.message}</p>
 							<label>
-								<span>Category owner</span>
-								<input name="owner_name" required></input>
-								<p class="form-error" data-gosx-field-error="owner_name" aria-live="polite"></p>
+								<span>New category name</span>
+								<input name="name" required></input>
+								<p class="form-error" data-gosx-field-error="name" aria-live="polite"></p>
 							</label>
+							<div class="form-grid-two">
+								<label>
+									<span>Category owner</span>
+									<input name="owner_name"></input>
+								</label>
+								<label>
+									<span>Owner email</span>
+									<input type="email" name="owner_email"></input>
+									<p class="form-error" data-gosx-field-error="owner_email" aria-live="polite"></p>
+								</label>
+							</div>
 							<label>
-								<span>Owner email</span>
-								<input type="email" name="owner_email" required></input>
-								<p class="form-error" data-gosx-field-error="owner_email" aria-live="polite"></p>
+								<span>Program track</span>
+								<select name="track_id">
+									<option value="">No default track</option>
+									<Each of={data.tracks} as="track">
+										<option value={track.ID}>{track.Name}</option>
+									</Each>
+								</select>
+								<p class="form-error" data-gosx-field-error="track_id" aria-live="polite"></p>
 							</label>
-						</div>
-						<label>
-							<span>Program track</span>
-							<select name="track_id" required>
-								<option value="">Choose a track</option>
-								<Each of={data.tracks} as="track">
-									<option value={track.ID}>{track.Name}</option>
-								</Each>
-							</select>
-							<p class="form-error" data-gosx-field-error="track_id" aria-live="polite"></p>
-						</label>
-						<p class="form-note">
-							Until a policy names this category,
-							<code>{data.categoryFallback.rule}</code>
-							routes it to
-							{data.categoryFallback.queue}
-							on
-							{data.categoryFallback.track}
-							.
-						</p>
-						<button class="button" type="submit">Add category</button>
-					</ActionForm>
+							<p class="form-note">
+								The active policy fallback
+								<code>{data.categoryFallback.rule}</code>
+								routes new categories to
+								{data.categoryFallback.queue}
+								.
+							</p>
+							<button class="button" type="submit">Add category</button>
+						</ActionForm>
+					</If>
 				</section>
 				<section class="panel">
 					<header class="panel-header">
@@ -301,27 +403,34 @@ func Page() Node {
 					<p>
 						Download a checksummed workspace for a guided restore, or a full archive with uploads and the independent audit ledger.
 					</p>
-					<p class="settings-actions">
-						<a class="button" href="/organizer/export/workspace.json">Download workspace</a>
-						<a class="button" href="/organizer/export/archive.tar.gz">Download full archive</a>
-					</p>
-					<Form
-						class="settings-form workspace-import-form"
-						method="post"
-						action="/organizer/import/workspace"
-						enctype="multipart/form-data"
-					>
-						<input type="hidden" name="csrf_token" value={csrf.token}></input>
-						<label>
-							<span>Restore workspace export</span>
-							<input type="file" name="workspace" accept="application/json,.json" required></input>
-						</label>
-						<p class="form-note">
-							A validated restore first creates a local backup. This host’s organizer principals, passkeys, and pending sign-in links stay in place.
+					<If cond={!data.workspace.readOnlyPreview}>
+						<p class="settings-actions">
+							<a class="button" href="/organizer/export/workspace.json">Download workspace</a>
+							<a class="button" href="/organizer/export/archive.tar.gz">Download full archive</a>
 						</p>
-						<p class="form-status" role="status" aria-live="polite"></p>
-						<button class="button button-primary" type="submit">Restore workspace</button>
-					</Form>
+						<Form
+							class="settings-form workspace-import-form"
+							method="post"
+							action="/organizer/import/workspace"
+							enctype="multipart/form-data"
+						>
+							<input type="hidden" name="csrf_token" value={csrf.token}></input>
+							<label>
+								<span>Restore workspace export</span>
+								<input type="file" name="workspace" accept="application/json,.json" required></input>
+							</label>
+							<p class="form-note">
+								A validated restore first creates a local backup. This host’s organizer principals, passkeys, and pending sign-in links stay in place.
+							</p>
+							<p class="form-status" role="status" aria-live="polite"></p>
+							<button class="button button-primary" type="submit">Restore workspace</button>
+						</Form>
+					</If>
+					<If cond={data.workspace.readOnlyPreview}>
+						<p class="control-note">
+							Exports and guided restore are available to authenticated organizers on a self-hosted workspace.
+						</p>
+					</If>
 				</section>
 			</aside>
 		</div>

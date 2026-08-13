@@ -4,11 +4,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/m31-labs/rostrum/internal/domain"
+	"github.com/m31-labs/rostrum/examples/demo/fixture"
 )
 
 func TestSubmissionDetailIncludesTheFullAbstract(t *testing.T) {
-	state := domain.Seed(time.Now().UTC())
+	state := fixture.Seed(time.Now().UTC())
 	view, err := SubmissionDetail(state, "sub_memory")
 	if err != nil {
 		t.Fatalf("SubmissionDetail: %v", err)
@@ -34,7 +34,7 @@ func TestSubmissionDetailIncludesTheFullAbstract(t *testing.T) {
 }
 
 func TestSubmissionDetailReportsNotFound(t *testing.T) {
-	state := domain.Seed(time.Now().UTC())
+	state := fixture.Seed(time.Now().UTC())
 	if _, err := SubmissionDetail(state, "sub_does_not_exist"); err == nil {
 		t.Fatal("expected an error for an unknown submission id")
 	}

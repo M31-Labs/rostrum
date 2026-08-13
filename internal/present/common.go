@@ -158,7 +158,7 @@ func SortedSessions(sessions []domain.Session) []domain.Session {
 // navigation links to: the first open form, or, when no form is open, the
 // first form of any status. It reports ok=false when state.Forms is empty,
 // so a caller can hide the "New submission" link on a workspace that has
-// not created a form yet (SEED=empty).
+// not created a form yet (INITIAL_WORKSPACE=empty).
 func PrimaryForm(state domain.State) (domain.SubmissionForm, bool) {
 	for _, form := range state.Forms {
 		if form.Status == "open" {
@@ -198,9 +198,8 @@ func EventMonogram(name string) string {
 // the event name, a short monogram, and the links to the primary call for
 // proposals and the public agenda and speaker gallery. Every organizer page
 // and the public-facing layouts add this under the "workspace" key so
-// app/layout.gsx and app/organizer/layout.gsx read live values instead of
-// a fixed demo event and form slug — the links stay correct on a fresh,
-// unseeded workspace (SEED=fresh or SEED=empty) as well as the seeded demo.
+// app/layout.gsx and app/organizer/layout.gsx read live values rather than
+// workspace-specific names or slugs.
 func WorkspaceIdentity(state domain.State) map[string]any {
 	cfpSlug := ""
 	if form, ok := PrimaryForm(state); ok {
@@ -209,7 +208,9 @@ func WorkspaceIdentity(state domain.State) map[string]any {
 	return map[string]any{
 		"eventName":          state.Event.Name,
 		"monogram":           EventMonogram(state.Event.Name),
-		"readOnlyDemo":       ReadOnlyDemoMode(),
+		"readOnlyPreview":    ReadOnlyPreviewMode(),
+		"previewLabel":       PreviewLabel(),
+		"previewMessage":     PreviewMessage(),
 		"hasCFP":             cfpSlug != "",
 		"cfpHref":            "/submit/" + cfpSlug,
 		"publicAgendaHref":   "/public/" + state.Event.Slug + "/agenda",

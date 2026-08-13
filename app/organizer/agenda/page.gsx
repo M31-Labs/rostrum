@@ -143,15 +143,23 @@ func AgendaBoard(props any) Node {
 		<aside class="agenda-bank" aria-label="Unscheduled sessions">
 			<header class="agenda-bank-head">
 				<h2>Unscheduled</h2>
-				<p>
-					Accepted sessions waiting for a room and time. Drag a card onto the board to place it.
-				</p>
+				<If cond={!props.readOnly}>
+					<p>
+						Accepted sessions waiting for a room and time. Drag a card onto the board to place it.
+					</p>
+				</If>
+				<If cond={props.readOnly}>
+					<p>
+						Read-only schedule snapshot. Use the local interactive run to place sessions.
+					</p>
+				</If>
 			</header>
 			<div class="agenda-bank-list">
 				<Each of={props.bank} as="session">
 					<article
 						class={"agenda-card agenda-bank-card track-" + session.trackTone}
-						draggable="true"
+						draggable={props.readOnly || session.statusValue == "cancelled" ? "false" : "true"}
+						aria-disabled={props.readOnly || session.statusValue == "cancelled"}
 						aria-grabbed={draggedID.Get() == session.id}
 						data-gosx-event-value={session.id}
 						data-session-id={session.id}
@@ -199,7 +207,8 @@ func AgendaBoard(props any) Node {
 							<Each of={cell.sessions} as="session">
 								<article
 									class={"agenda-card track-" + session.trackTone}
-									draggable="true"
+									draggable={props.readOnly || session.statusValue == "cancelled" ? "false" : "true"}
+									aria-disabled={props.readOnly || session.statusValue == "cancelled"}
 									aria-grabbed={draggedID.Get() == session.id}
 									data-gosx-event-value={session.id}
 									data-session-id={session.id}
@@ -227,52 +236,56 @@ func AgendaBoard(props any) Node {
 													<dd>{session.track}</dd>
 												</div>
 											</dl>
-											<form
-												class="agenda-unschedule-form"
-												method="post"
-												action={props.unscheduleAction}
-												data-gosx-form
-												data-gosx-form-mode="post"
-												data-gosx-form-state="idle"
-												data-gosx-enhance="form"
-												data-gosx-enhance-layer="bootstrap"
-												data-gosx-fallback="native-form"
-											>
-												<input type="hidden" name="csrf_token" value={props.csrf}></input>
-												<input type="hidden" name="session_id" value={session.id}></input>
-												<input type="hidden" name="day" value={props.day}></input>
-												<button class="button button-compact" type="submit">Return to bank</button>
-											</form>
+											<If cond={!props.readOnly && session.statusValue != "cancelled"}>
+												<form
+													class="agenda-unschedule-form"
+													method="post"
+													action={props.unscheduleAction}
+													data-gosx-form
+													data-gosx-form-mode="post"
+													data-gosx-form-state="idle"
+													data-gosx-enhance="form"
+													data-gosx-enhance-layer="bootstrap"
+													data-gosx-fallback="native-form"
+												>
+													<input type="hidden" name="csrf_token" value={props.csrf}></input>
+													<input type="hidden" name="session_id" value={session.id}></input>
+													<input type="hidden" name="day" value={props.day}></input>
+													<button class="button button-compact" type="submit">Return to bank</button>
+												</form>
+											</If>
 										</div>
 									</details>
 								</article>
 							</Each>
-							<span class="drop-hint">Drop here</span>
+							<span class="drop-hint" hidden={props.readOnly}>Drop here</span>
 						</div>
 					</Each>
 				</div>
 			</Each>
 		</section>
-		<form
-			id="agenda-drag-form"
-			class="agenda-drag-form"
-			method="post"
-			action={props.action}
-			data-gosx-form
-			data-gosx-form-mode="post"
-			data-gosx-form-state="idle"
-			data-gosx-enhance="form"
-			data-gosx-enhance-layer="bootstrap"
-			data-gosx-fallback="native-form"
-		>
-			<input type="hidden" name="csrf_token" value={props.csrf}></input>
-			<input type="hidden" name="session_id" value={draggedID.Get()}></input>
-			<input type="hidden" name="track_id" value={draggedTrack.Get()}></input>
-			<input type="hidden" name="room_id" value={dropRoom.Get()}></input>
-			<input type="hidden" name="starts_at" value={dropStart.Get()}></input>
-			<p class="form-error agenda-drag-error" data-gosx-field-error="starts_at" aria-live="polite"></p>
-			<p class="form-status agenda-drag-status" role="alert" aria-live="assertive" tabindex="-1">{props.actionMessage}</p>
-		</form>
+		<If cond={!props.readOnly}>
+			<form
+				id="agenda-drag-form"
+				class="agenda-drag-form"
+				method="post"
+				action={props.action}
+				data-gosx-form
+				data-gosx-form-mode="post"
+				data-gosx-form-state="idle"
+				data-gosx-enhance="form"
+				data-gosx-enhance-layer="bootstrap"
+				data-gosx-fallback="native-form"
+			>
+				<input type="hidden" name="csrf_token" value={props.csrf}></input>
+				<input type="hidden" name="session_id" value={draggedID.Get()}></input>
+				<input type="hidden" name="track_id" value={draggedTrack.Get()}></input>
+				<input type="hidden" name="room_id" value={dropRoom.Get()}></input>
+				<input type="hidden" name="starts_at" value={dropStart.Get()}></input>
+				<p class="form-error agenda-drag-error" data-gosx-field-error="starts_at" aria-live="polite"></p>
+				<p class="form-status agenda-drag-status" role="alert" aria-live="assertive" tabindex="-1">{props.actionMessage}</p>
+			</form>
+		</If>
 		<p class="sr-only" role="status" aria-live="polite">{status.Get()}</p>
 	</div>
 }
@@ -292,10 +305,12 @@ func AgendaListRow(props any) Node {
 			<small>{props.track}</small>
 		</div>
 		<span class={"status-pill status-" + props.tone}>{props.status}</span>
-		<details>
-			<summary>Move</summary>
-			<SessionMoveForm {...props}></SessionMoveForm>
-		</details>
+		<If cond={!data.workspace.readOnlyPreview && props.statusValue != "cancelled"}>
+			<details>
+				<summary aria-label={"Move " + props.title}>Move</summary>
+				<SessionMoveForm {...props}></SessionMoveForm>
+			</details>
+		</If>
 	</article>
 }
 
@@ -315,15 +330,17 @@ func Page() Node {
 			</div>
 			<div class="workspace-header-actions">
 				<a class="button" href={data.workspace.publicAgendaHref} data-gosx-link>Preview public agenda</a>
-				<ActionForm actionName="publishAgenda">
-					<input type="hidden" name="csrf_token" value={csrf.token}></input>
-					<p class="form-error" data-gosx-field-error="agenda" aria-live="polite"></p>
-					<p class="form-status" role="status" aria-live="polite">{action.message}</p>
-					<button class="button button-primary" type="submit" disabled={!data.publishable}>Publish agenda</button>
-				</ActionForm>
+				<If cond={!data.workspace.readOnlyPreview}>
+					<ActionForm actionName="publishAgenda">
+						<input type="hidden" name="csrf_token" value={csrf.token}></input>
+						<p class="form-error" data-gosx-field-error="agenda" aria-live="polite"></p>
+						<p class="form-status" role="status" aria-live="polite">{action.message}</p>
+						<button class="button button-primary" type="submit" disabled={!data.publishable}>Publish agenda</button>
+					</ActionForm>
+				</If>
 			</div>
 		</header>
-		<p class="flash-message">
+		<p class="flash-message" role="status" aria-live="polite">
 			{flash.notice}
 			{action.message}
 		</p>
@@ -338,18 +355,23 @@ func Page() Node {
 					<a class={day.class} href={day.href} data-gosx-link>{day.label}</a>
 				</Each>
 			</nav>
-			<p>
+			<p hidden={data.workspace.readOnlyPreview}>
 				<span aria-hidden="true">↕</span>
 				Drag a card or open its keyboard-accessible move controls.
 			</p>
-		</div>
-		<details class="panel agenda-create-session">
-			<summary>Add a manual session</summary>
-			<p>
-				Create a session directly in the unscheduled bank, then place it through the same conflict-aware move control as every accepted proposal.
+			<p hidden={!data.workspace.readOnlyPreview}>
+				Schedule controls are available in the local interactive run.
 			</p>
-			<SessionCreateForm day={data.dayKey}></SessionCreateForm>
-		</details>
+		</div>
+		<If cond={!data.workspace.readOnlyPreview}>
+			<details class="panel agenda-create-session">
+				<summary>Add a manual session</summary>
+				<p>
+					Create a session directly in the unscheduled bank, then place it through the same conflict-aware move control as every accepted proposal.
+				</p>
+				<SessionCreateForm day={data.dayKey}></SessionCreateForm>
+			</details>
+		</If>
 		<If cond={data.boardView}>
 			<AgendaBoard
 				date={data.date}
@@ -362,15 +384,18 @@ func Page() Node {
 				unscheduleAction={actionPath("unscheduleSession")}
 				csrf={csrf.token}
 				actionMessage={"" + action.message}
+				readOnly={data.workspace.readOnlyPreview}
 			></AgendaBoard>
-			<details class="agenda-keyboard-moves">
-				<summary>Move a session without drag and drop</summary>
-				<div class="agenda-list">
-					<Each of={data.moveSessions} as="session">
-						<AgendaListRow {...session}></AgendaListRow>
-					</Each>
-				</div>
-			</details>
+			<If cond={!data.workspace.readOnlyPreview}>
+				<details class="agenda-keyboard-moves">
+					<summary>Move a session without drag and drop</summary>
+					<div class="agenda-list">
+						<Each of={data.moveSessions} as="session">
+							<AgendaListRow {...session}></AgendaListRow>
+						</Each>
+					</div>
+				</details>
+			</If>
 		</If>
 		<If cond={!data.boardView}>
 			<section class="agenda-list-view" aria-label={data.view + " agenda view"}>

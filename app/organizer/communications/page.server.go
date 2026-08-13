@@ -61,7 +61,7 @@ func queueMessage(ctx *action.Context) error {
 	templateID := strings.TrimSpace(ctx.FormData["template_id"])
 	speakerID := strings.TrimSpace(ctx.FormData["speaker_id"])
 	provider := strings.TrimSpace(ctx.FormData["provider"])
-	if provider != "configured" && provider != "demo-outbox" && provider != "gmail" && provider != "outlook" {
+	if provider != "configured" && provider != "outbox" && provider != "gmail" && provider != "outlook" {
 		return action.Validation("Choose a delivery provider.", map[string]string{"provider": "Unknown provider."}, ctx.FormData)
 	}
 

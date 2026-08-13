@@ -23,8 +23,8 @@ import (
 // portal token never verifies against this one), even when both processes
 // read the identical SESSION_SECRET value.
 const (
-	reviewerKeyPurpose     = "rostrum.reviewer.token.v1:"
-	reviewerDemoKeyPurpose = "rostrum.reviewer.demo-token.v1:"
+	reviewerKeyPurpose        = "rostrum.reviewer.token.v1:"
+	reviewerPreviewKeyPurpose = "rostrum.reviewer.preview-token.v1:"
 )
 
 // ReviewerToken signs and verifies reviewer identity tokens for one
@@ -34,9 +34,9 @@ const (
 // *Token and a *ReviewerToken are different things, and the derived key
 // enforces it again at the byte level.
 type ReviewerToken struct {
-	key     []byte
-	demoKey []byte
-	ttl     time.Duration
+	key        []byte
+	previewKey []byte
+	ttl        time.Duration
 }
 
 var (
@@ -60,8 +60,8 @@ func newReviewerToken(secret string) *ReviewerToken {
 		secret = developmentSecret
 	}
 	sum := sha256.Sum256([]byte(reviewerKeyPurpose + secret))
-	demoSum := sha256.Sum256([]byte(reviewerDemoKeyPurpose + secret))
-	return &ReviewerToken{key: sum[:], demoKey: demoSum[:], ttl: TTL}
+	previewSum := sha256.Sum256([]byte(reviewerPreviewKeyPurpose + secret))
+	return &ReviewerToken{key: sum[:], previewKey: previewSum[:], ttl: TTL}
 }
 
 // reviewerClaims is the signed payload for a reviewer token. Its field name
@@ -90,19 +90,19 @@ func (t *ReviewerToken) SignReviewer(reviewerID string) string {
 	return encodeSegment(body) + "." + encodeSegment(t.sign(body))
 }
 
-// SignReviewerDemo returns a demo-only reviewer token for a persona link on
-// /tour. A live process rejects it even when it has the same SESSION_SECRET
-// and reviewer records as the demo process.
-func (t *ReviewerToken) SignReviewerDemo(reviewerID string) string {
+// SignReviewerPreview returns a preview-only reviewer token for a persona
+// link on /tour. A live process rejects it even when it has the same
+// SESSION_SECRET and reviewer records as the preview process.
+func (t *ReviewerToken) SignReviewerPreview(reviewerID string) string {
 	body, err := json.Marshal(reviewerClaims{
 		ReviewerID: strings.TrimSpace(reviewerID),
 		ExpiresAt:  time.Now().Add(t.ttl).Unix(),
-		Audience:   demoAudience,
+		Audience:   previewAudience,
 	})
 	if err != nil {
 		return ""
 	}
-	return encodeSegment(body) + "." + encodeSegment(t.signDemo(body))
+	return encodeSegment(body) + "." + encodeSegment(t.signPreview(body))
 }
 
 // VerifyReviewer reports the reviewer ID bound to tok when tok carries a
@@ -124,13 +124,13 @@ func (t *ReviewerToken) VerifyReviewer(tok string) (reviewerID string, ok bool) 
 	if err != nil {
 		return "", false
 	}
-	// Authenticate before parsing the body. Demo signatures are considered
-	// only by a process explicitly running in demo mode.
+	// Authenticate before parsing the body. Preview signatures are considered
+	// only by a process explicitly running in preview mode.
 	wantAudience := ""
 	switch {
 	case hmac.Equal(sig, t.sign(body)):
-	case demoModeEnabled() && hmac.Equal(sig, t.signDemo(body)):
-		wantAudience = demoAudience
+	case previewModeEnabled() && hmac.Equal(sig, t.signPreview(body)):
+		wantAudience = previewAudience
 	default:
 		return "", false
 	}
@@ -151,6 +151,6 @@ func (t *ReviewerToken) sign(body []byte) []byte {
 	return signWithKey(t.key, body)
 }
 
-func (t *ReviewerToken) signDemo(body []byte) []byte {
-	return signWithKey(t.demoKey, body)
+func (t *ReviewerToken) signPreview(body []byte) []byte {
+	return signWithKey(t.previewKey, body)
 }

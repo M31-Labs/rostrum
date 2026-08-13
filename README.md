@@ -24,7 +24,7 @@ matches what you want to test:
 | Path | Best for | Mutations | Setup |
 | --- | --- | --- | --- |
 | **Local judge demo — recommended first** | Verified visual/persona tour of the exact source tree | No; deliberately read-only | Go 1.26, Make, `curl`, and a POSIX shell; one command |
-| **Local interactive run** | Full feature scoring and end-to-end testing | Yes | Go 1.26; about one minute |
+| **Fresh interactive run** | Organizer setup and end-to-end feature testing from a clean workspace | Yes | Go 1.26 and Make; about one minute |
 | **Hosted preview** | A quick visual tour when the deployment preflight passes | No; deliberately read-only | None |
 
 ### Launch the deterministic judge demo
@@ -35,18 +35,19 @@ cd rostrum
 make judge-demo
 ```
 
-The helper builds into a disposable directory, boots the exact fictional
-read-only fixture, runs the full hosted-demo smoke contract, and prints every
-evaluation URL. Start at the guided [product tour](http://127.0.0.1:8080/tour).
-Press `Ctrl-C` to remove the process and fixture.
+The helper builds into a disposable directory, prepares the fictional
+evaluation fixture from [`examples/demo/`](examples/demo/README.md), boots it
+through generic read-only preview mode, runs the full smoke contract, and
+prints every evaluation URL. Start at the guided
+[product tour](http://127.0.0.1:8080/tour). Press `Ctrl-C` to remove the process
+and generated workspace.
 
-### Run the complete product locally
+### Run a fresh interactive workspace locally
 
 ```bash
 git clone https://github.com/M31-Labs/rostrum.git
 cd rostrum
-cp .env.example .env
-DEMO_MODE=memory go run .
+APP_MODE=live make dev
 ```
 
 Rostrum prints a one-time first-organizer URL to the terminal:
@@ -57,15 +58,17 @@ Rostrum has no organizer yet. Finish setup at: http://localhost:8080/setup?token
 
 Open that exact URL, enter a name and email address, and Rostrum creates the
 first organizer and signs that browser in. No email provider or external
-credential is needed. `DEMO_MODE=memory` makes the evaluation disposable; use
-plain `go run .` to persist the seeded workspace to `data/rostrum.json`.
+credential is needed. `make dev` uses an in-memory `INITIAL_WORKSPACE=fresh`
+store, so a restart discards it. The starter contains one editable CFP and no
+fictional speakers, proposals, reviews, or sessions. Follow the
+[self-hosting manual](docs/self-hosting.md) for a durable organizer workspace.
 
 Then visit:
 
 - [Guided product tour](http://localhost:8080/tour)
 - [Organizer workspace](http://localhost:8080/organizer)
-- [Public call for speakers](http://localhost:8080/submit/systems-forum-cfp)
-- [Public agenda](http://localhost:8080/public/m31-systems-forum-2026/agenda)
+- [Starter call for speakers](http://localhost:8080/submit/call-for-proposals)
+- [Public agenda](http://localhost:8080/public/your-event/agenda)
 - [Public API directory](http://localhost:8080/api/v1/workspace)
 
 Press `Ctrl/Cmd K` inside the workspace for the switcher, or press `G` followed
@@ -87,8 +90,9 @@ A judge-ready preview reports an immutable Rostrum version (not `dev`), the
 event slug `m31-systems-forum-2026`, and non-zero published session and speaker
 counts. Its `/organizer` route opens without sign-in and responses include
 `X-Robots-Tag: noindex, nofollow, noarchive`. If any check differs, use the
-[local interactive path](#run-the-complete-product-locally); it exercises the
-same repository with mutations enabled.
+[local judge demo](#launch-the-deterministic-judge-demo) for the same fictional
+workspace, or the [fresh interactive path](#run-a-fresh-interactive-workspace-locally)
+when you need mutations.
 
 The complete five-minute route and expected evidence are in the
 [judging guide](docs/judging-guide.md).
@@ -96,18 +100,19 @@ The complete five-minute route and expected evidence are in the
 ## See the handoffs, not a feature maze
 
 The `/tour` route follows five people through the same record: organizer,
-submitter, reviewer, speaker, and attendee. In a correctly configured read-only
-demo it also issues signed, persona-scoped links so judges can inspect the
-reviewer desk and speaker portal while the independent demo gate still rejects
-every mutation.
+submitter, reviewer, speaker, and attendee. In the correctly configured
+read-only evaluation preview it also issues signed, persona-scoped links so
+judges can inspect the reviewer desk and speaker portal while the independent
+preview gate still rejects every mutation.
 
 | Organizer command center | Published speaker experience |
 | --- | --- |
 | ![Rostrum organizer overview with pipeline, readiness, and schedule risk](docs/images/organizer-overview.webp) | ![Rostrum public speaker gallery with approved portraits and session details](docs/images/speaker-gallery.webp) |
 
 Every capture is generated from the deterministic fictional fixture. The
-approved seed portraits are synthetic fictional assets, never real speaker
-data; their initials fallbacks also demonstrate the publication-consent gate.
+approved example portraits are synthetic assets under `examples/demo/`, never
+real speaker data; their initials fallbacks also demonstrate the
+publication-consent gate.
 
 ## One record, the whole program
 
@@ -202,9 +207,9 @@ go install m31labs.dev/arbiter/cmd/arbiter@v1.9.0
 
 make check          # formatting, policy validation, vet, tests, race tests
 make build          # production bundle in dist/
-make smoke          # verify the deterministic read-only demo contract
+make smoke          # verify the fictional read-only preview contract
 make judge-demo     # verify, launch, print judge URLs, clean up on Ctrl-C
-make release-check  # check, size-budget build, and full demo smoke
+make release-check  # check, size-budget build, and full example smoke
 ```
 
 The app is server-rendered with GoSX. It ships no hand-written browser
@@ -218,9 +223,11 @@ enforces [`size-budget.json`](size-budget.json) and
 - [Published documentation site](https://m31-labs.github.io/rostrum/)
 - [Documentation home](docs/index.md)
 - [Judge and organizer guide](docs/judging-guide.md)
+- [Fictional evaluation-preview example](examples/demo/README.md)
 - [Architecture, security, and limitations](docs/architecture.md)
 - [API reference](docs/api.md)
-- [Deployment guide](docs/deployment.md)
+- [Self-hosting manual](docs/self-hosting.md)
+- [Deployment reference](docs/deployment.md)
 - [Launch-readiness gate](docs/launch-readiness.md)
 - [Visual system](docs/visual-system.md)
 - [Contributing](.github/CONTRIBUTING.md) · [Security](.github/SECURITY.md) ·

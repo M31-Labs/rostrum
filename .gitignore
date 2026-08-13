@@ -4,6 +4,8 @@
 /_site/
 /tmp
 /.env
+/.env.*
+!/.env.example
 /.playwright
 /.DS_Store
 /.analyses

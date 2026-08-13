@@ -11,12 +11,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/m31-labs/rostrum/examples/demo/fixture"
 	"github.com/m31-labs/rostrum/internal/audit"
 	"github.com/m31-labs/rostrum/internal/domain"
 )
 
 func TestEnvelopeRejectsTamperingAndPreservesCurrentIdentity(t *testing.T) {
-	state := domain.Seed(time.Date(2026, time.August, 10, 12, 0, 0, 0, time.UTC))
+	state := fixture.Seed(time.Date(2026, time.August, 10, 12, 0, 0, 0, time.UTC))
 	state.AuthMagicLinks = []domain.AuthMagicLink{{Token: "hashed", Email: "owner@example.com", ExpiresAt: time.Now().Add(time.Hour)}}
 	data, err := Marshal(state)
 	if err != nil {
@@ -40,7 +41,7 @@ func TestEnvelopeRejectsTamperingAndPreservesCurrentIdentity(t *testing.T) {
 		t.Fatal("Decode(tampered) = nil error, want checksum failure")
 	}
 
-	current := domain.Seed(time.Now().UTC())
+	current := fixture.Seed(time.Now().UTC())
 	current.Principals = []domain.Principal{{ID: "principal_current", Email: "current@example.com"}}
 	current.AuthPasskeys = []domain.AuthPasskey{{ID: "passkey_current"}}
 	kept := PreserveCurrentIdentity(current, imported)
@@ -50,7 +51,7 @@ func TestEnvelopeRejectsTamperingAndPreservesCurrentIdentity(t *testing.T) {
 }
 
 func TestDecodeRejectsChecksummedInvalidEvaluation(t *testing.T) {
-	state := domain.Seed(time.Date(2026, time.August, 10, 12, 0, 0, 0, time.UTC))
+	state := fixture.Seed(time.Date(2026, time.August, 10, 12, 0, 0, 0, time.UTC))
 	data, err := Marshal(state)
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
@@ -76,7 +77,7 @@ func TestDecodeRejectsChecksummedInvalidEvaluation(t *testing.T) {
 }
 
 func TestRebaseUploadPathsUsesOnlyGeneratedBasenames(t *testing.T) {
-	state := domain.Seed(time.Now().UTC())
+	state := fixture.Seed(time.Now().UTC())
 	state.TaskCompletions = append(state.TaskCompletions, domain.TaskCompletion{
 		ID: "done_rebase", TaskID: state.Tasks[0].ID, SpeakerID: state.Speakers[0].ID,
 		StoredPath: "/old-host/data/uploads/upload_example.pdf",
@@ -95,7 +96,7 @@ func TestRebaseUploadPathsUsesOnlyGeneratedBasenames(t *testing.T) {
 
 func TestWriteBackupRetainsNewestTen(t *testing.T) {
 	directory := t.TempDir()
-	state := domain.Seed(time.Now().UTC())
+	state := fixture.Seed(time.Now().UTC())
 	for index := 0; index < BackupRetention+2; index++ {
 		if _, err := writeBackupAt(directory, state, time.Date(2026, time.August, 1, 0, 0, index, 0, time.UTC)); err != nil {
 			t.Fatalf("backup %d: %v", index, err)
@@ -135,7 +136,7 @@ func TestWriteTarGZIncludesWorkspaceUploadsAndAudit(t *testing.T) {
 	}
 
 	var output bytes.Buffer
-	if err := WriteTarGZ(&output, domain.Seed(time.Now().UTC()), uploads, auditPath); err != nil {
+	if err := WriteTarGZ(&output, fixture.Seed(time.Now().UTC()), uploads, auditPath); err != nil {
 		t.Fatalf("WriteTarGZ: %v", err)
 	}
 	gzipReader, err := gzip.NewReader(bytes.NewReader(output.Bytes()))

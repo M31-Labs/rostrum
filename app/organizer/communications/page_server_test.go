@@ -36,8 +36,8 @@ func testWorkspaceState() domain.State {
 	}
 }
 
-// TestQueueMessageSendsAndRecordsOutcome proves the "demo-outbox" path
-// actually sends -- through messageSender (mail.FromEnv), the demo
+// TestQueueMessageSendsAndRecordsOutcome proves the local outbox path
+// actually records -- through messageSender (mail.FromEnv), the network-free
 // OutboxSender here since the test process sets no SMTP_HOST -- and
 // records the real outcome on the appended Communication row: a "sent"
 // status and a stamped SentAt, not the old queue-only bookkeeping.
@@ -53,7 +53,7 @@ func TestQueueMessageSendsAndRecordsOutcome(t *testing.T) {
 		FormData: map[string]string{
 			"template_id": "tpl_test",
 			"speaker_id":  "spk_ada",
-			"provider":    "demo-outbox",
+			"provider":    "outbox",
 		},
 	}
 

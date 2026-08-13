@@ -17,6 +17,7 @@ var AllowedMergeFields = map[string]bool{
 	"{{event.name}}":         true,
 	"{{speaker.first_name}}": true,
 	"{{speaker.name}}":       true,
+	"{{speaker.portal_url}}": true,
 	"{{session.title}}":      true,
 	"{{session.start_time}}": true,
 	"{{session.room}}":       true,
@@ -37,6 +38,9 @@ func Validate(name, audience, subject, body, replyTo string) error {
 	}
 	if strings.TrimSpace(subject) == "" {
 		return fmt.Errorf("template subject is required")
+	}
+	if strings.ContainsAny(subject, "\r\n") {
+		return fmt.Errorf("template subject must be a single line")
 	}
 	if strings.TrimSpace(body) == "" {
 		return fmt.Errorf("template body is required")

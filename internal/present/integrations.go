@@ -61,7 +61,6 @@ func Integrations(state domain.State) map[string]any {
 	pending, failed := outboxCounts(state)
 	return map[string]any{
 		"section":   "integrations",
-		"demoMode":  DemoMode(),
 		"workspace": WorkspaceIdentity(state),
 		"integration": map[string]any{
 			"id":              integration.ID,

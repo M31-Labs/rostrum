@@ -79,6 +79,7 @@ func loadReview(ctx *route.RouteContext, page route.FilePage) (any, error) {
 	if err != nil {
 		return map[string]any{
 			"available":       true,
+			"readOnlyPreview": present.ReadOnlyPreviewMode(),
 			"workspace":       present.WorkspaceIdentity(snapshot),
 			"reviewer":        reviewerSummary(reviewer),
 			"hasActiveRound":  false,
@@ -89,10 +90,11 @@ func loadReview(ctx *route.RouteContext, page route.FilePage) (any, error) {
 
 	submissions := reviewerSubmissionRows(snapshot, plan, reviewer)
 	return map[string]any{
-		"available":      true,
-		"workspace":      present.WorkspaceIdentity(snapshot),
-		"reviewer":       reviewerSummary(reviewer),
-		"hasActiveRound": true,
+		"available":       true,
+		"readOnlyPreview": present.ReadOnlyPreviewMode(),
+		"workspace":       present.WorkspaceIdentity(snapshot),
+		"reviewer":        reviewerSummary(reviewer),
+		"hasActiveRound":  true,
 		"plan": map[string]any{
 			"id":           plan.ID,
 			"name":         plan.Name,
@@ -109,7 +111,7 @@ func loadReview(ctx *route.RouteContext, page route.FilePage) (any, error) {
 // reviewUnavailable is the identical friendly response for a missing or
 // invalid token and an unknown or non-human reviewer ID. It still carries
 // "workspace" so app/layout.gsx's global nav renders a live Submit and
-// public-agenda link on this page too, not the fixed demo slug.
+// public-agenda link on this page too, without a hardcoded event slug.
 func reviewUnavailable(state domain.State) map[string]any {
 	return map[string]any{"available": false, "workspace": present.WorkspaceIdentity(state)}
 }

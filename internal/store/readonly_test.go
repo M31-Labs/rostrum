@@ -5,11 +5,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/m31-labs/rostrum/examples/demo/fixture"
 	"github.com/m31-labs/rostrum/internal/domain"
 )
 
 func TestReadOnlyRejectsEveryMutation(t *testing.T) {
-	seed := domain.Seed(time.Now().UTC())
+	seed := fixture.Seed(time.Now().UTC())
 	base, err := Open(":memory:", seed)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
@@ -29,8 +30,8 @@ func TestReadOnlyRejectsEveryMutation(t *testing.T) {
 	}
 	for _, check := range checks {
 		t.Run(check.name, func(t *testing.T) {
-			if err := check.call(); !errors.Is(err, ErrReadOnlyDemo) {
-				t.Fatalf("error = %v, want ErrReadOnlyDemo", err)
+			if err := check.call(); !errors.Is(err, ErrReadOnly) {
+				t.Fatalf("error = %v, want ErrReadOnly", err)
 			}
 		})
 	}

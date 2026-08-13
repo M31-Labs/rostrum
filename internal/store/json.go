@@ -175,7 +175,7 @@ func (store *JSONStore) persistLocked() error {
 	if store.path == "" {
 		return nil
 	}
-	if err := os.MkdirAll(filepath.Dir(store.path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(store.path), 0o700); err != nil {
 		return fmt.Errorf("create data directory: %w", err)
 	}
 	data, err := json.MarshalIndent(store.state, "", "  ")

@@ -212,6 +212,62 @@ func FormScheduleForm() Node {
 	</ActionForm>
 }
 
+func FormDetailsForm() Node {
+	return <ActionForm class="field-add-form" actionName="updateFormDetails">
+		<input type="hidden" name="csrf_token" value={csrf.token}></input>
+		<input type="hidden" name="form_id" value={data.form.id}></input>
+		<p class="form-status" role="status" aria-live="polite">{actions.updateFormDetails.message}</p>
+		<div class="form-grid-two">
+			<label>
+				<span>Internal name</span>
+				<input name="name" value={data.form.name} maxlength="200" required></input>
+				<p class="form-error" data-gosx-field-error="name" aria-live="polite"></p>
+			</label>
+			<label>
+				<span>Public title</span>
+				<input name="title" value={data.form.title} maxlength="200" required></input>
+				<p class="form-error" data-gosx-field-error="title" aria-live="polite"></p>
+			</label>
+			<label>
+				<span>Welcome heading</span>
+				<input name="welcome_heading" value={data.form.welcomeHeading} maxlength="200" required></input>
+				<p class="form-error" data-gosx-field-error="welcome_heading" aria-live="polite"></p>
+			</label>
+			<label>
+				<span>Success heading (optional)</span>
+				<input name="success_heading" value={data.form.successHeading} maxlength="200"></input>
+				<p class="form-error" data-gosx-field-error="success_heading" aria-live="polite"></p>
+			</label>
+		</div>
+		<label>
+			<span>Welcome copy</span>
+			<textarea name="welcome_body" maxlength="4000" required>{data.form.welcomeBody}</textarea>
+			<p class="form-error" data-gosx-field-error="welcome_body" aria-live="polite"></p>
+		</label>
+		<label>
+			<span>Success copy (optional)</span>
+			<textarea name="success_body" maxlength="4000">{data.form.successBody}</textarea>
+			<p class="form-error" data-gosx-field-error="success_body" aria-live="polite"></p>
+		</label>
+		<div class="form-grid-two">
+			<label class="checkbox-control">
+				<input type="checkbox" name="send_confirmation" value="yes" checked={data.form.confirmation}></input>
+				<span>
+					Send the configured submission confirmation
+				</span>
+			</label>
+			<label class="checkbox-control">
+				<input type="checkbox" name="redirect_to_portal" value="yes" checked={data.form.redirect}></input>
+				<span>
+					Continue from success into the speaker portal
+				</span>
+			</label>
+		</div>
+		<p class="form-error" data-gosx-field-error="send_confirmation" aria-live="polite"></p>
+		<button class="button button-primary" type="submit">Save public copy</button>
+	</ActionForm>
+}
+
 func CreateForm() Node {
 	return <ActionForm class="field-add-form" actionName="createForm">
 		<input type="hidden" name="csrf_token" value={csrf.token}></input>
@@ -322,10 +378,10 @@ func Page() Node {
 			<div class="workspace-header-actions">
 				<If cond={data.hasForm}>
 					<a class="button" href={data.form.publicURL} data-gosx-link>Preview public form</a>
-					<If cond={data.form.statusValue == "open"}>
+					<If cond={!data.workspace.readOnlyPreview && data.form.statusValue == "open"}>
 						<ToggleStatus next="closed" label="Close CFP" className="button"></ToggleStatus>
 					</If>
-					<If cond={data.form.statusValue == "closed"}>
+					<If cond={!data.workspace.readOnlyPreview && data.form.statusValue == "closed"}>
 						<ToggleStatus next="open" label="Open CFP" className="button button-primary"></ToggleStatus>
 					</If>
 				</If>
@@ -365,10 +421,12 @@ func Page() Node {
 					</a>
 				</Each>
 			</div>
-			<details class="field-add-details">
-				<summary>Create another form</summary>
-				<CreateForm></CreateForm>
-			</details>
+			<If cond={!data.workspace.readOnlyPreview}>
+				<details class="field-add-details">
+					<summary>Create another form</summary>
+					<CreateForm></CreateForm>
+				</details>
+			</If>
 		</section>
 		<If cond={!data.hasForm}>
 			<section class="panel">
@@ -380,6 +438,18 @@ func Page() Node {
 			</section>
 		</If>
 		<If cond={data.hasForm}>
+			<If cond={!data.workspace.readOnlyPreview}>
+				<section class="panel">
+					<header class="panel-header">
+						<div>
+							<p class="panel-kicker">Public handoff</p>
+							<h2>Copy, confirmation, and portal</h2>
+						</div>
+						<span>Editable</span>
+					</header>
+					<FormDetailsForm></FormDetailsForm>
+				</section>
+			</If>
 			<section class="form-summary-grid">
 				<article class="form-summary-card summary-primary">
 					<div class="summary-top">
@@ -408,17 +478,33 @@ func Page() Node {
 					<p class="panel-kicker">Submission outcome</p>
 					<h2>Close the loop immediately.</h2>
 					<ul class="check-list">
+						<If cond={data.form.confirmation}>
+							<li>
+								<span aria-hidden="true">✓</span>
+								Confirmation email is enabled
+							</li>
+						</If>
+						<If cond={!data.form.confirmation}>
+							<li>
+								<span aria-hidden="true">—</span>
+								Confirmation email is disabled
+							</li>
+						</If>
+						<If cond={data.form.redirect}>
+							<li>
+								<span aria-hidden="true">✓</span>
+								Submitter redirects into their portal
+							</li>
+						</If>
+						<If cond={!data.form.redirect}>
+							<li>
+								<span aria-hidden="true">—</span>
+								Submitter stays on the success page
+							</li>
+						</If>
 						<li>
 							<span aria-hidden="true">✓</span>
-							Confirmation email is enabled
-						</li>
-						<li>
-							<span aria-hidden="true">✓</span>
-							Submitter redirects into their portal
-						</li>
-						<li>
-							<span aria-hidden="true">✓</span>
-							Category policy assigns queue, owner, and track
+							Category policy records an explainable route
 						</li>
 					</ul>
 					<p class="policy-file">
@@ -442,22 +528,24 @@ func Page() Node {
 					<div class="field-builder-list">
 						<Each of={data.fields} as="field">
 							<article class="field-builder-row">
-								<div class="field-move-controls">
-									<MoveFieldForm
-										id={field.id}
-										direction="up"
-										symbol="↑"
-										label={"Move " + field.label + " up"}
-										disabled={field.first}
-									></MoveFieldForm>
-									<MoveFieldForm
-										id={field.id}
-										direction="down"
-										symbol="↓"
-										label={"Move " + field.label + " down"}
-										disabled={field.last}
-									></MoveFieldForm>
-								</div>
+								<If cond={!data.workspace.readOnlyPreview}>
+									<div class="field-move-controls">
+										<MoveFieldForm
+											id={field.id}
+											direction="up"
+											symbol="↑"
+											label={"Move " + field.label + " up"}
+											disabled={field.first}
+										></MoveFieldForm>
+										<MoveFieldForm
+											id={field.id}
+											direction="down"
+											symbol="↓"
+											label={"Move " + field.label + " down"}
+											disabled={field.last}
+										></MoveFieldForm>
+									</div>
+								</If>
 								<span class="field-index mono">{field.index}</span>
 								<div>
 									<strong>{field.label}</strong>
@@ -472,24 +560,28 @@ func Page() Node {
 									<span class="lock-note">Locked</span>
 								</If>
 							</article>
-							<details class="field-manage-details">
-								<summary>{"Edit " + field.label}</summary>
-								<If cond={!field.locked}>
-									<UpdateFieldForm field={field}></UpdateFieldForm>
-									<RemoveFieldForm id={field.id} label={field.label}></RemoveFieldForm>
-								</If>
-								<If cond={field.locked}>
-									<p class="control-note">
-										Locked core fields preserve routing and speaker identity; custom questions remain fully editable.
-									</p>
-								</If>
-							</details>
+							<If cond={!data.workspace.readOnlyPreview}>
+								<details class="field-manage-details">
+									<summary>{"Edit " + field.label}</summary>
+									<If cond={!field.locked}>
+										<UpdateFieldForm field={field}></UpdateFieldForm>
+										<RemoveFieldForm id={field.id} label={field.label}></RemoveFieldForm>
+									</If>
+									<If cond={field.locked}>
+										<p class="control-note">
+											Locked core fields preserve routing and speaker identity; custom questions remain fully editable.
+										</p>
+									</If>
+								</details>
+							</If>
 						</Each>
 					</div>
-					<details class="field-add-details">
-						<summary>Add a field</summary>
-						<AddFieldForm></AddFieldForm>
-					</details>
+					<If cond={!data.workspace.readOnlyPreview}>
+						<details class="field-add-details">
+							<summary>Add a field</summary>
+							<AddFieldForm></AddFieldForm>
+						</details>
+					</If>
 				</section>
 				<aside class="stacked-panels">
 					<section class="panel">
@@ -516,25 +608,31 @@ func Page() Node {
 									{rule.trace}
 								</small>
 							</article>
-							<RemoveQuestionRule id={rule.id} target={rule.target}></RemoveQuestionRule>
+							<If cond={!data.workspace.readOnlyPreview}>
+								<RemoveQuestionRule id={rule.id} target={rule.target}></RemoveQuestionRule>
+							</If>
 						</Each>
-						<details class="field-add-details">
-							<summary>Add a visibility rule</summary>
-							<AddQuestionRule></AddQuestionRule>
-						</details>
+						<If cond={!data.workspace.readOnlyPreview}>
+							<details class="field-add-details">
+								<summary>Add a visibility rule</summary>
+								<AddQuestionRule></AddQuestionRule>
+							</details>
+						</If>
 					</section>
-					<section class="panel">
-						<header class="panel-header">
-							<div>
-								<p class="panel-kicker">Guardrails</p>
-								<h2>Form controls</h2>
-							</div>
-						</header>
-						<FormScheduleForm></FormScheduleForm>
-						<p class="control-note">
-							The server rejects late submissions even if a stale browser still has the page open.
-						</p>
-					</section>
+					<If cond={!data.workspace.readOnlyPreview}>
+						<section class="panel">
+							<header class="panel-header">
+								<div>
+									<p class="panel-kicker">Guardrails</p>
+									<h2>Form controls</h2>
+								</div>
+							</header>
+							<FormScheduleForm></FormScheduleForm>
+							<p class="control-note">
+								The server rejects late submissions even if a stale browser still has the page open.
+							</p>
+						</section>
+					</If>
 				</aside>
 			</div>
 			<section class="panel routing-panel">

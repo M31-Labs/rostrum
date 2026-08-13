@@ -169,71 +169,73 @@ func Page() Node {
 			<p>
 				Open one round at a time. Editing a roster never deletes a review; changes to a rubric with recorded scores require a new round.
 			</p>
-			<ActionForm class="review-plan-create-form" actionName="createReviewPlan">
-				<input type="hidden" name="csrf_token" value={csrf.token}></input>
-				<p class="form-status" role="status" aria-live="polite">{actions.createReviewPlan.message}</p>
-				<div class="form-grid-two">
-					<label>
-						<span>Plan name</span>
-						<input name="name" maxlength="160" required placeholder="e.g. Round 3 — programming committee"></input>
-						<p class="form-error" data-gosx-field-error="name" aria-live="polite"></p>
-					</label>
-					<label>
-						<span>Round</span>
-						<input type="number" name="round" min="1" max="99" value="1" required></input>
-						<p class="form-error" data-gosx-field-error="round" aria-live="polite"></p>
-					</label>
-				</div>
-				<div class="form-grid-two">
-					<label>
-						<span>Initial state</span>
-						<select name="status">
-							<option value="draft">Draft</option>
-							<option value="open">Open now</option>
-						</select>
-						<p class="form-error" data-gosx-field-error="status" aria-live="polite"></p>
-					</label>
-					<label>
-						<span>Due date</span>
-						<input type="datetime-local" name="due_at" required></input>
-						<p class="form-error" data-gosx-field-error="due_at" aria-live="polite"></p>
-					</label>
-				</div>
-				<label>
-					<span>Instructions</span>
-					<textarea name="instructions" maxlength="4000" placeholder="How should reviewers apply this rubric?"></textarea>
-					<p class="form-error" data-gosx-field-error="instructions" aria-live="polite"></p>
-				</label>
-				<label>
-					<span>
-						Rubric — one line per criterion: id|name|description|weight|max
-					</span>
-					<textarea name="rubric" required>{data.defaultRubric}</textarea>
-					<p class="form-error" data-gosx-field-error="rubric" aria-live="polite"></p>
-				</label>
-				<div class="form-grid-two">
-					<label>
-						<span>Human evaluations per proposal</span>
-						<input type="number" name="evaluations_per_item" min="1" max="20" value="2" required></input>
-						<p class="form-error" data-gosx-field-error="evaluations_per_item" aria-live="polite"></p>
-					</label>
-					<div class="checkbox-stack">
-						<label class="checkbox-control">
-							<input type="checkbox" name="anonymous"></input>
-							<span>Anonymous reviewer view</span>
+			<If cond={!data.workspace.readOnlyPreview}>
+				<ActionForm class="review-plan-create-form" actionName="createReviewPlan">
+					<input type="hidden" name="csrf_token" value={csrf.token}></input>
+					<p class="form-status" role="status" aria-live="polite">{actions.createReviewPlan.message}</p>
+					<div class="form-grid-two">
+						<label>
+							<span>Plan name</span>
+							<input name="name" maxlength="160" required placeholder="e.g. Round 3 — programming committee"></input>
+							<p class="form-error" data-gosx-field-error="name" aria-live="polite"></p>
 						</label>
-						<label class="checkbox-control">
-							<input type="checkbox" name="weekly_reminders"></input>
-							<span>Weekly reminders</span>
-						</label>
-						<label class="checkbox-control">
-							<input type="checkbox" name="include_files"></input>
-							<span>Include uploaded files</span>
+						<label>
+							<span>Round</span>
+							<input type="number" name="round" min="1" max="99" value="1" required></input>
+							<p class="form-error" data-gosx-field-error="round" aria-live="polite"></p>
 						</label>
 					</div>
-				</div>
-				<button class="button button-primary" type="submit">Create review plan</button>
-			</ActionForm>
+					<div class="form-grid-two">
+						<label>
+							<span>Initial state</span>
+							<select name="status">
+								<option value="draft">Draft</option>
+								<option value="open">Open now</option>
+							</select>
+							<p class="form-error" data-gosx-field-error="status" aria-live="polite"></p>
+						</label>
+						<label>
+							<span>Due date</span>
+							<input type="datetime-local" name="due_at" required></input>
+							<p class="form-error" data-gosx-field-error="due_at" aria-live="polite"></p>
+						</label>
+					</div>
+					<label>
+						<span>Instructions</span>
+						<textarea name="instructions" maxlength="4000" placeholder="How should reviewers apply this rubric?"></textarea>
+						<p class="form-error" data-gosx-field-error="instructions" aria-live="polite"></p>
+					</label>
+					<label>
+						<span>
+							Rubric — one line per criterion: id|name|description|weight|max
+						</span>
+						<textarea name="rubric" required>{data.defaultRubric}</textarea>
+						<p class="form-error" data-gosx-field-error="rubric" aria-live="polite"></p>
+					</label>
+					<div class="form-grid-two">
+						<label>
+							<span>Human evaluations per proposal</span>
+							<input type="number" name="evaluations_per_item" min="1" max="20" value="2" required></input>
+							<p class="form-error" data-gosx-field-error="evaluations_per_item" aria-live="polite"></p>
+						</label>
+						<div class="checkbox-stack">
+							<label class="checkbox-control">
+								<input type="checkbox" name="anonymous"></input>
+								<span>Anonymous reviewer view</span>
+							</label>
+							<label class="checkbox-control">
+								<input type="checkbox" name="weekly_reminders"></input>
+								<span>Weekly reminders</span>
+							</label>
+							<label class="checkbox-control">
+								<input type="checkbox" name="include_files"></input>
+								<span>Include uploaded files</span>
+							</label>
+						</div>
+					</div>
+					<button class="button button-primary" type="submit">Create review plan</button>
+				</ActionForm>
+			</If>
 			<div class="review-plan-manager-list">
 				<Each of={data.plans} as="plan">
 					<article class="review-plan-manager-card">
@@ -272,7 +274,7 @@ func Page() Node {
 								recorded score(s).
 							</span>
 						</div>
-						<If cond={plan.editable}>
+						<If cond={plan.editable && !data.workspace.readOnlyPreview}>
 							<ActionForm class="review-plan-update-form" actionName="updateReviewPlan">
 								<input type="hidden" name="csrf_token" value={csrf.token}></input>
 								<input type="hidden" name="plan_id" value={plan.id}></input>
@@ -421,7 +423,7 @@ func Page() Node {
 												{assignment.assignedAt}
 											</small>
 										</span>
-										<If cond={plan.editable}>
+										<If cond={plan.editable && !data.workspace.readOnlyPreview}>
 											<ActionForm actionName="unassignReview">
 												<input type="hidden" name="csrf_token" value={csrf.token}></input>
 												<input type="hidden" name="assignment_id" value={assignment.id}></input>
@@ -446,13 +448,15 @@ func Page() Node {
 					</p>
 					<h2>Candidate scorecard</h2>
 				</div>
-				<ActionForm actionName="assignPendingToActivePlan">
-					<input type="hidden" name="csrf_token" value={csrf.token}></input>
-					<button class="button button-compact" type="submit">Assign pending proposals</button>
-					<p class="form-status" role="status" aria-live="polite">
-						{actions.assignPendingToActivePlan.message}
-					</p>
-				</ActionForm>
+				<If cond={!data.workspace.readOnlyPreview}>
+					<ActionForm actionName="assignPendingToActivePlan">
+						<input type="hidden" name="csrf_token" value={csrf.token}></input>
+						<button class="button button-compact" type="submit">Assign pending proposals</button>
+						<p class="form-status" role="status" aria-live="polite">
+							{actions.assignPendingToActivePlan.message}
+						</p>
+					</ActionForm>
+				</If>
 			</header>
 			<div class="review-table" role="table" aria-label="Round two candidate scores">
 				<div class="review-head" role="row">
@@ -487,7 +491,7 @@ func Page() Node {
 					</article>
 				</Each>
 			</div>
-			<If cond={data.hasActivePlan}>
+			<If cond={data.hasActivePlan && !data.workspace.readOnlyPreview}>
 				<ActionForm class="review-manual-assignment" actionName="assignReview">
 					<input type="hidden" name="csrf_token" value={csrf.token}></input>
 					<input type="hidden" name="plan_id" value={data.activePlan.id}></input>
@@ -516,90 +520,92 @@ func Page() Node {
 				</ActionForm>
 			</If>
 		</section>
-		<section class="panel review-entry-panel">
-			<header class="panel-header">
-				<div>
-					<p class="panel-kicker">Human judgment</p>
-					<h2>Record a rubric review</h2>
-				</div>
-			</header>
-			<p>
-				Scored here on behalf of the reviewer by program staff. A reviewer with a review link (below) can score their own proposals directly instead.
-			</p>
-			<ActionForm class="review-entry-form" actionName="saveReview">
-				<input type="hidden" name="csrf_token" value={csrf.token}></input>
-				<input type="hidden" name="plan_id" value={data.activePlan.id}></input>
-				<p class="form-error" data-gosx-field-error="plan_id" aria-live="polite"></p>
-				<p class="form-status" role="alert" aria-live="assertive">{actions.saveReview.message}</p>
-				<div class="form-grid-two">
-					<label>
-						<span>Proposal</span>
-						<select name="submission_id" required>
-							<Each of={data.candidates} as="candidate">
-								<option value={candidate.id}>{candidate.title}</option>
-							</Each>
-						</select>
-						<p class="form-error" data-gosx-field-error="submission_id" aria-live="polite"></p>
-					</label>
-					<label>
-						<span>Reviewer</span>
-						<select name="reviewer_id" required>
-							<Each of={data.humanReviewers} as="reviewer">
-								<option value={reviewer.id}>{reviewer.name}</option>
-							</Each>
-						</select>
-						<p class="form-error" data-gosx-field-error="reviewer_id" aria-live="polite"></p>
-					</label>
-				</div>
-				<fieldset>
-					<legend>Weighted criteria</legend>
-					<div class="rubric-score-grid">
-						<Each of={data.activePlan.criteria} as="criterion">
-							<label>
-								<span>
-									{criterion.name}
-									<small>{criterion.weight}</small>
-								</span>
-								<input
-									type="number"
-									name={"score_" + criterion.id}
-									min="0"
-									max={criterion.max}
-									step="0.1"
-									required
-								></input>
-								<p class="form-error" data-gosx-field-error={"score_" + criterion.id} aria-live="polite"></p>
-								<small>{criterion.description}</small>
-							</label>
-						</Each>
+		<If cond={!data.workspace.readOnlyPreview}>
+			<section class="panel review-entry-panel">
+				<header class="panel-header">
+					<div>
+						<p class="panel-kicker">Human judgment</p>
+						<h2>Record a rubric review</h2>
 					</div>
-				</fieldset>
-				<div class="form-grid-two">
-					<label>
-						<span>Recommendation</span>
-						<select name="recommendation" required>
-							<option value="strong_yes">Strong yes</option>
-							<option value="yes">Yes</option>
-							<option value="maybe">Maybe</option>
-							<option value="no">No</option>
-							<option value="strong_no">Strong no</option>
-						</select>
-						<p class="form-error" data-gosx-field-error="recommendation" aria-live="polite"></p>
-					</label>
-					<label>
-						<span>Decision context</span>
-						<textarea
-							name="comments"
-							minlength="20"
-							required
-							placeholder="Most important strength, risk, and follow-up question"
-						></textarea>
-						<p class="form-error" data-gosx-field-error="comments" aria-live="polite"></p>
-					</label>
-				</div>
-				<button class="button button-primary" type="submit">Save human review</button>
-			</ActionForm>
-		</section>
+				</header>
+				<p>
+					Scored here on behalf of the reviewer by program staff. A reviewer with a review link (below) can score their own proposals directly instead.
+				</p>
+				<ActionForm class="review-entry-form" actionName="saveReview">
+					<input type="hidden" name="csrf_token" value={csrf.token}></input>
+					<input type="hidden" name="plan_id" value={data.activePlan.id}></input>
+					<p class="form-error" data-gosx-field-error="plan_id" aria-live="polite"></p>
+					<p class="form-status" role="alert" aria-live="assertive">{actions.saveReview.message}</p>
+					<div class="form-grid-two">
+						<label>
+							<span>Proposal</span>
+							<select name="submission_id" required>
+								<Each of={data.candidates} as="candidate">
+									<option value={candidate.id}>{candidate.title}</option>
+								</Each>
+							</select>
+							<p class="form-error" data-gosx-field-error="submission_id" aria-live="polite"></p>
+						</label>
+						<label>
+							<span>Reviewer</span>
+							<select name="reviewer_id" required>
+								<Each of={data.humanReviewers} as="reviewer">
+									<option value={reviewer.id}>{reviewer.name}</option>
+								</Each>
+							</select>
+							<p class="form-error" data-gosx-field-error="reviewer_id" aria-live="polite"></p>
+						</label>
+					</div>
+					<fieldset>
+						<legend>Weighted criteria</legend>
+						<div class="rubric-score-grid">
+							<Each of={data.activePlan.criteria} as="criterion">
+								<label>
+									<span>
+										{criterion.name}
+										<small>{criterion.weight}</small>
+									</span>
+									<input
+										type="number"
+										name={"score_" + criterion.id}
+										min="0"
+										max={criterion.max}
+										step="0.1"
+										required
+									></input>
+									<p class="form-error" data-gosx-field-error={"score_" + criterion.id} aria-live="polite"></p>
+									<small>{criterion.description}</small>
+								</label>
+							</Each>
+						</div>
+					</fieldset>
+					<div class="form-grid-two">
+						<label>
+							<span>Recommendation</span>
+							<select name="recommendation" required>
+								<option value="strong_yes">Strong yes</option>
+								<option value="yes">Yes</option>
+								<option value="maybe">Maybe</option>
+								<option value="no">No</option>
+								<option value="strong_no">Strong no</option>
+							</select>
+							<p class="form-error" data-gosx-field-error="recommendation" aria-live="polite"></p>
+						</label>
+						<label>
+							<span>Decision context</span>
+							<textarea
+								name="comments"
+								minlength="20"
+								required
+								placeholder="Most important strength, risk, and follow-up question"
+							></textarea>
+							<p class="form-error" data-gosx-field-error="comments" aria-live="polite"></p>
+						</label>
+					</div>
+					<button class="button button-primary" type="submit">Save human review</button>
+				</ActionForm>
+			</section>
+		</If>
 		<section id="reviewer-manager" class="panel reviewer-panel">
 			<header class="panel-header">
 				<div>
@@ -613,42 +619,44 @@ func Page() Node {
 					total
 				</span>
 			</header>
-			<ActionForm class="reviewer-create-form" actionName="createReviewer">
-				<input type="hidden" name="csrf_token" value={csrf.token}></input>
-				<p class="form-status" role="status" aria-live="polite">{actions.createReviewer.message}</p>
-				<div class="form-grid-two">
+			<If cond={!data.workspace.readOnlyPreview}>
+				<ActionForm class="reviewer-create-form" actionName="createReviewer">
+					<input type="hidden" name="csrf_token" value={csrf.token}></input>
+					<p class="form-status" role="status" aria-live="polite">{actions.createReviewer.message}</p>
+					<div class="form-grid-two">
+						<label>
+							<span>Name</span>
+							<input name="name" maxlength="160" required></input>
+							<p class="form-error" data-gosx-field-error="name" aria-live="polite"></p>
+						</label>
+						<label>
+							<span>Kind</span>
+							<select name="kind">
+								<option value="human">Human reviewer</option>
+								<option value="virtual">Virtual lens</option>
+							</select>
+							<p class="form-error" data-gosx-field-error="kind" aria-live="polite"></p>
+						</label>
+					</div>
+					<div class="form-grid-two">
+						<label>
+							<span>Email</span>
+							<input type="email" name="email"></input>
+							<p class="form-error" data-gosx-field-error="email" aria-live="polite"></p>
+						</label>
+						<label>
+							<span>Company / organization</span>
+							<input name="company" maxlength="160"></input>
+						</label>
+					</div>
 					<label>
-						<span>Name</span>
-						<input name="name" maxlength="160" required></input>
-						<p class="form-error" data-gosx-field-error="name" aria-live="polite"></p>
+						<span>Expertise tags (comma-separated)</span>
+						<input name="expertise" maxlength="500" placeholder="agents, governance, accessibility"></input>
+						<p class="form-error" data-gosx-field-error="expertise" aria-live="polite"></p>
 					</label>
-					<label>
-						<span>Kind</span>
-						<select name="kind">
-							<option value="human">Human reviewer</option>
-							<option value="virtual">Virtual lens</option>
-						</select>
-						<p class="form-error" data-gosx-field-error="kind" aria-live="polite"></p>
-					</label>
-				</div>
-				<div class="form-grid-two">
-					<label>
-						<span>Email</span>
-						<input type="email" name="email"></input>
-						<p class="form-error" data-gosx-field-error="email" aria-live="polite"></p>
-					</label>
-					<label>
-						<span>Company / organization</span>
-						<input name="company" maxlength="160"></input>
-					</label>
-				</div>
-				<label>
-					<span>Expertise tags (comma-separated)</span>
-					<input name="expertise" maxlength="500" placeholder="agents, governance, accessibility"></input>
-					<p class="form-error" data-gosx-field-error="expertise" aria-live="polite"></p>
-				</label>
-				<button class="button button-compact" type="submit">Add reviewer</button>
-			</ActionForm>
+					<button class="button button-compact" type="submit">Add reviewer</button>
+				</ActionForm>
+			</If>
 			<div class="reviewer-grid">
 				<Each of={data.reviewers} as="reviewer">
 					<article class="reviewer-card">
@@ -665,7 +673,7 @@ func Page() Node {
 							{reviewer.completed}
 							done
 						</span>
-						<If cond={reviewer.active}>
+						<If cond={reviewer.active && !data.workspace.readOnlyPreview}>
 							<details class="reviewer-editor">
 								<summary>Edit reviewer</summary>
 								<ActionForm actionName="updateReviewer">

@@ -1,6 +1,6 @@
 ---
 description: Evidence-based production-candidate checks for source, deployment, identity, providers, storage, and recovery.
-nav_order: "06 / 07"
+nav_order: "07 / 08"
 eyebrow: Prove the exact candidate
 ---
 
@@ -19,7 +19,7 @@ storage, and recovery paths still require operator-owned evidence.
 | --- | --- | --- |
 | Source distribution | MIT license, evaluator quickstart, CI, community files, and versioned docs | Verify the exact candidate can be cloned anonymously and every public source/docs link resolves |
 | Core program flow | Implemented and covered by unit, race, policy, and rendered-flow checks | Run the operator journey against the immutable candidate |
-| Public read-only preview | Fail-closed `APP_MODE=demo` implementation and Kubernetes baseline | Prove the deployed host is running the intended seed/version and refusing every mutation |
+| Public read-only preview | Generic fail-closed `APP_MODE=preview` plus the isolated `examples/demo/` fixture and deployment | Prove the deployed host is running the pinned fictional template and intended version while refusing every mutation |
 | Identity | Organizer roles, one-time setup, magic link, OAuth adapters, passkeys, speaker/reviewer signed links | Test the selected sign-in method from an external browser/inbox |
 | Email | Durable outbox plus Resend and SMTP transports | Send through the selected real transport and retain non-secret evidence |
 | Canonical storage | JSON, SQLite WAL, and Postgres implementations share a validated aggregate contract | Restart, backup, and restore the exact selected backend |
@@ -53,9 +53,10 @@ These commands prove:
 
 - Go and GoSX formatting, Arbiter policy validation, `go vet`, unit tests, and
   race tests pass for this source tree.
-- A temporary `APP_MODE=demo` process boots with the deterministic seed;
-  organizer, signed persona, CFP, public/embed/API/calendar, header, count,
-  and mutation-refusal contracts pass.
+- A temporary `APP_MODE=preview` process boots from the generated, checksummed
+  fictional example; organizer, signed persona, CFP,
+  public/embed/API/calendar, header, count, and mutation-refusal contracts
+  pass.
 - The production bundle stays within committed static HTML, island, runtime,
   server binary, distribution, and per-route client budgets.
 
@@ -125,34 +126,47 @@ distributed transaction.
 
 ## Hosted preview acceptance
 
-The preview must be a separate process, hostname, volume, audit path, and
-session secret containing only the deterministic fictional seed. It must use:
+The preview must be a separate process, hostname, volume, upload directory,
+audit path, and session secret containing only the fictional evaluation
+example. Follow
+[`examples/demo/README.md`](https://github.com/M31-Labs/rostrum/blob/main/examples/demo/README.md),
+which generates environment-specific workspace and checksum files. The hosted
+process must use:
 
 ```text
-APP_MODE=demo
+APP_MODE=preview
 APP_ENV=production
 PUBLIC_URL=https://demo.example.com
 ROSTRUM_VERSION=<immutable-release-or-commit>
-SESSION_SECRET=<unique-random-32+-character-secret>
-SEED=demo
+SESSION_SECRET=REPLACE_ME
+INITIAL_WORKSPACE_PATH=/app/demo-data/initial-workspace.json
+INITIAL_WORKSPACE_SHA256_FILE=/app/demo-data/initial-workspace.sha256
 STORE_DRIVER=sqlite
 DATA_PATH=/app/demo-data/rostrum.sqlite
+UPLOAD_DIR=/app/demo-data/uploads
 AUDIT_LOG_PATH=/app/demo-data/audit.log
 BACKUP_DIR=/app/demo-data/backups
-DEMO_MODE=false
 MAIL_DRIVER=outbox
 ORGANIZER_EMAILS=
+PRINCIPAL_ROLES=
 RESET_SECRET=
+TRUSTED_PROXY_CIDRS=<exact-private-ingress-cidrs>
 ```
 
 Do not provide external database, network mail, Accelevents, Airtable, or OAuth
-credentials to the preview. Startup must fail if the seed fingerprint,
-persistence path, release identity, or credential posture differs.
+credentials to the preview. Startup must fail if the template pin, complete
+persisted state, persistence path, release identity, or credential posture
+differs. It must also fail if any email-like value anywhere in the complete
+workspace uses a domain other than `example.com`, `example.net`, `example.org`,
+or their subdomains. This is preview-only protection; it does not constrain a
+live organizer workspace. The generated workspace, workspace checksum, and
+upload-checksum manifest are runtime artifacts; approved-upload paths in the
+workspace are absolute. Do not commit these files or reuse them in live.
 
 Verify all of the following against the deployed candidate:
 
 1. `/api/health` returns `ok=true` and the expected immutable version.
-2. `/api/v1/workspace` returns the M31 Systems Forum seed with non-zero
+2. `/api/v1/workspace` returns the M31 Systems Forum example with non-zero
    published session/speaker counts.
 3. `/organizer` is anonymously readable; the product tour, CFP, agenda, public
    agenda, gallery, and public calendar return 200.
@@ -160,7 +174,13 @@ Verify all of the following against the deployed candidate:
    reset, import, export, upload, and private-file paths return 403.
 5. The read-only banner and login explanation are visible.
 6. Every response sends `X-Robots-Tag: noindex, nofollow, noarchive`.
-7. No network provider request occurs.
+7. A disposable preflight using a non-reserved email in any workspace field
+   fails startup without echoing the rejected address; the shipped fictional
+   example uses only reserved example domains.
+8. No network provider request occurs.
+9. On a disposable staging volume, the example init accepts the unchanged
+   overlay on restart and refuses a missing, replaced, added, or symlinked
+   portrait instead of serving it.
 
 Run the exact remote contract from a checkout of the same candidate:
 
@@ -195,7 +215,8 @@ From a real external inbox:
 5. Record provider message ID/time, recipient, release version, and result.
    Never record the token or SMTP password.
 
-The demo outbox is useful product evidence, but it is not delivery proof.
+The preview's local outbox is useful product evidence, but it is not delivery
+proof.
 
 ### Accelevents (only when enabled)
 
@@ -204,8 +225,8 @@ live candidate. Rostrum publishes speakers attached to published, scheduled
 sessions first, then those sessions; it never reads changes back.
 
 1. Run the credential-free dry run and inspect the exact speaker/session plan.
-2. Publish into a disposable or staging event and verify the expected six
-   seeded public sessions (or the candidate workspace's published count).
+2. Publish into a disposable or staging event and verify the candidate
+   workspace's intended published-session count.
 3. Re-run and verify the provider updates stable Rostrum IDs rather than
    creating duplicates.
 4. Confirm a draft or cancelled session does not reach the target event.
@@ -230,9 +251,9 @@ in [the deployment guide](deployment.md#airtable-projection).
   keep one application replica.
 - **SQLite:** boot and restart twice against the same path; retain the database,
   WAL files, uploads, audit, and backups together.
-- **Postgres:** use a non-production endpoint, restart, submit/import a fixture,
-  and prove state plus audit behavior. Complete the managed-database backup and
-  restore drill separately.
+- **Postgres:** use a non-production endpoint, restart, submit or import a
+  controlled staging workspace, and prove state plus audit behavior. Complete
+  the managed-database backup and restore drill separately.
 
 ## Release verification runbook
 

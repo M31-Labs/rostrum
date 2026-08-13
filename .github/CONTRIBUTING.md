@@ -12,25 +12,29 @@ small, explainable changes that preserve operator trust.
    event data, and provider credentials out of issues, fixtures, commits, and
    screenshots.
 
-Use the repository's fictional M31 Systems Forum data for examples.
+Use the fictional M31 Systems Forum data under
+[`examples/demo/`](../examples/demo/README.md) for examples. Do not add that
+fixture to core defaults or production packaging.
 
 ## Local setup
 
 Requirements:
 
 - Go 1.26 or newer
+- Make
 - GoSX v0.38.1
 - Arbiter v1.9.0
 
 ```bash
 go install m31labs.dev/gosx/cmd/gosx@v0.38.1
 go install m31labs.dev/arbiter/cmd/arbiter@v1.9.0
-cp .env.example .env
-DEMO_MODE=memory go run .
+APP_MODE=live make dev
 ```
 
 Open the one-time `/setup?token=…` URL printed by the process to create your
-disposable organizer session.
+disposable organizer session. This starts the fresh, in-memory workspace with
+no fictional participants or program records. Use `make judge-demo` when a
+change needs the complete fictional read-only example instead.
 
 ## Change guidelines
 
@@ -41,8 +45,9 @@ disposable organizer session.
 - Give drag, pointer, and color interactions an equivalent keyboard/text path.
 - Reuse the [Paper & Ink visual system](../docs/visual-system.md).
 - Add or update tests at the layer whose contract changed.
-- Document new environment variables in `.env.example` and operational effects
-  in `docs/deployment.md`.
+- Document new environment variables in `.env.example` and
+  `docs/self-hosting.md`; add advanced deployment or integration effects to
+  `docs/deployment.md` when applicable.
 - Do not claim external-provider success from a fake server, dry run, or local
   outbox test.
 
@@ -56,10 +61,10 @@ make smoke
 make size-budget
 ```
 
-`make check` includes race tests. `make smoke` boots the deterministic
-read-only fixture and verifies its complete organizer/persona/public contract.
-`make size-budget` creates a production bundle and enforces committed
-route/runtime limits.
+`make check` includes race tests. `make smoke` prepares the isolated fictional
+fixture, boots it through generic preview mode, and verifies its complete
+organizer/persona/public contract. `make size-budget` creates a production
+bundle and enforces committed route/runtime limits.
 
 If the change affects deployment, identity, email, an external database,
 Airtable, imports, or recovery, describe the additional acceptance evidence

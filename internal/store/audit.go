@@ -46,7 +46,7 @@ func (store *auditedStore) Reset() error {
 	}
 	_, err := store.ledger.Append(audit.FromMeta(domain.AuditMeta{
 		Actor: "system", Action: "workspace.reset", EntityType: "workspace",
-		Summary: "Workspace reset to its configured seed.", Origin: "rostrum",
+		Summary: "Workspace reset to its configured initial state.", Origin: "rostrum",
 	}))
 	if err != nil {
 		return fmt.Errorf("workspace reset but independent audit append failed: %w", err)

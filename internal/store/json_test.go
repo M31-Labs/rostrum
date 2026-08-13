@@ -7,12 +7,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/m31-labs/rostrum/examples/demo/fixture"
 	"github.com/m31-labs/rostrum/internal/domain"
 )
 
 func TestJSONStorePersistsValidatedMutation(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "rostrum.json")
-	seed := domain.Seed(time.Date(2026, time.August, 9, 12, 0, 0, 0, time.UTC))
+	seed := fixture.Seed(time.Date(2026, time.August, 9, 12, 0, 0, 0, time.UTC))
 	first, err := Open(path, seed)
 	if err != nil {
 		t.Fatal(err)
@@ -34,7 +35,7 @@ func TestJSONStorePersistsValidatedMutation(t *testing.T) {
 }
 
 func TestJSONStoreRollsBackFailedMutation(t *testing.T) {
-	seed := domain.Seed(time.Date(2026, time.August, 9, 12, 0, 0, 0, time.UTC))
+	seed := fixture.Seed(time.Date(2026, time.August, 9, 12, 0, 0, 0, time.UTC))
 	value, err := Open(":memory:", seed)
 	if err != nil {
 		t.Fatal(err)
@@ -57,7 +58,7 @@ func TestJSONStoreRollsBackFailedMutation(t *testing.T) {
 // reads with no intervening write return the same cached value, and neither
 // read triggers a clone of state that has not changed.
 func TestJSONStoreSnapshotIsStableAcrossReads(t *testing.T) {
-	seed := domain.Seed(time.Date(2026, time.August, 9, 12, 0, 0, 0, time.UTC))
+	seed := fixture.Seed(time.Date(2026, time.August, 9, 12, 0, 0, 0, time.UTC))
 	value, err := Open(":memory:", seed)
 	if err != nil {
 		t.Fatal(err)
@@ -83,7 +84,7 @@ func TestJSONStoreSnapshotIsStableAcrossReads(t *testing.T) {
 // rebuilds the cache: a Snapshot() taken after the write observes the
 // mutation, and the value taken before it is left untouched (copy-on-write).
 func TestJSONStoreSnapshotSeesSubsequentUpdate(t *testing.T) {
-	seed := domain.Seed(time.Date(2026, time.August, 9, 12, 0, 0, 0, time.UTC))
+	seed := fixture.Seed(time.Date(2026, time.August, 9, 12, 0, 0, 0, time.UTC))
 	value, err := Open(":memory:", seed)
 	if err != nil {
 		t.Fatal(err)
@@ -115,7 +116,7 @@ func TestJSONStoreSnapshotSeesSubsequentUpdate(t *testing.T) {
 // changes only the caller's local copy of the slice header and never grows
 // the cached snapshot that other readers see.
 func TestJSONStoreSnapshotTopLevelAppendIsIsolated(t *testing.T) {
-	seed := domain.Seed(time.Date(2026, time.August, 9, 12, 0, 0, 0, time.UTC))
+	seed := fixture.Seed(time.Date(2026, time.August, 9, 12, 0, 0, 0, time.UTC))
 	value, err := Open(":memory:", seed)
 	if err != nil {
 		t.Fatal(err)
@@ -144,7 +145,7 @@ func TestJSONStoreSnapshotTopLevelAppendIsIsolated(t *testing.T) {
 // memory and corrupts every other reader's view, including the store's own
 // cache. Callers must never do this; see the JSONStore doc comment.
 func TestJSONStoreSnapshotElementMutationIsForbidden(t *testing.T) {
-	seed := domain.Seed(time.Date(2026, time.August, 9, 12, 0, 0, 0, time.UTC))
+	seed := fixture.Seed(time.Date(2026, time.August, 9, 12, 0, 0, 0, time.UTC))
 	value, err := Open(":memory:", seed)
 	if err != nil {
 		t.Fatal(err)
@@ -174,7 +175,7 @@ func TestJSONStoreSnapshotElementMutationIsForbidden(t *testing.T) {
 // detector reports nothing, and every observed snapshot must be a value the
 // writer actually published (never a torn or partial struct).
 func TestJSONStoreSnapshotConcurrentReadsAndWriteRaceClean(t *testing.T) {
-	seed := domain.Seed(time.Date(2026, time.August, 9, 12, 0, 0, 0, time.UTC))
+	seed := fixture.Seed(time.Date(2026, time.August, 9, 12, 0, 0, 0, time.UTC))
 	value, err := Open(":memory:", seed)
 	if err != nil {
 		t.Fatal(err)
@@ -227,7 +228,7 @@ func TestJSONStoreSnapshotConcurrentReadsAndWriteRaceClean(t *testing.T) {
 }
 
 func TestJSONStoreAuditIsCommittedWithTheMutation(t *testing.T) {
-	store, err := Open(":memory:", domain.Seed(time.Now().UTC()))
+	store, err := Open(":memory:", fixture.Seed(time.Now().UTC()))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

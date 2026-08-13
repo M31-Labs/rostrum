@@ -110,14 +110,14 @@ func FileAction(props any) Node {
 		action={"/portal-upload/" + data.speaker.id + "/" + props.id}
 	>
 		<input type="hidden" name="csrf_token" value={csrf.token}></input>
-		<label>
-			<span class="sr-only">
-				Choose file for
-				{props.title}
+		<label class="file-drop-surface">
+			<span class="file-drop-title">{props.uploadHint}</span>
+			<span class="file-drop-note">
+				Maximum 10 MiB. The file stays private until an organizer approves it.
 			</span>
-			<input type="file" name="file" required></input>
+			<input type="file" name="file" accept={props.accept} required></input>
 		</label>
-		<button class="button button-compact" type="submit">Upload file</button>
+		<button class="button button-compact" type="submit">Upload selected file</button>
 		<p class="form-status" role="status" aria-live="polite"></p>
 	</Form>
 }
@@ -199,6 +199,36 @@ func ProfileFields(props any) Node {
 	</fragment>
 }
 
+func ProfileSnapshot(props any) Node {
+	return <fragment>
+		<dl class="detail-answers">
+			<div>
+				<dt>Role</dt>
+				<dd>{props.role}</dd>
+			</div>
+			<div>
+				<dt>Company or project</dt>
+				<dd>{props.company}</dd>
+			</div>
+			<div>
+				<dt>Pronouns</dt>
+				<dd>{props.pronouns}</dd>
+			</div>
+			<div>
+				<dt>City</dt>
+				<dd>{props.city}</dd>
+			</div>
+			<div>
+				<dt>Biography</dt>
+				<dd>{props.biography}</dd>
+			</div>
+		</dl>
+		<p class="form-note">
+			This observer view shows the speaker’s saved profile without exposing editable controls.
+		</p>
+	</fragment>
+}
+
 func PortalUnavailable(props any) Node {
 	return <section class="portal-section portal-unavailable">
 		<p class="panel-kicker">Speaker portal</p>
@@ -215,6 +245,14 @@ func Page() Node {
 			<PortalUnavailable></PortalUnavailable>
 		</If>
 		<If cond={data.available}>
+			<If cond={data.workspace.readOnlyPreview}>
+				<div class="closed-notice" role="status">
+					<strong>Speaker journey preview.</strong>
+					<p>
+						Profile, readiness, schedule, proposals, and resources are visible; upload, completion, withdrawal, and save controls are not shown.
+					</p>
+				</div>
+			</If>
 			<If cond={data.viewingAsOrganizer}>
 				<div class="closed-notice" role="status">
 					<strong>Viewing as organizer.</strong>
@@ -231,7 +269,7 @@ func Page() Node {
 					<div>
 						<strong>Proposal received.</strong>
 						<p>
-							Your confirmation is in the demo outbox. You can finish your profile here while review begins.
+							Your confirmation is recorded in the local outbox. You can finish your profile here while review begins.
 						</p>
 					</div>
 				</div>
@@ -311,14 +349,17 @@ func Page() Node {
 										<If cond={task.fileName != ""}>
 											<p class="uploaded-file">
 												Current file ·
-												<a href={task.fileURL} class="file-download">{task.fileName}</a>
+												<If cond={!data.workspace.readOnlyPreview}>
+													<a href={task.fileURL} class="file-download">{task.fileName}</a>
+												</If>
+												<If cond={data.workspace.readOnlyPreview}>{task.fileName}</If>
 											</p>
 										</If>
 									</div>
-									<If cond={task.kind == "file" || task.kind == "headshot"}>
+									<If cond={!data.workspace.readOnlyPreview && (task.kind == "file" || task.kind == "headshot")}>
 										<FileAction {...task}></FileAction>
 									</If>
-									<If cond={task.kind != "file" && task.kind != "headshot"}>
+									<If cond={!data.workspace.readOnlyPreview && task.kind != "file" && task.kind != "headshot"}>
 										<TaskAction {...task}></TaskAction>
 									</If>
 								</article>
@@ -333,37 +374,48 @@ func Page() Node {
 							</div>
 							<span>Updates sync to the gallery</span>
 						</header>
-						<ActionForm actionName="updateProfile">
-							<input type="hidden" name="csrf_token" value={csrf.token}></input>
-							<p class="form-status" role="alert" aria-live="assertive">{actions.updateProfile.message}</p>
-							<If cond={actions.updateProfile.name != ""}>
-								<ProfileFields
-									role={actions.updateProfile.values.role}
-									company={actions.updateProfile.values.company}
-									pronouns={actions.updateProfile.values.pronouns}
-									city={actions.updateProfile.values.city}
-									biography={actions.updateProfile.values.biography}
-									biographyError={actions.updateProfile.fieldErrors.biography}
-									linkedin={actions.updateProfile.values.linkedin}
-									website={actions.updateProfile.values.website}
-									emailOptOut={actions.updateProfile.values.email_opt_out == "on"}
-								></ProfileFields>
-							</If>
-							<If cond={actions.updateProfile.name == ""}>
-								<ProfileFields
-									role={data.speaker.role}
-									company={data.speaker.company}
-									pronouns={data.speaker.pronouns}
-									city={data.speaker.city}
-									biography={data.speaker.biography}
-									biographyError=""
-									linkedin={data.speaker.linkedIn}
-									website={data.speaker.website}
-									emailOptOut={data.speaker.emailOptOut}
-								></ProfileFields>
-							</If>
-							<button class="button button-primary" type="submit">Save public profile</button>
-						</ActionForm>
+						<If cond={data.workspace.readOnlyPreview}>
+							<ProfileSnapshot
+								role={data.speaker.role}
+								company={data.speaker.company}
+								pronouns={data.speaker.pronouns}
+								city={data.speaker.city}
+								biography={data.speaker.biography}
+							></ProfileSnapshot>
+						</If>
+						<If cond={!data.workspace.readOnlyPreview}>
+							<ActionForm actionName="updateProfile">
+								<input type="hidden" name="csrf_token" value={csrf.token}></input>
+								<p class="form-status" role="alert" aria-live="assertive">{actions.updateProfile.message}</p>
+								<If cond={actions.updateProfile.name != ""}>
+									<ProfileFields
+										role={actions.updateProfile.values.role}
+										company={actions.updateProfile.values.company}
+										pronouns={actions.updateProfile.values.pronouns}
+										city={actions.updateProfile.values.city}
+										biography={actions.updateProfile.values.biography}
+										biographyError={actions.updateProfile.fieldErrors.biography}
+										linkedin={actions.updateProfile.values.linkedin}
+										website={actions.updateProfile.values.website}
+										emailOptOut={actions.updateProfile.values.email_opt_out == "on"}
+									></ProfileFields>
+								</If>
+								<If cond={actions.updateProfile.name == ""}>
+									<ProfileFields
+										role={data.speaker.role}
+										company={data.speaker.company}
+										pronouns={data.speaker.pronouns}
+										city={data.speaker.city}
+										biography={data.speaker.biography}
+										biographyError=""
+										linkedin={data.speaker.linkedIn}
+										website={data.speaker.website}
+										emailOptOut={data.speaker.emailOptOut}
+									></ProfileFields>
+								</If>
+								<button class="button button-primary" type="submit">Save public profile</button>
+							</ActionForm>
+						</If>
 					</section>
 				</div>
 				<aside class="portal-secondary">
@@ -415,10 +467,10 @@ func Page() Node {
 										Withdrawing will remove the linked session from the public agenda.
 									</p>
 								</If>
-								<If cond={proposal.hasResume}>
+								<If cond={proposal.hasResume && !data.workspace.readOnlyPreview}>
 									<a class="button button-compact" href={proposal.resumeURL} data-gosx-link>Continue draft</a>
 								</If>
-								<If cond={proposal.canWithdraw && !data.viewingAsOrganizer}>
+								<If cond={proposal.canWithdraw && !data.viewingAsOrganizer && !data.workspace.readOnlyPreview}>
 									<details>
 										<summary>Withdraw this proposal</summary>
 										<WithdrawSubmission id={proposal.id}></WithdrawSubmission>

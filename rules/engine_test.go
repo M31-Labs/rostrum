@@ -1,18 +1,20 @@
 package rules
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/m31-labs/rostrum/internal/domain"
 )
 
-func TestEngineRoutesGovernanceSubmissions(t *testing.T) {
+func TestEngineUsesGenericProductionRouting(t *testing.T) {
 	engine := mustEngine(t)
 	decision, err := engine.Route("governance", "Talk", "Advanced")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Queue != "governed-systems" || decision.Owner != "Theo Okafor" || decision.Rule != "RouteGovernance" {
+	if decision.Queue != "program-triage" || decision.Owner != "Program team" || decision.Track != "" || decision.Rule != "RouteProgramTriage" {
 		t.Fatalf("unexpected routing decision: %#v", decision)
 	}
 }
@@ -23,8 +25,32 @@ func TestEngineUsesRoutingFallback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Queue != "program-triage" || decision.Rule != "RouteFallback" {
+	if decision.Queue != "program-triage" || decision.Track != "" || decision.Rule != "RouteProgramTriage" {
 		t.Fatalf("unexpected fallback decision: %#v", decision)
+	}
+}
+
+func TestEngineLoadsExampleRoutingOnlyWhenExplicitlySupplied(t *testing.T) {
+	source, err := os.ReadFile(filepath.Join("..", "examples", "demo", "rules", "cfp-routing.arb"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine, err := NewWithRoutingSource(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decision, err := engine.Route("governance", "Talk", "Advanced")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Queue != "governed-systems" || decision.Owner != "Theo Okafor" || decision.Track != "track-governance" || decision.Rule != "RouteGovernance" {
+		t.Fatalf("unexpected example routing decision: %#v", decision)
+	}
+}
+
+func TestEngineRejectsEmptyConfiguredRouting(t *testing.T) {
+	if _, err := NewWithRoutingSource(nil); err == nil {
+		t.Fatal("empty configured routing policy accepted")
 	}
 }
 

@@ -6,11 +6,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/m31-labs/rostrum/examples/demo/fixture"
 	"github.com/m31-labs/rostrum/internal/domain"
 )
 
 func TestPublicEndpointsDoNotExposePrivateWorkspaceFields(t *testing.T) {
-	state := domain.Seed(time.Now().UTC())
+	state := fixture.Seed(time.Now().UTC())
+	for index := range state.Tasks {
+		if state.Tasks[index].ID == "task_headshot" {
+			state.Tasks[index].Type = "headshot"
+		}
+	}
 	state.TaskCompletions[0].StoredPath = "/private/uploads/agreement.pdf"
 
 	for name, payload := range map[string]any{
@@ -30,7 +36,12 @@ func TestPublicEndpointsDoNotExposePrivateWorkspaceFields(t *testing.T) {
 }
 
 func TestScheduleIncludesOnlyPublishedSessions(t *testing.T) {
-	state := domain.Seed(time.Now().UTC())
+	state := fixture.Seed(time.Now().UTC())
+	for index := range state.Tasks {
+		if state.Tasks[index].ID == "task_headshot" {
+			state.Tasks[index].Type = "headshot"
+		}
+	}
 	payload := Schedule(state)
 	sessions := payload["sessions"].([]map[string]any)
 	if len(sessions) != 6 {
@@ -44,9 +55,20 @@ func TestScheduleIncludesOnlyPublishedSessions(t *testing.T) {
 }
 
 func TestSpeakersExposeOnlyApprovedPublicHeadshotProjection(t *testing.T) {
-	state := domain.Seed(time.Now().UTC())
+	state := fixture.Seed(time.Now().UTC())
+	for index := range state.Tasks {
+		if state.Tasks[index].ID == "task_headshot" {
+			state.Tasks[index].Type = "headshot"
+		}
+	}
 	for index := range state.Speakers {
 		state.Speakers[index].HeadshotURL = "/portal-file/private-completion"
+	}
+	for index := range state.TaskCompletions {
+		completion := &state.TaskCompletions[index]
+		if completion.TaskID == "task_headshot" && completion.Status == domain.TaskApproved {
+			completion.StoredPath = "/durable/uploads/" + completion.SpeakerID + ".webp"
+		}
 	}
 	payload := Speakers(state)
 	rows := payload["speakers"].([]map[string]any)
@@ -54,7 +76,7 @@ func TestSpeakersExposeOnlyApprovedPublicHeadshotProjection(t *testing.T) {
 	for _, row := range rows {
 		byID[row["id"].(string)] = row
 	}
-	if got := byID["spk_maya"]["headshotUrl"]; got != "/demo-headshots/spk_maya.webp" {
+	if got := byID["spk_maya"]["headshotUrl"]; got != "/public-headshot/spk_maya" {
 		t.Fatalf("approved public headshot URL = %q", got)
 	}
 	if got := byID["spk_lina"]["headshotUrl"]; got != "" {
@@ -69,8 +91,13 @@ func TestSpeakersExposeOnlyApprovedPublicHeadshotProjection(t *testing.T) {
 	}
 }
 
-func TestSpeakersApprovedReplacementOverridesSeedPortrait(t *testing.T) {
-	state := domain.Seed(time.Now().UTC())
+func TestSpeakersApprovedCompletionUsesStateAuthenticatedRoute(t *testing.T) {
+	state := fixture.Seed(time.Now().UTC())
+	for index := range state.Tasks {
+		if state.Tasks[index].ID == "task_headshot" {
+			state.Tasks[index].Type = "headshot"
+		}
+	}
 	for index := range state.TaskCompletions {
 		completion := &state.TaskCompletions[index]
 		if completion.TaskID == "task_headshot" && completion.SpeakerID == "spk_maya" {
@@ -80,7 +107,7 @@ func TestSpeakersApprovedReplacementOverridesSeedPortrait(t *testing.T) {
 	}
 	rows := Speakers(state)["speakers"].([]map[string]any)
 	for _, row := range rows {
-		if row["id"] == "spk_maya" && row["headshotUrl"] != "/headshots/spk_maya.png" {
+		if row["id"] == "spk_maya" && row["headshotUrl"] != "/public-headshot/spk_maya" {
 			t.Fatalf("replacement headshotUrl = %q, want approved upload", row["headshotUrl"])
 		}
 	}

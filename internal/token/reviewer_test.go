@@ -73,30 +73,30 @@ func TestNewReviewerDerivesFromEnvironment(t *testing.T) {
 	}
 }
 
-func TestDemoReviewerTokenRequiresDemoMode(t *testing.T) {
-	// Model a demo and live deployment with the same secret and seeded IDs.
-	demoSigner := newReviewerToken("shared-demo-and-live-secret")
-	liveVerifier := newReviewerToken("shared-demo-and-live-secret")
-	t.Setenv("APP_MODE", "demo")
-	signed := demoSigner.SignReviewerDemo("rev_ada")
+func TestPreviewReviewerTokenRequiresPreviewMode(t *testing.T) {
+	// Model preview and live deployments with the same secret and IDs.
+	previewSigner := newReviewerToken("shared-preview-and-live-secret")
+	liveVerifier := newReviewerToken("shared-preview-and-live-secret")
+	t.Setenv("APP_MODE", "preview")
+	signed := previewSigner.SignReviewerPreview("rev_ada")
 	if signed == "" {
-		t.Fatal("SignReviewerDemo returned an empty token")
+		t.Fatal("SignReviewerPreview returned an empty token")
 	}
 
-	if id, ok := demoSigner.VerifyReviewer(signed); !ok || id != "rev_ada" {
-		t.Fatalf("demo process rejected demo reviewer token: id=%q ok=%v", id, ok)
+	if id, ok := previewSigner.VerifyReviewer(signed); !ok || id != "rev_ada" {
+		t.Fatalf("preview process rejected preview reviewer token: id=%q ok=%v", id, ok)
 	}
 
 	t.Setenv("APP_MODE", "live")
 	if id, ok := liveVerifier.VerifyReviewer(signed); ok || id != "" {
-		t.Fatalf("live process accepted demo reviewer token: id=%q ok=%v", id, ok)
+		t.Fatalf("live process accepted preview reviewer token: id=%q ok=%v", id, ok)
 	}
 }
 
 func TestNormalReviewerTokenRemainsValidAcrossModes(t *testing.T) {
-	tok := newReviewerToken("shared-demo-and-live-secret")
+	tok := newReviewerToken("shared-preview-and-live-secret")
 	signed := tok.SignReviewer("rev_ada")
-	for _, mode := range []string{"live", "demo"} {
+	for _, mode := range []string{"live", "preview"} {
 		t.Setenv("APP_MODE", mode)
 		if id, valid := tok.VerifyReviewer(signed); !valid || id != "rev_ada" {
 			t.Fatalf("normal reviewer token rejected in %s mode: id=%q ok=%v", mode, id, valid)
@@ -125,13 +125,13 @@ func TestSpeakerAndReviewerTokensNeverCrossAuthenticate(t *testing.T) {
 		t.Fatal("Verify accepted a reviewer-signed token as a portal token")
 	}
 
-	t.Setenv("APP_MODE", "demo")
-	demoSpeakerToken := speaker.SignDemo("spk_maya")
-	if _, ok := reviewer.VerifyReviewer(demoSpeakerToken); ok {
-		t.Fatal("VerifyReviewer accepted a demo speaker token")
+	t.Setenv("APP_MODE", "preview")
+	previewSpeakerToken := speaker.SignPreview("spk_maya")
+	if _, ok := reviewer.VerifyReviewer(previewSpeakerToken); ok {
+		t.Fatal("VerifyReviewer accepted a preview speaker token")
 	}
-	demoReviewerToken := reviewer.SignReviewerDemo("rev_ada")
-	if _, ok := speaker.Verify(demoReviewerToken); ok {
-		t.Fatal("Verify accepted a demo reviewer token as a portal token")
+	previewReviewerToken := reviewer.SignReviewerPreview("rev_ada")
+	if _, ok := speaker.Verify(previewReviewerToken); ok {
+		t.Fatal("Verify accepted a preview reviewer token as a portal token")
 	}
 }

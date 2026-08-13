@@ -40,12 +40,16 @@ Treat all of the following as secrets or private event data:
 - speaker email, proposal text, review content, uploads, exports, archives,
   backups, and audit ledgers.
 
-The M31 Systems Forum seed is fictional and is the only dataset intended for
-public examples.
+The M31 Systems Forum fixture under `examples/demo/` is fictional and is the
+only dataset intended for public examples. Its generated workspace and
+checksum manifests are deployment-specific runtime artifacts, not production
+defaults.
 
 ## Deployment boundary
 
 Repository tests do not prove the security of an operator's TLS termination,
 secret manager, external database, mail provider, backup storage, ingress, or
-network policy. Follow the [deployment guide](../docs/deployment.md) and
+network policy. Start with the
+[self-hosting manual](../docs/self-hosting.md), then use the
+[deployment reference](../docs/deployment.md) and
 [launch-readiness gate](../docs/launch-readiness.md) for those checks.

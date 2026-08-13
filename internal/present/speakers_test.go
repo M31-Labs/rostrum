@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/m31-labs/rostrum/internal/domain"
+	"github.com/m31-labs/rostrum/examples/demo/fixture"
 )
 
 // TestSpeakersHeadshotFallback covers PT-3's organizer readiness view: the
@@ -13,7 +13,7 @@ import (
 // /portal-file/ link resolves for them too), and reports hasHeadshot false
 // otherwise, so the template can fall back to initials.
 func TestSpeakersHeadshotFallback(t *testing.T) {
-	state := domain.Seed(time.Now().UTC())
+	state := fixture.Seed(time.Now().UTC())
 	rows := Speakers(state, "")["rows"].([]map[string]any)
 
 	byID := map[string]map[string]any{}

@@ -399,11 +399,13 @@ func fetchReleaseRoutes(root string, paths []string) map[string][]byte {
 
 func releaseServerEnvironment(distDir, baseURL string, port int) []string {
 	blocked := map[string]bool{
-		"DATA_PATH":     true,
-		"DEMO_MODE":     true,
-		"GOSX_APP_ROOT": true,
-		"PORT":          true,
-		"PUBLIC_URL":    true,
+		"APP_MODE":               true,
+		"DATA_PATH":              true,
+		"GOSX_APP_ROOT":          true,
+		"INITIAL_WORKSPACE":      true,
+		"INITIAL_WORKSPACE_PATH": true,
+		"PORT":                   true,
+		"PUBLIC_URL":             true,
 	}
 	environment := make([]string, 0, len(os.Environ())+5)
 	for _, entry := range os.Environ() {
@@ -414,7 +416,7 @@ func releaseServerEnvironment(distDir, baseURL string, port int) []string {
 	}
 	return append(environment,
 		"DATA_PATH=:memory:",
-		"DEMO_MODE=memory",
+		"INITIAL_WORKSPACE=fresh",
 		"GOSX_APP_ROOT="+distDir,
 		"PORT="+strconv.Itoa(port),
 		"PUBLIC_URL="+baseURL,

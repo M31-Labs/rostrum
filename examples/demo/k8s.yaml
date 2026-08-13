@@ -1,0 +1,305 @@
+# Rostrum fictional hosted example — deliberately separate from the reusable
+# deployment in deploy/k8s/rostrum.yaml and from the base Rostrum image.
+#
+# Build examples/demo/Dockerfile on top of one immutable Rostrum image. Replace
+# the image/digest, version, hostname, trusted proxy CIDRs, Traefik ingress
+# class, and issuer placeholders; create the session secret out of band. Never reuse a live data
+# volume. The cluster must have Traefik's Kubernetes CRDs and kubernetesCRD
+# provider enabled for the request-body middleware below.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: rostrum-demo
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: rostrum-demo-data
+  namespace: rostrum-demo
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: rostrum-demo-secrets
+  namespace: rostrum-demo
+type: Opaque
+stringData:
+  # Intentionally too short for production startup: replace it out of band.
+  SESSION_SECRET: "REPLACE_ME"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rostrum-demo
+  namespace: rostrum-demo
+  labels:
+    app: rostrum-demo
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: rostrum-demo
+  template:
+    metadata:
+      labels:
+        app: rostrum-demo
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: prepare-example
+          image: __DEMO_IMAGE_BY_DIGEST__
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-ec"]
+          args:
+            - |
+              fail_integrity() {
+                echo "example overlay integrity check failed: $*" >&2
+                return 1
+              }
+              verify_example() {
+                if [ ! -d /app/demo-data/uploads ] || [ -L /app/demo-data/uploads ]; then
+                  fail_integrity "missing or unsafe uploads directory"
+                  return 1
+                fi
+                for required in \
+                  /app/demo-data/initial-workspace.json \
+                  /app/demo-data/initial-workspace.sha256 \
+                  /app/demo-data/uploads.sha256; do
+                  if [ ! -f "$required" ] || [ -L "$required" ]; then
+                    fail_integrity "missing or unsafe ${required#/app/demo-data/}"
+                    return 1
+                  fi
+                done
+                if ! cmp -s \
+                  /opt/rostrum-demo/initial-workspace.sha256 \
+                  /app/demo-data/initial-workspace.sha256; then
+                  fail_integrity "workspace checksum pin differs from the image"
+                  return 1
+                fi
+                if ! cmp -s \
+                  /opt/rostrum-demo/uploads.sha256 \
+                  /app/demo-data/uploads.sha256; then
+                  fail_integrity "upload checksum manifest differs from the image"
+                  return 1
+                fi
+                expected_workspace=$(tr -d '[:space:]' < /opt/rostrum-demo/initial-workspace.sha256)
+                actual_workspace=$(sha256sum /app/demo-data/initial-workspace.json | awk '{print $1}')
+                if [ "$actual_workspace" != "$expected_workspace" ]; then
+                  fail_integrity "workspace bytes differ from the pinned template"
+                  return 1
+                fi
+                expected_uploads=$(wc -l < /opt/rostrum-demo/uploads.sha256 | tr -d '[:space:]')
+                actual_uploads=$(find /app/demo-data/uploads -mindepth 1 -maxdepth 1 -print | wc -l | tr -d '[:space:]')
+                if [ "$actual_uploads" != "$expected_uploads" ]; then
+                  fail_integrity "upload set differs from the image manifest"
+                  return 1
+                fi
+                while read -r expected name extra; do
+                  if [ -z "$expected" ] || [ -z "$name" ] || [ -n "$extra" ]; then
+                    fail_integrity "malformed upload checksum manifest"
+                    return 1
+                  fi
+                  case "$name" in
+                    */*|.*)
+                      fail_integrity "unsafe upload name in checksum manifest"
+                      return 1
+                      ;;
+                  esac
+                  if [ ! -f "/app/demo-data/uploads/$name" ] || [ -L "/app/demo-data/uploads/$name" ]; then
+                    fail_integrity "missing or unsafe upload $name"
+                    return 1
+                  fi
+                done < /opt/rostrum-demo/uploads.sha256
+                if ! (cd /app/demo-data/uploads && sha256sum -c /opt/rostrum-demo/uploads.sha256 >/dev/null); then
+                  fail_integrity "portrait bytes differ from the image manifest"
+                  return 1
+                fi
+              }
+              if [ -e /app/demo-data/.example-ready ] || [ -L /app/demo-data/.example-ready ]; then
+                if [ ! -f /app/demo-data/.example-ready ] || [ -L /app/demo-data/.example-ready ]; then
+                  fail_integrity "unsafe readiness marker"
+                  exit 1
+                fi
+                verify_example
+                exit 0
+              fi
+              # A freshly formatted ext4 volume can contain lost+found. Permit
+              # only that root-owned directory; every other preexisting entry
+              # is evidence that this is not a fresh example volume.
+              if [ -e /app/demo-data/lost+found ] && \
+                { [ ! -d /app/demo-data/lost+found ] || [ -L /app/demo-data/lost+found ]; }; then
+                echo "refusing unsafe lost+found entry on preview volume" >&2
+                exit 1
+              fi
+              if [ -n "$(find /app/demo-data -mindepth 1 -maxdepth 1 ! -name lost+found -print -quit)" ]; then
+                echo "refusing to initialize a non-empty preview volume" >&2
+                exit 1
+              fi
+              mkdir -p /app/demo-data/uploads /app/demo-data/backups
+              cp /opt/rostrum-demo/initial-workspace.json /app/demo-data/initial-workspace.json
+              cp /opt/rostrum-demo/initial-workspace.sha256 /app/demo-data/initial-workspace.sha256
+              cp /opt/rostrum-demo/uploads.sha256 /app/demo-data/uploads.sha256
+              cp /opt/rostrum-demo/uploads/* /app/demo-data/uploads/
+              chmod 0640 /app/demo-data/initial-workspace.json /app/demo-data/initial-workspace.sha256 /app/demo-data/uploads.sha256 /app/demo-data/uploads/*
+              verify_example
+              touch /app/demo-data/.example-ready
+          volumeMounts:
+            - name: data
+              mountPath: /app/demo-data
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+      containers:
+        - name: rostrum-demo
+          image: __DEMO_IMAGE_BY_DIGEST__
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          env:
+            - name: APP_MODE
+              value: "preview"
+            - name: APP_ENV
+              value: "production"
+            - name: PORT
+              value: "8080"
+            - name: PUBLIC_URL
+              value: "https://__DEMO_HOSTNAME__"
+            - name: ROSTRUM_VERSION
+              value: "__ROSTRUM_VERSION__"
+            # Set to the exact pod/service CIDR(s) from which Traefik reaches
+            # this pod. Never substitute a trust-all network.
+            - name: TRUSTED_PROXY_CIDRS
+              value: "__TRUSTED_PROXY_CIDRS__"
+            - name: INITIAL_WORKSPACE
+              value: "fresh"
+            - name: INITIAL_WORKSPACE_PATH
+              value: "/app/demo-data/initial-workspace.json"
+            - name: INITIAL_WORKSPACE_SHA256_FILE
+              value: "/app/demo-data/initial-workspace.sha256"
+            - name: STORE_DRIVER
+              value: "sqlite"
+            - name: DATA_PATH
+              value: "/app/demo-data/rostrum.sqlite"
+            - name: AUDIT_LOG_PATH
+              value: "/app/demo-data/audit.log"
+            - name: BACKUP_DIR
+              value: "/app/demo-data/backups"
+            - name: UPLOAD_DIR
+              value: "/app/demo-data/uploads"
+            - name: CFP_ROUTING_POLICY_PATH
+              value: "/opt/rostrum-demo/cfp-routing.arb"
+            - name: CFP_ROUTING_POLICY_SHA256_FILE
+              value: "/opt/rostrum-demo/cfp-routing.sha256"
+            - name: MAIL_DRIVER
+              value: "outbox"
+            - name: ORGANIZER_EMAILS
+              value: ""
+            - name: PRINCIPAL_ROLES
+              value: ""
+            - name: RESET_SECRET
+              value: ""
+            - name: PREVIEW_LABEL
+              value: "Observer demo"
+            - name: PREVIEW_MESSAGE
+              value: "Explore the full organizer workspace with fictional data. Controls that create, move, publish, upload, or save are not shown."
+            - name: SESSION_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: rostrum-demo-secrets
+                  key: SESSION_SECRET
+          volumeMounts:
+            - name: data
+              mountPath: /app/demo-data
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 8080
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "1"
+              memory: "512Mi"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: rostrum-demo-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rostrum-demo
+  namespace: rostrum-demo
+spec:
+  selector:
+    app: rostrum-demo
+  ports:
+    - port: 80
+      targetPort: 8080
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: request-body-limit
+  namespace: rostrum-demo
+spec:
+  buffering:
+    # Match the live deployment boundary even though observer mode rejects
+    # every mutation: 12 MiB portal envelope, 32 MiB import plus multipart
+    # overhead, and a hard 34 MiB proxy ceiling.
+    maxRequestBodyBytes: 35651584
+    memRequestBodyBytes: 2097152
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: rostrum-demo
+  namespace: rostrum-demo
+  annotations:
+    cert-manager.io/cluster-issuer: "__CLUSTER_ISSUER__"
+    traefik.ingress.kubernetes.io/router.middlewares: "rostrum-demo-request-body-limit@kubernetescrd"
+spec:
+  ingressClassName: __INGRESS_CLASS__
+  tls:
+    - hosts:
+        - __DEMO_HOSTNAME__
+      secretName: rostrum-demo-tls
+  rules:
+    - host: __DEMO_HOSTNAME__
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: rostrum-demo
+                port:
+                  number: 80

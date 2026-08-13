@@ -4,14 +4,25 @@
 # audit ledger, and logs all live under one disposable directory.
 set -eu
 
-SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
+SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+ROOT=$(CDPATH='' cd -- "$SCRIPT_DIR/../.." && pwd)
 PORT=${JUDGE_DEMO_PORT:-8080}
 BASE="http://127.0.0.1:$PORT"
 DEMO_DIR=$(mktemp -d "${TMPDIR:-/tmp}/rostrum-judge-demo.XXXXXX")
 BIN="$DEMO_DIR/rostrum"
 LOG="$DEMO_DIR/server.log"
 SERVER_PID=""
+
+sha256_file() {
+	if command -v sha256sum >/dev/null 2>&1; then
+		sha256sum "$1" | awk '{print $1}'
+	elif command -v shasum >/dev/null 2>&1; then
+		shasum -a 256 "$1" | awk '{print $1}'
+	else
+		echo "judge-demo: install sha256sum or shasum." >&2
+		return 1
+	fi
+}
 
 cleanup() {
 	if [ -n "$SERVER_PID" ] && kill -0 "$SERVER_PID" 2>/dev/null; then
@@ -46,30 +57,52 @@ else
 	REVISION="worktree"
 fi
 VERSION="judge-demo-$REVISION"
+TEMPLATE="$DEMO_DIR/initial-workspace.json"
+CHECKSUM="$DEMO_DIR/initial-workspace.sha256"
+UPLOAD_CHECKSUMS="$DEMO_DIR/uploads.sha256"
+UPLOADS="$DEMO_DIR/uploads"
+ROUTING_POLICY="$SCRIPT_DIR/rules/cfp-routing.arb"
+ROUTING_POLICY_SHA256=$(sha256_file "$ROUTING_POLICY")
 
 echo "judge-demo: building a disposable Rostrum binary..."
 (cd "$ROOT" && CGO_ENABLED=0 go build -trimpath -o "$BIN" .)
+(cd "$ROOT" && go run ./examples/demo/prepare \
+	-workspace "$TEMPLATE" \
+	-checksum "$CHECKSUM" \
+	-upload-checksums "$UPLOAD_CHECKSUMS" \
+	-assets "$SCRIPT_DIR/assets/headshots" \
+	-uploads "$UPLOADS")
 
 # Explicit empty assignments override a developer's shell and .env file. The
-# demo startup validator independently rejects credentials, identity state,
-# mutable/in-memory storage, and non-demo seed data.
+# preview startup validator independently rejects credentials, identity state,
+# mutable/in-memory storage, and any change to the pinned example template.
 env \
 	APP_ENV=development \
-	APP_MODE=demo \
-	SEED=demo \
-	DEMO_MODE=true \
+	APP_MODE=preview \
+	INITIAL_WORKSPACE=fresh \
+	INITIAL_WORKSPACE_PATH="$TEMPLATE" \
+	INITIAL_WORKSPACE_SHA256= \
+	INITIAL_WORKSPACE_SHA256_FILE="$CHECKSUM" \
 	STORE_DRIVER=json \
 	DATA_PATH="$DEMO_DIR/workspace.json" \
+	UPLOAD_DIR="$UPLOADS" \
+	CFP_ROUTING_POLICY_PATH="$ROUTING_POLICY" \
+	CFP_ROUTING_POLICY_SHA256="$ROUTING_POLICY_SHA256" \
+	CFP_ROUTING_POLICY_SHA256_FILE= \
 	AUDIT_LOG_PATH="$DEMO_DIR/audit.log" \
 	BACKUP_DIR="$DEMO_DIR/backups" \
 	PORT="$PORT" \
 	PUBLIC_URL="$BASE" \
 	ROSTRUM_VERSION="$VERSION" \
 	SESSION_SECRET=rostrum-judge-demo-local-only-0001 \
+	PREVIEW_LABEL="Observer demo" \
+	PREVIEW_MESSAGE="Explore the full organizer workspace with fictional data. Controls that create, move, publish, upload, or save are not shown." \
 	MAIL_DRIVER=outbox \
 	MAIL_FROM= \
 	ORGANIZER_EMAILS= \
 	RESET_SECRET= \
+	TRUSTED_PROXY_CIDRS= \
+	PRINCIPAL_ROLES= \
 	DATABASE_URL= \
 	RESEND_API_KEY= \
 	SMTP_HOST= \
@@ -79,8 +112,12 @@ env \
 	ACCELEVENTS_API_KEY= \
 	ACCELEVENTS_API_TOKEN= \
 	ACCELEVENTS_EVENT_URL= \
+	ACCELEVENTS_BASE_URL= \
 	AIRTABLE_PAT= \
 	AIRTABLE_BASE_ID= \
+	AIRTABLE_API_BASE_URL= \
+	AIRTABLE_SPEAKERS_TABLE= \
+	AIRTABLE_SESSIONS_TABLE= \
 	AUTH_GITHUB_CLIENT_ID= \
 	AUTH_GITHUB_CLIENT_SECRET= \
 	AUTH_GOOGLE_CLIENT_ID= \

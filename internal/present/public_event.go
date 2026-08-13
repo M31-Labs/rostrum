@@ -66,7 +66,6 @@ func PublicSpeakers(state domain.State, slug string, embedded bool) (map[string]
 			active[id] = struct{}{}
 		}
 	}
-	headshot := findHeadshotTask(state)
 	speakers := make([]map[string]any, 0, len(active))
 	for _, speaker := range state.Speakers {
 		if _, found := active[speaker.ID]; !found {
@@ -78,7 +77,7 @@ func PublicSpeakers(state domain.State, slug string, embedded bool) (map[string]
 				talks = append(talks, map[string]string{"title": item.Title, "time": TimeRange(item.StartsAt, item.EndsAt), "room": RoomName(state, item.RoomID)})
 			}
 		}
-		headshotURL := publicHeadshotURL(state, headshot, speaker.ID)
+		headshotURL := publicHeadshotURL(state, speaker.ID)
 		portraitClass := "speaker-portrait"
 		if headshotURL != "" {
 			portraitClass += " has-headshot"
@@ -121,7 +120,6 @@ func EmbedAdmin(state domain.State) map[string]any {
 	speakerSource := base + "/speakers?embed=1"
 	return map[string]any{
 		"section":   "embeds",
-		"demoMode":  DemoMode(),
 		"workspace": WorkspaceIdentity(state),
 		"event":     publicEvent(state),
 		"agenda": map[string]any{
@@ -158,67 +156,24 @@ func initialSet(state domain.State, ids []string) string {
 	return strings.Join(values, " · ")
 }
 
-// findHeadshotTask returns the event's headshot-upload task, or nil when no
-// task is assigned that role.
-func findHeadshotTask(state domain.State) *domain.Task {
-	for index := range state.Tasks {
-		if state.Tasks[index].Active() && IsHeadshotTask(state.Tasks[index]) {
-			return &state.Tasks[index]
-		}
-	}
-	return nil
-}
-
 // IsHeadshotTask reports whether task is the speaker headshot-upload task.
-// "headshot" is the PT-4 task-create type; the seeded task_headshot
-// predates that vocabulary and still carries Type "file", so this also
-// matches its well-known ID until the seed is updated to Type "headshot"
-// (see the PT-3 unit report). Exported so app/organizer/portal's
-// approveTask (the headshot publish-on-approve step) shares one
-// definition with the gallery lookup here instead of drifting apart.
 func IsHeadshotTask(task domain.Task) bool {
-	return task.Type == "headshot" || task.ID == "task_headshot"
+	return task.Type == "headshot"
 }
 
 // publicHeadshotURL returns the unauthenticated gallery image path for
 // speakerID, or empty when the speaker has no approved headshot.
 //
-// The public gallery must not link the authenticated /portal-file/ route
-// (an anonymous visitor cannot open it), so this never reuses
-// Speaker.HeadshotURL. Instead it derives the path organizer approveTask
-// (app/organizer/portal/page.server.go) copies the approved upload bytes
-// to: public/headshots/<speakerID><ext>, served statically at
-// /headshots/<speakerID><ext>. Approval is the publication consent gate —
-// this returns empty for any completion that is not domain.TaskApproved —
-// and both sides derive the same extension from the completion's stored
-// FileName, so no filesystem probe is needed here.
-func publicHeadshotURL(state domain.State, headshotTask *domain.Task, speakerID string) string {
-	if headshotTask == nil {
+// The public gallery must not link the authenticated /portal-file/ route.
+// Approval is the publication consent gate; the public handler independently
+// validates that StoredPath remains inside the configured upload directory and
+// that its bytes are an allowed image before serving it.
+func publicHeadshotURL(state domain.State, speakerID string) string {
+	if _, found := state.ApprovedHeadshot(speakerID); !found {
 		return ""
 	}
-	item, found := completion(state, headshotTask.ID, speakerID)
-	if !found || item.Status != domain.TaskApproved || item.FileName == "" {
+	if strings.TrimSpace(speakerID) == "" || strings.ContainsAny(speakerID, "/\\?#") {
 		return ""
 	}
-	// The deterministic fictional seed ships compact editorial portraits in an
-	// immutable demo-only directory so a local replacement upload cannot delete
-	// a tracked source asset. Once a real upload has StoredPath, its approved
-	// copy and safe extension below always take precedence.
-	if state.Event.ID == "evt_m31_forum_2026" && strings.TrimSpace(item.StoredPath) == "" {
-		switch speakerID {
-		case "spk_maya", "spk_theo", "spk_priya":
-			return "/demo-headshots/" + speakerID + ".webp"
-		}
-	}
-	return "/headshots/" + speakerID + fileExtension(item.FileName)
-}
-
-// fileExtension returns the lowercased, dotted extension of name (for
-// example ".jpg"), defaulting to ".jpg" when name has none. Shared naming
-// convention with organizer approveTask's public headshot copy.
-func fileExtension(name string) string {
-	if dot := strings.LastIndex(name, "."); dot >= 0 {
-		return strings.ToLower(name[dot:])
-	}
-	return ".jpg"
+	return "/public-headshot/" + speakerID
 }

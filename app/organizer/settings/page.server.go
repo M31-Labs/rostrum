@@ -28,10 +28,12 @@ func init() {
 			return server.Metadata{Title: server.Title{Default: "Event settings — Rostrum"}, Description: "Event identity, dates, venue, tracks, and rooms."}, nil
 		},
 		Actions: route.FileActions{
-			"saveEvent":   saveEvent,
-			"addRoom":     addRoom,
-			"addTrack":    addTrack,
-			"addCategory": addCategory,
+			"saveEvent":      saveEvent,
+			"addRoom":        addRoom,
+			"addTrack":       addTrack,
+			"addCategory":    addCategory,
+			"updateCategory": updateCategory,
+			"retireCategory": retireCategory,
 		},
 	}); err != nil {
 		log.Fatal(err)
@@ -193,14 +195,8 @@ func addCategory(ctx *action.Context) error {
 	if name == "" {
 		fieldErrors["name"] = "Enter a category name."
 	}
-	if ownerName == "" {
-		fieldErrors["owner_name"] = "Enter the category owner's name."
-	}
-	if !strings.Contains(ownerEmail, "@") {
+	if ownerEmail != "" && !strings.Contains(ownerEmail, "@") {
 		fieldErrors["owner_email"] = "Enter a valid category-owner email."
-	}
-	if trackID == "" {
-		fieldErrors["track_id"] = "Choose the track this category belongs to."
 	}
 	if len(fieldErrors) > 0 {
 		return action.Validation("Correct the category details.", fieldErrors, ctx.FormData)
@@ -218,8 +214,10 @@ func addCategory(ctx *action.Context) error {
 		if categoryNameTaken(state.Event.Categories, name) {
 			return action.Validation("Use a category name that is not already in this event.", map[string]string{"name": "That category already exists."}, ctx.FormData)
 		}
-		if _, found := state.Track(trackID); !found {
-			return action.Validation("Choose a configured program track.", map[string]string{"track_id": "That track no longer exists."}, ctx.FormData)
+		if trackID != "" {
+			if _, found := state.Track(trackID); !found {
+				return action.Validation("Choose a configured program track.", map[string]string{"track_id": "That track no longer exists."}, ctx.FormData)
+			}
 		}
 		state.Event.Categories = append(state.Event.Categories, domain.Category{
 			ID: categoryID, Name: name, OwnerName: ownerName, OwnerEmail: ownerEmail, TrackID: trackID,
@@ -228,8 +226,98 @@ func addCategory(ctx *action.Context) error {
 	}); err != nil {
 		return err
 	}
-	session.AddFlash(ctx.Request, "notice", "Added category “"+name+"”. It will use the routing fallback until a policy rule names it.")
+	session.AddFlash(ctx.Request, "notice", "Added category “"+name+"”. The active routing policy now sends it through its fallback route.")
 	live.Broadcast("event:category-created", map[string]string{"category": categoryID})
+	actionflow.Redirect(ctx, "/organizer/settings")
+	return nil
+}
+
+func updateCategory(ctx *action.Context) error {
+	categoryID := strings.TrimSpace(ctx.FormData["category_id"])
+	name := strings.TrimSpace(ctx.FormData["name"])
+	ownerName := strings.TrimSpace(ctx.FormData["owner_name"])
+	ownerEmail := strings.ToLower(strings.TrimSpace(ctx.FormData["owner_email"]))
+	trackID := strings.TrimSpace(ctx.FormData["track_id"])
+	fieldErrors := map[string]string{}
+	if name == "" {
+		fieldErrors["name"] = "Enter a category name."
+	}
+	if ownerEmail != "" && !strings.Contains(ownerEmail, "@") {
+		fieldErrors["owner_email"] = "Enter a valid category-owner email."
+	}
+	if len(fieldErrors) > 0 {
+		return action.Validation("Correct the category details.", fieldErrors, ctx.FormData)
+	}
+	if err := appstate.MustGet().UpdateAudit(domain.AuditMeta{
+		Actor:      settingsActor(ctx),
+		Action:     "event.category_updated",
+		EntityType: "category",
+		EntityID:   categoryID,
+		Summary:    "Updated a CFP category and its optional owner and track.",
+		Origin:     "organizer-settings",
+	}, func(state *domain.State) error {
+		if trackID != "" {
+			if _, found := state.Track(trackID); !found {
+				return action.Validation("Choose a configured program track.", map[string]string{"track_id": "That track no longer exists."}, ctx.FormData)
+			}
+		}
+		for index := range state.Event.Categories {
+			category := &state.Event.Categories[index]
+			if category.ID == categoryID {
+				for _, other := range state.Event.Categories {
+					if other.ID != categoryID && strings.EqualFold(strings.TrimSpace(other.Name), name) {
+						return action.Validation("Use a unique category name.", map[string]string{"name": "That category already exists."}, ctx.FormData)
+					}
+				}
+				category.Name = name
+				category.OwnerName = ownerName
+				category.OwnerEmail = ownerEmail
+				category.TrackID = trackID
+				return nil
+			}
+		}
+		return action.Error(404, "Category not found.")
+	}); err != nil {
+		return err
+	}
+	session.AddFlash(ctx.Request, "notice", "Updated category “"+name+"”.")
+	live.Broadcast("event:category-updated", map[string]string{"category": categoryID})
+	actionflow.Redirect(ctx, "/organizer/settings")
+	return nil
+}
+
+func retireCategory(ctx *action.Context) error {
+	categoryID := strings.TrimSpace(ctx.FormData["category_id"])
+	name := categoryID
+	if err := appstate.MustGet().UpdateAudit(domain.AuditMeta{
+		Actor:      settingsActor(ctx),
+		Action:     "event.category_retired",
+		EntityType: "category",
+		EntityID:   categoryID,
+		Summary:    "Retired an unused CFP category.",
+		Origin:     "organizer-settings",
+	}, func(state *domain.State) error {
+		if len(state.Event.Categories) <= 1 {
+			return action.Validation("Keep at least one category available for public submissions.", map[string]string{"category": "Add a replacement category first."}, ctx.FormData)
+		}
+		for _, submission := range state.Submissions {
+			if submission.CategoryID == categoryID {
+				return action.Validation("This category is already used by proposals.", map[string]string{"category": "Rename it instead; categories with proposal history cannot be retired."}, ctx.FormData)
+			}
+		}
+		for index, category := range state.Event.Categories {
+			if category.ID == categoryID {
+				name = category.Name
+				state.Event.Categories = append(state.Event.Categories[:index], state.Event.Categories[index+1:]...)
+				return nil
+			}
+		}
+		return action.Error(404, "Category not found.")
+	}); err != nil {
+		return err
+	}
+	session.AddFlash(ctx.Request, "notice", "Retired unused category “"+name+"”.")
+	live.Broadcast("event:category-retired", map[string]string{"category": categoryID})
 	actionflow.Redirect(ctx, "/organizer/settings")
 	return nil
 }

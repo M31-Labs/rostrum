@@ -2,15 +2,19 @@ package submit
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/m31-labs/rostrum/examples/demo/fixture"
 	"github.com/m31-labs/rostrum/internal/appstate"
 	"github.com/m31-labs/rostrum/internal/domain"
+	"github.com/m31-labs/rostrum/internal/mail"
 	"github.com/m31-labs/rostrum/internal/ratelimit"
 	"github.com/m31-labs/rostrum/internal/store"
 	"github.com/m31-labs/rostrum/internal/token"
@@ -27,12 +31,68 @@ func submissionTestState(t *testing.T) *store.JSONStore {
 	submissionIPLimiter = ratelimit.NewTokenBucket(10, time.Hour)
 	draftCreationLimiter = ratelimit.NewCounter(draftCreationSessionLimit)
 	draftCreationIPLimiter = ratelimit.NewTokenBucket(draftCreationIPLimit, time.Hour)
-	workspace, err := store.Open(":memory:", domain.Seed(time.Date(2026, time.August, 10, 12, 0, 0, 0, time.UTC)))
+	testOutbox := mail.NewOutboxSender()
+	confirmationSender = func() mail.Sender { return testOutbox }
+	workspace, err := store.Open(":memory:", fixture.Seed(time.Date(2026, time.August, 10, 12, 0, 0, 0, time.UTC)))
 	if err != nil {
 		t.Fatalf("open workspace: %v", err)
 	}
 	appstate.Set(workspace)
 	return workspace
+}
+
+type submissionCaptureSender struct {
+	messages []mail.Message
+	err      error
+	onSend   func(mail.Message)
+}
+
+func (sender *submissionCaptureSender) Send(message mail.Message) error {
+	sender.messages = append(sender.messages, message)
+	if sender.onSend != nil {
+		sender.onSend(message)
+	}
+	return sender.err
+}
+
+func (sender *submissionCaptureSender) Name() string { return "test-transport" }
+
+func validProposalData(email, title string) map[string]string {
+	return map[string]string{
+		"form_id":    "form_cfp_2026",
+		"title":      title,
+		"abstract":   "A complete proposal with enough detail for the program team to evaluate it.",
+		"format":     "Talk",
+		"category":   "agents",
+		"level":      "Intermediate",
+		"topics":     "Inspection\nDelivery\nOperations",
+		"first_name": "Ada",
+		"last_name":  "Lovelace",
+		"email":      email,
+	}
+}
+
+func confirmationCommunications(state domain.State) []domain.Communication {
+	result := make([]domain.Communication, 0)
+	for _, communication := range state.Communications {
+		if communication.Trigger == "submission.confirmation" {
+			result = append(result, communication)
+		}
+	}
+	return result
+}
+
+func thanksDataForSpeaker(t *testing.T, slug, speakerID string) map[string]any {
+	t.Helper()
+	key := token.New().Sign(speakerID)
+	loaded, err := loadThanks(&route.RouteContext{
+		Request: httptest.NewRequest(http.MethodGet, "/submit/"+slug+"/thanks?speaker="+url.QueryEscape(speakerID)+"&key="+url.QueryEscape(key), nil),
+		Params:  map[string]string{"slug": slug},
+	}, route.FilePage{})
+	if err != nil {
+		t.Fatalf("loadThanks: %v", err)
+	}
+	return loaded.(map[string]any)
 }
 
 type mutateAfterSnapshotStore struct {
@@ -388,7 +448,7 @@ func TestThanksRequiresKeyBoundToSpeaker(t *testing.T) {
 
 func TestSubmitProposalRevalidatesTheCurrentFormSchema(t *testing.T) {
 	now := time.Now().UTC()
-	state := domain.Seed(now)
+	state := fixture.Seed(now)
 	state.Forms[0].CloseAt = now.Add(time.Hour)
 	workspace, err := store.Open(":memory:", state)
 	if err != nil {
@@ -412,8 +472,10 @@ func TestSubmitProposalRevalidatesTheCurrentFormSchema(t *testing.T) {
 		},
 	})
 
+	request := httptest.NewRequest(http.MethodPost, "/submit/systems-forum-cfp/__actions/submitProposal", nil)
+	identity := ratelimit.RequestIdentity(request)
 	err = submitProposal(&action.Context{
-		Request: httptest.NewRequest(http.MethodPost, "/submit/systems-forum-cfp/__actions/submitProposal", nil),
+		Request: request,
 		FormData: map[string]string{
 			"form_id":    "form_cfp_2026",
 			"title":      "A current schema must win",
@@ -436,5 +498,268 @@ func TestSubmitProposalRevalidatesTheCurrentFormSchema(t *testing.T) {
 	}
 	if after := len(workspace.Snapshot().Submissions); after != before {
 		t.Fatalf("submissions after stale-schema rejection = %d, want %d", after, before)
+	}
+	if count := submissionLimiter.Count(identity); count != 0 {
+		t.Fatalf("stale-schema rejection consumed %d successful-submission slots", count)
+	}
+}
+
+func TestSubmitProposalUsesConfiguredConfirmationTemplateAndPortalMerge(t *testing.T) {
+	workspace := submissionTestState(t)
+	const templateID = "tpl_custom_submission_receipt"
+	if err := workspace.Update(func(state *domain.State) error {
+		state.EmailTemplates = append(state.EmailTemplates, domain.EmailTemplate{
+			ID: templateID, Name: "Custom receipt", Audience: "submitter",
+			Subject: "Receipt: {{submission.title}} at {{event.name}}",
+			Body:    "Dear {{speaker.name}},\n\nOpen your private workspace:\n{{speaker.portal_url}}",
+		})
+		form, found := state.Form("form_cfp_2026")
+		if !found {
+			return errors.New("test form not found")
+		}
+		form.SendConfirmation = true
+		form.ConfirmationTemplate = templateID
+		return nil
+	}); err != nil {
+		t.Fatalf("configure form: %v", err)
+	}
+
+	t.Setenv("PUBLIC_URL", "https://events.example")
+	beforeSubmissions := len(workspace.Snapshot().Submissions)
+	durableAtSend := false
+	sender := &submissionCaptureSender{onSend: func(mail.Message) {
+		durableAtSend = len(workspace.Snapshot().Submissions) == beforeSubmissions+1
+	}}
+	confirmationSender = func() mail.Sender { return sender }
+	if err := submitProposal(&action.Context{
+		Request:  httptest.NewRequest(http.MethodPost, "/submit/systems-forum-cfp/__actions/submitProposal", nil),
+		FormData: validProposalData("configured-template@example.com", "Inspectable delivery"),
+	}); err != nil {
+		t.Fatalf("submitProposal: %v", err)
+	}
+
+	if len(sender.messages) != 1 {
+		t.Fatalf("delivery attempts = %d, want 1", len(sender.messages))
+	}
+	if !durableAtSend {
+		t.Fatal("confirmation delivery ran before the proposal commit became visible")
+	}
+	message := sender.messages[0]
+	if message.Subject != "Receipt: Inspectable delivery at M31 Systems Forum 2026" {
+		t.Fatalf("subject = %q", message.Subject)
+	}
+	if !strings.HasPrefix(message.TextBody, "Dear Ada Lovelace,\n\nOpen your private workspace:\nhttps://events.example/portal/") {
+		t.Fatalf("body did not render organizer copy and portal URL: %q", message.TextBody)
+	}
+	portalStart := strings.Index(message.TextBody, "https://")
+	portal, err := url.Parse(strings.TrimSpace(message.TextBody[portalStart:]))
+	if err != nil {
+		t.Fatalf("parse rendered portal URL: %v", err)
+	}
+	segments := strings.Split(strings.Trim(portal.Path, "/"), "/")
+	if len(segments) != 2 || segments[0] != "portal" {
+		t.Fatalf("portal path = %q", portal.Path)
+	}
+	keySpeakerID, ok := token.New().Verify(portal.Query().Get("key"))
+	if !ok || keySpeakerID != segments[1] {
+		t.Fatalf("portal key subject = %q, ok=%t; want %q", keySpeakerID, ok, segments[1])
+	}
+
+	communications := confirmationCommunications(workspace.Snapshot())
+	if len(communications) != 1 {
+		t.Fatalf("confirmation rows = %d, want 1", len(communications))
+	}
+	communication := communications[0]
+	if communication.TemplateID != templateID || communication.Subject != message.Subject || communication.Status != domain.CommunicationSent {
+		t.Fatalf("confirmation row = %#v", communication)
+	}
+	if communication.Provider != "test-transport" || communication.RecipientEmail != "configured-template@example.com" || communication.SubmissionID == "" {
+		t.Fatalf("confirmation delivery metadata = %#v", communication)
+	}
+	if communication.IdempotencyKey == "" || communication.IdempotencyKey != message.IdempotencyKey || communication.AttemptCount != 1 || communication.LastAttemptAt.IsZero() {
+		t.Fatalf("confirmation attempt metadata = %#v / message=%#v", communication, message)
+	}
+	if status := thanksDataForSpeaker(t, "systems-forum-cfp", communication.SpeakerID)["confirmationStatus"].(string); status != domain.CommunicationSent {
+		t.Fatalf("thanks confirmation status = %q, want sent", status)
+	}
+}
+
+func TestSubmitProposalSkipsDisabledConfirmation(t *testing.T) {
+	workspace := submissionTestState(t)
+	if err := workspace.Update(func(state *domain.State) error {
+		form, found := state.Form("form_cfp_2026")
+		if !found {
+			return errors.New("test form not found")
+		}
+		form.SendConfirmation = false
+		return nil
+	}); err != nil {
+		t.Fatalf("disable confirmation: %v", err)
+	}
+	sender := &submissionCaptureSender{}
+	confirmationSender = func() mail.Sender { return sender }
+
+	if err := submitProposal(&action.Context{
+		Request:  httptest.NewRequest(http.MethodPost, "/submit/systems-forum-cfp/__actions/submitProposal", nil),
+		FormData: validProposalData("no-confirmation@example.com", "No automatic receipt"),
+	}); err != nil {
+		t.Fatalf("submitProposal: %v", err)
+	}
+	if len(sender.messages) != 0 {
+		t.Fatalf("disabled confirmation attempted %d deliveries", len(sender.messages))
+	}
+	if rows := confirmationCommunications(workspace.Snapshot()); len(rows) != 0 {
+		t.Fatalf("disabled confirmation recorded rows: %#v", rows)
+	}
+	snapshot := workspace.Snapshot()
+	created := snapshot.Submissions[len(snapshot.Submissions)-1]
+	if status := thanksDataForSpeaker(t, "systems-forum-cfp", created.SpeakerIDs[0])["confirmationStatus"].(string); status != "disabled" {
+		t.Fatalf("thanks confirmation status = %q, want disabled", status)
+	}
+}
+
+func TestSubmitProposalRecordsFailedAttemptWithoutProviderError(t *testing.T) {
+	workspace := submissionTestState(t)
+	sender := &submissionCaptureSender{err: errors.New("provider secret and internal host must never persist")}
+	confirmationSender = func() mail.Sender { return sender }
+
+	if err := submitProposal(&action.Context{
+		Request:  httptest.NewRequest(http.MethodPost, "/submit/systems-forum-cfp/__actions/submitProposal", nil),
+		FormData: validProposalData("failed-confirmation@example.com", "Durable before delivery"),
+	}); err != nil {
+		t.Fatalf("submitProposal: %v", err)
+	}
+	rows := confirmationCommunications(workspace.Snapshot())
+	if len(rows) != 1 || rows[0].Status != domain.CommunicationFailed || rows[0].AttemptCount != 1 {
+		t.Fatalf("failed confirmation rows = %#v", rows)
+	}
+	if rows[0].Error != "delivery_failed" || strings.Contains(rows[0].Error, "provider secret") {
+		t.Fatalf("stored failure category = %q", rows[0].Error)
+	}
+	if status := thanksDataForSpeaker(t, "systems-forum-cfp", rows[0].SpeakerID)["confirmationStatus"].(string); status != domain.CommunicationFailed {
+		t.Fatalf("thanks confirmation status = %q, want failed", status)
+	}
+	snapshot := workspace.Snapshot()
+	if submission, found := snapshot.Submission(rows[0].SubmissionID); !found || submission.Status != domain.SubmissionPending {
+		t.Fatalf("proposal was not durable before failed delivery: %#v", submission)
+	}
+}
+
+func TestSubmitProposalRejectsUnsafeImportedConfirmationBeforeQuota(t *testing.T) {
+	workspace := submissionTestState(t)
+	if err := workspace.Update(func(state *domain.State) error {
+		form, found := state.Form("form_cfp_2026")
+		if !found {
+			return errors.New("test form not found")
+		}
+		for index := range state.EmailTemplates {
+			if state.EmailTemplates[index].ID == form.ConfirmationTemplate {
+				state.EmailTemplates[index].Subject = "Receipt\nBcc: attacker@example.com"
+				return nil
+			}
+		}
+		return errors.New("confirmation template not found")
+	}); err != nil {
+		t.Fatalf("install unsafe imported template: %v", err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/submit/systems-forum-cfp/__actions/submitProposal", nil)
+	identity := ratelimit.RequestIdentity(request)
+	before := len(workspace.Snapshot().Submissions)
+	err := submitProposal(&action.Context{Request: request, FormData: validProposalData("unsafe-template@example.com", "Safe boundary")})
+	if err == nil || !strings.Contains(err.Error(), "invalid confirmation template") {
+		t.Fatalf("unsafe confirmation template error = %v", err)
+	}
+	if got := len(workspace.Snapshot().Submissions); got != before {
+		t.Fatalf("unsafe template changed submission count to %d, want %d", got, before)
+	}
+	if count := submissionLimiter.Count(identity); count != 0 {
+		t.Fatalf("unsafe template consumed %d successful-submission slots", count)
+	}
+}
+
+func TestInvalidProposalDoesNotConsumeSuccessfulSubmissionBudget(t *testing.T) {
+	workspace := submissionTestState(t)
+	const remoteAddress = "203.0.113.77:443"
+	identityRequest := httptest.NewRequest(http.MethodPost, "/submit/systems-forum-cfp/__actions/submitProposal", nil)
+	identityRequest.RemoteAddr = remoteAddress
+	identity := ratelimit.RequestIdentity(identityRequest)
+
+	invalid := validProposalData("quota@example.com", "Incomplete proposal")
+	delete(invalid, "abstract")
+	for attempt := 0; attempt < 7; attempt++ {
+		request := httptest.NewRequest(http.MethodPost, "/submit/systems-forum-cfp/__actions/submitProposal", nil)
+		request.RemoteAddr = remoteAddress
+		err := submitProposal(&action.Context{Request: request, FormData: invalid})
+		var result *action.ResultError
+		if !errors.As(err, &result) || result.Result.FieldErrors["abstract"] == "" {
+			t.Fatalf("invalid attempt %d = %v, want abstract validation", attempt+1, err)
+		}
+	}
+	if count := submissionLimiter.Count(identity); count != 0 {
+		t.Fatalf("invalid proposals consumed %d successful-submission slots", count)
+	}
+
+	before := len(workspace.Snapshot().Submissions)
+	for attempt := 0; attempt < 5; attempt++ {
+		request := httptest.NewRequest(http.MethodPost, "/submit/systems-forum-cfp/__actions/submitProposal", nil)
+		request.RemoteAddr = remoteAddress
+		data := validProposalData("quota@example.com", fmt.Sprintf("Valid proposal %d", attempt+1))
+		if err := submitProposal(&action.Context{Request: request, FormData: data}); err != nil {
+			t.Fatalf("valid attempt %d: %v", attempt+1, err)
+		}
+	}
+	if count := submissionLimiter.Count(identity); count != 5 {
+		t.Fatalf("successful submission count = %d, want 5", count)
+	}
+	if got := len(workspace.Snapshot().Submissions); got != before+5 {
+		t.Fatalf("submission count = %d, want %d", got, before+5)
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "/submit/systems-forum-cfp/__actions/submitProposal", nil)
+	request.RemoteAddr = remoteAddress
+	err := submitProposal(&action.Context{Request: request, FormData: validProposalData("quota@example.com", "One too many")})
+	var result *action.ResultError
+	if !errors.As(err, &result) || !strings.Contains(result.Result.FieldErrors["form"], "submission limit") {
+		t.Fatalf("sixth valid submission = %v, want limit validation", err)
+	}
+}
+
+func TestThanksReceiptRemainsKeyedWhenPortalRedirectIsDisabled(t *testing.T) {
+	workspace := submissionTestState(t)
+	if err := workspace.Update(func(state *domain.State) error {
+		form, found := state.Form("form_cfp_2026")
+		if !found {
+			return errors.New("test form not found")
+		}
+		form.RedirectToPortal = false
+		return nil
+	}); err != nil {
+		t.Fatalf("disable portal redirect: %v", err)
+	}
+
+	target, err := url.Parse(thanksRedirectURL("systems-forum-cfp", "spk_maya"))
+	if err != nil {
+		t.Fatalf("parse thanks redirect: %v", err)
+	}
+	if target.Path != "/submit/systems-forum-cfp/thanks" {
+		t.Fatalf("thanks redirect path = %q", target.Path)
+	}
+	if subject, ok := token.New().Verify(target.Query().Get("key")); !ok || subject != "spk_maya" {
+		t.Fatalf("thanks receipt key subject = %q, ok=%t", subject, ok)
+	}
+	ctx := &route.RouteContext{
+		Request: httptest.NewRequest(http.MethodGet, target.String(), nil),
+		Params:  map[string]string{"slug": "systems-forum-cfp"},
+	}
+	loaded, err := loadThanks(ctx, route.FilePage{})
+	if err != nil {
+		t.Fatalf("loadThanks: %v", err)
+	}
+	data := loaded.(map[string]any)
+	if data["hasPortal"].(bool) || data["portalURL"].(string) != "" {
+		t.Fatalf("portal redirect disabled but thanks exposed portal: %#v", data)
+	}
+	if title := data["submission"].(map[string]any)["title"].(string); title == "" {
+		t.Fatal("keyed receipt did not retain its owned proposal title")
 	}
 }

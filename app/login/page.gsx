@@ -9,13 +9,14 @@ func Page() Node {
 		<section class="auth-card">
 			<p class="eyebrow">Sign in</p>
 			<h1>Rostrum</h1>
-			<If cond={data.readOnlyDemo}>
+			<If cond={data.workspace.readOnlyPreview}>
 				<p>
-					This hosted preview uses fictional data and is read-only. Sign-in, uploads, and workspace changes are disabled.
+					{data.workspace.previewMessage}
+					Sign-in and identity setup are disabled.
 				</p>
-				<a class="button button-primary" href="/organizer" data-gosx-link>Browse the demo workspace</a>
+				<a class="button button-primary" href="/organizer" data-gosx-link>Browse the workspace</a>
 			</If>
-			<If cond={!data.readOnlyDemo}>
+			<If cond={!data.workspace.readOnlyPreview}>
 				<p>
 					Sign in with a magic link, a passkey, or a connected account.
 				</p>

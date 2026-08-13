@@ -5,6 +5,9 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"io"
 	"io/fs"
 	"mime/multipart"
@@ -17,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/m31-labs/rostrum/examples/demo/fixture"
 	"github.com/m31-labs/rostrum/internal/appstate"
 	workspacearchive "github.com/m31-labs/rostrum/internal/archive"
 	internalaudit "github.com/m31-labs/rostrum/internal/audit"
@@ -66,12 +70,122 @@ func TestRostrumFileRouterDeclaresEnglishLanguageAndPreservesContract(t *testing
 // call appstate.MustGet() the same way the real handlers do) have state to
 // read and mutate.
 func TestMain(m *testing.M) {
-	workspace, err := store.Open(":memory:", domain.Seed(time.Now().UTC()))
+	workspace, err := store.Open(":memory:", fixture.Seed(time.Now().UTC()))
 	if err != nil {
 		panic(err)
 	}
 	appstate.Set(workspace)
 	os.Exit(m.Run())
+}
+
+func TestLoadInitialWorkspaceDefaultsAndRejectsUnknownSelection(t *testing.T) {
+	now := time.Date(2026, time.August, 12, 12, 0, 0, 0, time.UTC)
+	fresh, err := loadInitialWorkspace(t.TempDir(), "", "", "", "", now)
+	if err != nil {
+		t.Fatalf("load default workspace: %v", err)
+	}
+	if fresh.State.Event.Name != domain.FreshState(now).Event.Name || fresh.TemplatePath != "" {
+		t.Fatalf("default workspace = %+v, want built-in fresh state", fresh)
+	}
+	empty, err := loadInitialWorkspace(t.TempDir(), "empty", "", "", "", now)
+	if err != nil {
+		t.Fatalf("load empty workspace: %v", err)
+	}
+	if len(empty.State.Forms) != 0 {
+		t.Fatalf("empty workspace has %d forms, want none", len(empty.State.Forms))
+	}
+	if _, err := loadInitialWorkspace(t.TempDir(), "demo", "", "", "", now); err == nil || !strings.Contains(err.Error(), "fresh or empty") {
+		t.Fatalf("unknown INITIAL_WORKSPACE error = %v", err)
+	}
+}
+
+func TestLoadInitialWorkspaceStrictTemplateAndChecksumSources(t *testing.T) {
+	root := t.TempDir()
+	fixtureDir := filepath.Join(root, "fixtures")
+	if err := os.MkdirAll(fixtureDir, 0o755); err != nil {
+		t.Fatalf("create fixture directory: %v", err)
+	}
+	now := time.Date(2026, time.August, 12, 12, 0, 0, 0, time.UTC)
+	raw, err := json.Marshal(domain.FreshState(now))
+	if err != nil {
+		t.Fatalf("marshal workspace: %v", err)
+	}
+	workspacePath := filepath.Join(fixtureDir, "workspace.json")
+	if err := os.WriteFile(workspacePath, raw, 0o600); err != nil {
+		t.Fatalf("write workspace: %v", err)
+	}
+	digest := sha256.Sum256(raw)
+	wantChecksum := hex.EncodeToString(digest[:])
+
+	inline, err := loadInitialWorkspace(root, "fresh", "fixtures/workspace.json", wantChecksum, "", now.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("load inline-pinned workspace: %v", err)
+	}
+	if inline.TemplatePath != workspacePath || inline.ExpectedSHA256 != wantChecksum || inline.ChecksumFile != "" {
+		t.Fatalf("inline source = %+v", inline)
+	}
+
+	checksumPath := filepath.Join(fixtureDir, "workspace.sha256")
+	if err := os.WriteFile(checksumPath, []byte(wantChecksum+"\n"), 0o600); err != nil {
+		t.Fatalf("write checksum: %v", err)
+	}
+	fromFile, err := loadInitialWorkspace(root, "empty", "fixtures/workspace.json", "", "fixtures/workspace.sha256", now.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("load file-pinned workspace: %v", err)
+	}
+	if fromFile.ChecksumFile != checksumPath || fromFile.ExpectedSHA256 != wantChecksum {
+		t.Fatalf("checksum file source = %+v", fromFile)
+	}
+
+	if _, err := loadInitialWorkspace(root, "fresh", workspacePath, wantChecksum, checksumPath, now); err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Fatalf("dual checksum source error = %v", err)
+	}
+	if _, err := loadInitialWorkspace(root, "fresh", workspacePath, strings.Repeat("0", 64), "", now); err == nil || !strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("mismatched checksum error = %v", err)
+	}
+}
+
+func TestLoadInitialWorkspaceRejectsInvalidPathJSONAndState(t *testing.T) {
+	root := t.TempDir()
+	now := time.Date(2026, time.August, 12, 12, 0, 0, 0, time.UTC)
+	if _, err := loadInitialWorkspace(root, "fresh", "missing.json", "", "", now); err == nil || !strings.Contains(err.Error(), "read INITIAL_WORKSPACE_PATH") {
+		t.Fatalf("missing path error = %v", err)
+	}
+
+	cases := []struct {
+		name string
+		raw  []byte
+		want string
+	}{
+		{name: "invalid json", raw: []byte(`{"event":`), want: "decode INITIAL_WORKSPACE_PATH"},
+		{name: "unknown field", raw: append(mustMarshalState(t, domain.FreshState(now))[:len(mustMarshalState(t, domain.FreshState(now)))-1], []byte(`,"unexpected":true}`)...), want: "unknown field"},
+		{name: "invalid state", raw: mustMarshalState(t, func() domain.State { state := domain.FreshState(now); state.Event.Name = ""; return state }()), want: "event id, name, and slug"},
+		{name: "trailing json", raw: append(mustMarshalState(t, domain.FreshState(now)), []byte(` {}`)...), want: "trailing content"},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			path := filepath.Join(root, strings.ReplaceAll(test.name, " ", "-")+".json")
+			if err := os.WriteFile(path, test.raw, 0o600); err != nil {
+				t.Fatalf("write invalid fixture: %v", err)
+			}
+			if _, err := loadInitialWorkspace(root, "fresh", path, "", "", now); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("load error = %v, want %q", err, test.want)
+			}
+		})
+	}
+
+	if _, err := loadInitialWorkspace(root, "fresh", "", strings.Repeat("a", 64), "", now); err == nil || !strings.Contains(err.Error(), "requires INITIAL_WORKSPACE_PATH") {
+		t.Fatalf("orphan checksum error = %v", err)
+	}
+}
+
+func mustMarshalState(t *testing.T, state domain.State) []byte {
+	t.Helper()
+	raw, err := json.Marshal(state)
+	if err != nil {
+		t.Fatalf("marshal state: %v", err)
+	}
+	return raw
 }
 
 func testSessionManager(t *testing.T) *session.Manager {
@@ -94,6 +208,116 @@ func signInAs(authManager *auth.Manager, role string) func(http.Handler) http.Ha
 			authManager.SignIn(r, auth.User{ID: "test-" + role, Email: "test-" + role + "@example.com", Roles: []string{role}})
 			next.ServeHTTP(w, r)
 		})
+	}
+}
+
+func TestValidateRuntimePosture(t *testing.T) {
+	strongSecret := "unique-test-session-secret-at-least-32-characters"
+	tests := []struct {
+		name         string
+		publicURL    string
+		appEnv       string
+		dataPath     string
+		secret       string
+		staticExport string
+		wantError    bool
+	}{
+		{name: "local development", publicURL: "http://127.0.0.1:8080", appEnv: "development", dataPath: ":memory:", secret: developmentSessionSecret},
+		{name: "production https durable", publicURL: "https://program.example.com", appEnv: "production", dataPath: "/srv/rostrum.json", secret: strongSecret},
+		{name: "public development still strict", publicURL: "https://program.example.com", appEnv: "development", dataPath: "/srv/rostrum.json", secret: strongSecret},
+		{name: "public weak secret", publicURL: "https://program.example.com", appEnv: "development", dataPath: "/srv/rostrum.json", secret: "short", wantError: true},
+		{name: "public plain http", publicURL: "http://program.example.com", appEnv: "development", dataPath: "/srv/rostrum.json", secret: strongSecret, wantError: true},
+		{name: "public memory state", publicURL: "https://program.example.com", appEnv: "development", dataPath: ":memory:", secret: strongSecret, wantError: true},
+		{name: "public static export bypass", publicURL: "https://program.example.com", appEnv: "development", dataPath: "/srv/rostrum.json", secret: strongSecret, staticExport: "1", wantError: true},
+		{name: "production loopback remains strict", publicURL: "http://localhost:8080", appEnv: "production", dataPath: "/srv/rostrum.json", secret: strongSecret, wantError: true},
+		{name: "unknown environment", publicURL: "http://localhost:8080", appEnv: "staging", dataPath: ":memory:", secret: developmentSessionSecret, wantError: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := validateRuntimePosture(test.publicURL, test.appEnv, test.dataPath, test.secret, test.staticExport)
+			if (err != nil) != test.wantError {
+				t.Fatalf("validateRuntimePosture() error = %v, wantError %v", err, test.wantError)
+			}
+		})
+	}
+}
+
+func TestResetWorkspaceRequiresMutatingRoleAndFormSecret(t *testing.T) {
+	initial := fixture.Seed(time.Now().UTC())
+	initial.Event.Name = "Reset target"
+	workspace, err := store.Open(":memory:", initial)
+	if err != nil {
+		t.Fatalf("open workspace: %v", err)
+	}
+	appstate.Set(workspace)
+	t.Cleanup(func() { _ = workspace.Close() })
+
+	uploads := filepath.Join(t.TempDir(), "uploads")
+	if err := os.MkdirAll(uploads, 0o700); err != nil {
+		t.Fatalf("create uploads: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(uploads, "proof.txt"), []byte("proof"), 0o600); err != nil {
+		t.Fatalf("write proof upload: %v", err)
+	}
+
+	t.Setenv("APP_ENV", "development")
+	t.Setenv("RESET_SECRET", "reset-only-from-form")
+	manager := testSessionManager(t)
+	authManager := identity.New(manager)
+	handler := http.HandlerFunc(resetWorkspace(uploads))
+
+	request := func(target, body string) *http.Request {
+		r := httptest.NewRequest(http.MethodPost, target, strings.NewReader(body))
+		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		return r
+	}
+	for _, test := range []struct {
+		name string
+		wrap func(http.Handler) http.Handler
+	}{
+		{name: "anonymous", wrap: func(next http.Handler) http.Handler { return next }},
+		{name: "observer", wrap: signInAs(authManager, identity.RoleObserver)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			wrapped := manager.Middleware(test.wrap(authManager.Middleware(handler)))
+			wrapped.ServeHTTP(response, request("/workspace/reset", "secret=reset-only-from-form"))
+			if response.Code != http.StatusForbidden {
+				t.Fatalf("status = %d, want 403; body=%s", response.Code, response.Body.String())
+			}
+		})
+	}
+
+	organizer := manager.Middleware(signInAs(authManager, identity.RoleOrganizer)(authManager.Middleware(handler)))
+	queryOnly := httptest.NewRecorder()
+	organizer.ServeHTTP(queryOnly, request("/workspace/reset?secret=reset-only-from-form", ""))
+	if queryOnly.Code != http.StatusNotFound {
+		t.Fatalf("query-only secret status = %d, want 404", queryOnly.Code)
+	}
+	if _, err := os.Stat(filepath.Join(uploads, "proof.txt")); err != nil {
+		t.Fatalf("rejected reset removed upload: %v", err)
+	}
+
+	accepted := httptest.NewRecorder()
+	organizer.ServeHTTP(accepted, request("/workspace/reset", "secret=reset-only-from-form"))
+	if accepted.Code != http.StatusSeeOther {
+		t.Fatalf("organizer reset status = %d, want 303; body=%s", accepted.Code, accepted.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(uploads, "proof.txt")); !os.IsNotExist(err) {
+		t.Fatalf("accepted reset retained upload, stat err=%v", err)
+	}
+}
+
+func TestResetWorkspaceProductionWithoutSecretIsUnavailable(t *testing.T) {
+	t.Setenv("APP_ENV", "production")
+	t.Setenv("RESET_SECRET", "")
+	manager := testSessionManager(t)
+	authManager := identity.New(manager)
+	handler := manager.Middleware(signInAs(authManager, identity.RoleOrganizer)(authManager.Middleware(resetWorkspace(t.TempDir()))))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/workspace/reset", nil))
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("production reset without secret status = %d, want 404", response.Code)
 	}
 }
 
@@ -237,11 +461,12 @@ func workspaceImportRequest(t *testing.T, contents []byte) *http.Request {
 func TestPortalUploadRequiresBoundOwnerOrMutatingOrganizer(t *testing.T) {
 	testPortalWorkspace(t)
 	root := t.TempDir()
+	uploadDir := filepath.Join(root, "data", "uploads")
 	path := "/portal-upload/spk_owner/task_headshot"
 	payload := []byte{0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 'J', 'F', 'I', 'F'}
 	manager := testSessionManager(t)
 	authManager := identity.New(manager)
-	handler := http.HandlerFunc(portalUpload(root))
+	handler := http.HandlerFunc(portalUpload(uploadDir))
 
 	for _, test := range []struct {
 		name string
@@ -260,7 +485,7 @@ func TestPortalUploadRequiresBoundOwnerOrMutatingOrganizer(t *testing.T) {
 			}
 		})
 	}
-	if _, err := os.Stat(filepath.Join(root, "data", "uploads")); !os.IsNotExist(err) {
+	if _, err := os.Stat(uploadDir); !os.IsNotExist(err) {
 		t.Fatalf("unauthorized upload prepared storage, stat err = %v", err)
 	}
 }
@@ -268,8 +493,9 @@ func TestPortalUploadRequiresBoundOwnerOrMutatingOrganizer(t *testing.T) {
 func TestPortalUploadChecksAssignmentImageBytesAndLimit(t *testing.T) {
 	_, workspace := testPortalWorkspace(t)
 	root := t.TempDir()
+	uploadDir := filepath.Join(root, "data", "uploads")
 	manager := testSessionManager(t)
-	handler := manager.Middleware(bindPortalSpeaker("spk_owner")(http.HandlerFunc(portalUpload(root))))
+	handler := manager.Middleware(bindPortalSpeaker("spk_owner")(http.HandlerFunc(portalUpload(uploadDir))))
 
 	// An assigned speaker cannot submit an unassigned task even with a valid
 	// portal session. The response is intentionally indistinguishable from a
@@ -294,7 +520,7 @@ func TestPortalUploadChecksAssignmentImageBytesAndLimit(t *testing.T) {
 	if overLimit.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("over-limit status = %d, want 413; body=%s", overLimit.Code, overLimit.Body.String())
 	}
-	entries, err := os.ReadDir(filepath.Join(root, "data", "uploads"))
+	entries, err := os.ReadDir(uploadDir)
 	if err != nil && !os.IsNotExist(err) {
 		t.Fatalf("read upload dir: %v", err)
 	}
@@ -309,8 +535,9 @@ func TestPortalUploadChecksAssignmentImageBytesAndLimit(t *testing.T) {
 func TestPortalUploadStoresAuthorizedHeadshotAndBindsProfileURL(t *testing.T) {
 	_, workspace := testPortalWorkspace(t)
 	root := t.TempDir()
+	uploadDir := filepath.Join(root, "data", "uploads")
 	manager := testSessionManager(t)
-	handler := manager.Middleware(bindPortalSpeaker("spk_owner")(http.HandlerFunc(portalUpload(root))))
+	handler := manager.Middleware(bindPortalSpeaker("spk_owner")(http.HandlerFunc(portalUpload(uploadDir))))
 	recorder := httptest.NewRecorder()
 	payload := []byte{0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 'J', 'F', 'I', 'F'}
 	handler.ServeHTTP(recorder, portalUploadRequest(t, "/portal-upload/spk_owner/task_headshot", "portrait.jpg", payload))
@@ -338,8 +565,9 @@ func TestPortalUploadStoresAuthorizedHeadshotAndBindsProfileURL(t *testing.T) {
 func TestPortalUploadReplacesAndCleansSupersededPrivateFile(t *testing.T) {
 	_, workspace := testPortalWorkspace(t)
 	root := t.TempDir()
+	uploadDir := filepath.Join(root, "data", "uploads")
 	manager := testSessionManager(t)
-	handler := manager.Middleware(bindPortalSpeaker("spk_owner")(http.HandlerFunc(portalUpload(root))))
+	handler := manager.Middleware(bindPortalSpeaker("spk_owner")(http.HandlerFunc(portalUpload(uploadDir))))
 	firstPayload := []byte{0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 'J', 'F', 'I', 'F', '1'}
 	secondPayload := []byte{0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 'J', 'F', 'I', 'F', '2'}
 
@@ -402,11 +630,11 @@ func TestRemoveSupersededUploadProtectsSharedAndOutsidePaths(t *testing.T) {
 		t.Fatalf("seed shared completion: %v", err)
 	}
 
-	removeSupersededUpload(root, filepath.ToSlash(oldPath), filepath.ToSlash(replacementPath))
+	removeSupersededUpload(uploadDir, filepath.ToSlash(oldPath), filepath.ToSlash(replacementPath))
 	if _, err := os.Stat(oldPath); err != nil {
 		t.Fatalf("shared upload removed despite a current reference: %v", err)
 	}
-	removeSupersededUpload(root, filepath.ToSlash(outsidePath), filepath.ToSlash(replacementPath))
+	removeSupersededUpload(uploadDir, filepath.ToSlash(outsidePath), filepath.ToSlash(replacementPath))
 	if _, err := os.Stat(outsidePath); err != nil {
 		t.Fatalf("outside path changed during cleanup: %v", err)
 	}
@@ -417,7 +645,7 @@ func TestRemoveSupersededUploadProtectsSharedAndOutsidePaths(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("clear shared completion: %v", err)
 	}
-	removeSupersededUpload(root, filepath.ToSlash(oldPath), filepath.ToSlash(replacementPath))
+	removeSupersededUpload(uploadDir, filepath.ToSlash(oldPath), filepath.ToSlash(replacementPath))
 	if _, err := os.Stat(oldPath); !os.IsNotExist(err) {
 		t.Fatalf("unreferenced upload was not removed, stat err = %v", err)
 	}
@@ -429,7 +657,8 @@ func TestSecurityHeadersAuthorizeOnlyTheGoSXInlineRuntime(t *testing.T) {
 	if !strings.HasPrefix(hash, "'sha256-") {
 		t.Fatalf("navigation CSP hash = %q", hash)
 	}
-	handler := securityHeaders("https://rostrum.example", hash)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := testSecurityHeaders("https://rostrum.example", hash)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Test-Nonce", server.RequestNonce(r))
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	recorder := httptest.NewRecorder()
@@ -437,7 +666,8 @@ func TestSecurityHeadersAuthorizeOnlyTheGoSXInlineRuntime(t *testing.T) {
 
 	policy := recorder.Header().Get("Content-Security-Policy")
 	for _, required := range []string{
-		"script-src 'self' 'wasm-unsafe-eval' " + hash,
+		"script-src 'self' 'wasm-unsafe-eval' 'nonce-",
+		hash,
 		"frame-src 'self'",
 		"form-action 'self'",
 		"upgrade-insecure-requests",
@@ -452,11 +682,43 @@ func TestSecurityHeadersAuthorizeOnlyTheGoSXInlineRuntime(t *testing.T) {
 	if strings.Contains(policy, "'unsafe-eval'") {
 		t.Fatalf("CSP should authorize only WebAssembly compilation, not generic eval: %s", policy)
 	}
+	nonce := recorder.Header().Get("X-Test-Nonce")
+	if nonce == "" || !strings.Contains(policy, "'nonce-"+nonce+"'") {
+		t.Fatalf("CSP nonce was not threaded through the request: nonce=%q policy=%q", nonce, policy)
+	}
+	if strings.Contains(policy, server.NoncePlaceholder) {
+		t.Fatalf("CSP leaked nonce placeholder: %s", policy)
+	}
 }
 
-func TestReadOnlyDemoGateBlocksMutationsAndSensitiveSurfaces(t *testing.T) {
-	t.Setenv("APP_MODE", "demo")
-	handler := readOnlyDemoGate()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func TestCSRFProtectionAllowsOnlyBoundedClientDiagnosticsWithoutAToken(t *testing.T) {
+	t.Setenv("APP_MODE", "live")
+	manager := testSessionManager(t)
+	reached := make(map[string]int)
+	handler := manager.Middleware(csrfProtection(manager)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reached[r.URL.Path]++
+		w.WriteHeader(http.StatusNoContent)
+	})))
+
+	diagnostics := httptest.NewRecorder()
+	handler.ServeHTTP(diagnostics, httptest.NewRequest(http.MethodPost, server.ClientEventsRoute, strings.NewReader(`{"events":[]}`)))
+	if diagnostics.Code != http.StatusNoContent || reached[server.ClientEventsRoute] != 1 {
+		t.Fatalf("client diagnostics status=%d reached=%d, want 204 and one handler call", diagnostics.Code, reached[server.ClientEventsRoute])
+	}
+
+	mutation := httptest.NewRecorder()
+	handler.ServeHTTP(mutation, httptest.NewRequest(http.MethodPost, "/organizer/agenda/__actions/moveSession", strings.NewReader("session_id=ses_memory")))
+	if mutation.Code != http.StatusForbidden {
+		t.Fatalf("workspace mutation without CSRF status=%d, want 403", mutation.Code)
+	}
+	if reached["/organizer/agenda/__actions/moveSession"] != 0 {
+		t.Fatal("workspace mutation without CSRF reached the action handler")
+	}
+}
+
+func TestReadOnlyPreviewGateBlocksMutationsAndSensitiveSurfaces(t *testing.T) {
+	t.Setenv("APP_MODE", "preview")
+	handler := readOnlyPreviewGate()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	cases := []struct {
@@ -474,7 +736,7 @@ func TestReadOnlyDemoGateBlocksMutationsAndSensitiveSurfaces(t *testing.T) {
 		{http.MethodGet, "/portal-file/done_demo", http.StatusForbidden},
 		{http.MethodGet, "/auth/magic-link", http.StatusForbidden},
 		{http.MethodGet, "/setup", http.StatusForbidden},
-		{http.MethodGet, "/demo/reset", http.StatusForbidden},
+		{http.MethodGet, "/workspace/reset", http.StatusForbidden},
 		{http.MethodGet, "/organizer", http.StatusNoContent},
 		{http.MethodGet, "/review/token", http.StatusNoContent},
 		{http.MethodGet, "/login", http.StatusNoContent},
@@ -494,8 +756,8 @@ func TestReadOnlyDemoGateBlocksMutationsAndSensitiveSurfaces(t *testing.T) {
 	}
 }
 
-func TestOrganizerGateAllowsAnonymousReadOnlyDemoInspection(t *testing.T) {
-	t.Setenv("APP_MODE", "demo")
+func TestOrganizerGateAllowsAnonymousReadOnlyPreviewInspection(t *testing.T) {
+	t.Setenv("APP_MODE", "preview")
 	t.Setenv("GOSX_STATIC_EXPORT", "")
 	handler := organizerGate()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
@@ -503,18 +765,18 @@ func TestOrganizerGateAllowsAnonymousReadOnlyDemoInspection(t *testing.T) {
 	read := httptest.NewRecorder()
 	handler.ServeHTTP(read, httptest.NewRequest(http.MethodGet, "/organizer/agenda", nil))
 	if read.Code != http.StatusNoContent {
-		t.Fatalf("anonymous demo organizer GET status = %d, want 204", read.Code)
+		t.Fatalf("anonymous preview organizer GET status = %d, want 204", read.Code)
 	}
 	write := httptest.NewRecorder()
 	handler.ServeHTTP(write, httptest.NewRequest(http.MethodPost, "/organizer/agenda", nil))
 	if write.Code != http.StatusForbidden {
-		t.Fatalf("anonymous demo organizer POST status = %d, want 403", write.Code)
+		t.Fatalf("anonymous preview organizer POST status = %d, want 403", write.Code)
 	}
 }
 
-func TestSecurityHeadersMarkReadOnlyDemoResponsesNoindex(t *testing.T) {
-	t.Setenv("APP_MODE", "demo")
-	handler := securityHeaders("https://demo.rostrum.example", navigationScriptCSPHash())(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func TestSecurityHeadersMarkReadOnlyPreviewResponsesNoindex(t *testing.T) {
+	t.Setenv("APP_MODE", "preview")
+	handler := testSecurityHeaders("https://preview.rostrum.example", navigationScriptCSPHash())(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	for _, path := range []string{"/", "/organizer", "/public/m31-systems-forum-2026/agenda", "/login"} {
@@ -529,7 +791,7 @@ func TestSecurityHeadersMarkReadOnlyDemoResponsesNoindex(t *testing.T) {
 func TestFrameAncestorsScopedToPublicRoutes(t *testing.T) {
 	t.Setenv("APP_MODE", "live")
 	hash := navigationScriptCSPHash()
-	handler := securityHeaders("https://rostrum.example", hash)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := testSecurityHeaders("https://rostrum.example", hash)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
 
@@ -553,6 +815,16 @@ func TestFrameAncestorsScopedToPublicRoutes(t *testing.T) {
 	}
 }
 
+func testSecurityHeaders(publicBase string, scriptHashes ...string) server.Middleware {
+	return func(next http.Handler) http.Handler {
+		app := server.New()
+		app.EnableSecurityPolicy(rostrumSecurityPolicy(publicBase, scriptHashes...))
+		app.Use(routeSecurityHeaders())
+		app.Mount("/", next)
+		return app.Build()
+	}
+}
+
 func TestSubmissionsCSVRequiresOrganizerSessionAndEscapesFormulas(t *testing.T) {
 	manager := testSessionManager(t)
 	authManager := identity.New(manager)
@@ -564,6 +836,7 @@ func TestSubmissionsCSVRequiresOrganizerSessionAndEscapesFormulas(t *testing.T) 
 		state.Submissions = append(state.Submissions, domain.Submission{
 			ID:          submissionID,
 			EventID:     state.Event.ID,
+			FormID:      state.Forms[0].ID,
 			Title:       `=HYPERLINK("https://evil.example")`,
 			Status:      domain.SubmissionPending,
 			SubmittedAt: now,
@@ -609,7 +882,7 @@ func TestSubmissionsCSVRequiresOrganizerSessionAndEscapesFormulas(t *testing.T) 
 }
 
 func TestWorkspaceExportRequiresMutatingRoleAndRecordsAccess(t *testing.T) {
-	state := domain.Seed(time.Now().UTC())
+	state := fixture.Seed(time.Now().UTC())
 	state.AuthMagicLinks = []domain.AuthMagicLink{{Token: "transient-token", Email: "owner@example.com", ExpiresAt: time.Now().Add(time.Hour)}}
 	workspace, err := store.Open(":memory:", state)
 	if err != nil {
@@ -662,14 +935,14 @@ func TestWorkspaceExportRequiresMutatingRoleAndRecordsAccess(t *testing.T) {
 }
 
 func TestWorkspaceImportValidatesBeforeBackupAndRetainsLocalIdentity(t *testing.T) {
-	source := domain.Seed(time.Now().UTC())
+	source := fixture.Seed(time.Now().UTC())
 	source.Event.Name = "Imported program"
 	exportData, err := workspacearchive.Marshal(source)
 	if err != nil {
 		t.Fatalf("marshal source export: %v", err)
 	}
 
-	current := domain.Seed(time.Now().UTC())
+	current := fixture.Seed(time.Now().UTC())
 	current.Event.Name = "Current program"
 	current.Principals = []domain.Principal{{ID: "principal_current", Email: "current@example.com"}}
 	current.AuthPasskeys = []domain.AuthPasskey{{ID: "passkey_current"}}
@@ -682,7 +955,7 @@ func TestWorkspaceImportValidatesBeforeBackupAndRetainsLocalIdentity(t *testing.
 	manager := testSessionManager(t)
 	authManager := identity.New(manager)
 	backups := filepath.Join(t.TempDir(), "backups")
-	handler := manager.Middleware(signInAs(authManager, identity.RoleOrganizer)(authManager.Middleware(workspaceImport(t.TempDir(), backups))))
+	handler := manager.Middleware(signInAs(authManager, identity.RoleOrganizer)(authManager.Middleware(workspaceImport(filepath.Join(t.TempDir(), "uploads"), backups))))
 
 	// A stale checksum is rejected before the backup directory is created or
 	// the in-memory workspace is touched.
@@ -729,7 +1002,7 @@ func TestWorkspaceImportValidatesBeforeBackupAndRetainsLocalIdentity(t *testing.
 }
 
 func TestWorkspaceArchiveRequiresMutatingRoleAndIncludesAssets(t *testing.T) {
-	state := domain.Seed(time.Now().UTC())
+	state := fixture.Seed(time.Now().UTC())
 	workspace, err := store.Open(":memory:", state)
 	if err != nil {
 		t.Fatalf("open workspace: %v", err)
@@ -757,7 +1030,7 @@ func TestWorkspaceArchiveRequiresMutatingRoleAndIncludesAssets(t *testing.T) {
 
 	manager := testSessionManager(t)
 	authManager := identity.New(manager)
-	handler := workspaceArchive(root, auditPath)
+	handler := workspaceArchive(uploads, auditPath)
 	unauthorized := httptest.NewRecorder()
 	manager.Middleware(authManager.Middleware(handler)).ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/organizer/export/archive.tar.gz", nil))
 	if unauthorized.Code != http.StatusForbidden {
@@ -852,7 +1125,7 @@ func TestClearUploadsRemovesFilesButKeepsDirectory(t *testing.T) {
 		t.Fatalf("seed upload file: %v", err)
 	}
 
-	clearUploads(root)
+	clearUploads(uploadDir)
 
 	entries, err := os.ReadDir(uploadDir)
 	if err != nil {
@@ -864,6 +1137,137 @@ func TestClearUploadsRemovesFilesButKeepsDirectory(t *testing.T) {
 
 	// A missing uploads directory (a fresh workspace) must not be an error.
 	clearUploads(filepath.Join(root, "never-created"))
+}
+
+func TestResolveUploadDirectoryUsesAppRootAndRejectsBroadTargets(t *testing.T) {
+	root := t.TempDir()
+	defaultDir, err := resolveUploadDirectory(root, "")
+	if err != nil {
+		t.Fatalf("resolve default UPLOAD_DIR: %v", err)
+	}
+	if want := filepath.Join(root, "data", "uploads"); defaultDir != want {
+		t.Fatalf("default UPLOAD_DIR = %q, want %q", defaultDir, want)
+	}
+	relativeDir, err := resolveUploadDirectory(root, "var/uploads")
+	if err != nil {
+		t.Fatalf("resolve relative UPLOAD_DIR: %v", err)
+	}
+	if want := filepath.Join(root, "var", "uploads"); relativeDir != want {
+		t.Fatalf("relative UPLOAD_DIR = %q, want %q", relativeDir, want)
+	}
+	for _, unsafe := range []string{root, string(filepath.Separator)} {
+		if _, err := resolveUploadDirectory(root, unsafe); err == nil {
+			t.Fatalf("unsafe UPLOAD_DIR %q accepted", unsafe)
+		}
+	}
+}
+
+func TestPublicHeadshotRequiresApprovalAndServesSafeImage(t *testing.T) {
+	_, workspace := testPortalWorkspace(t)
+	uploadDir := filepath.Join(t.TempDir(), "uploads")
+	if err := os.MkdirAll(uploadDir, 0o750); err != nil {
+		t.Fatalf("create uploads: %v", err)
+	}
+	payload := []byte{0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 'J', 'F', 'I', 'F'}
+	storedPath := filepath.Join(uploadDir, "portrait.jpg")
+	if err := os.WriteFile(storedPath, payload, 0o600); err != nil {
+		t.Fatalf("write portrait: %v", err)
+	}
+	now := time.Now().UTC()
+	if err := workspace.Update(func(state *domain.State) error {
+		state.TaskCompletions = append(state.TaskCompletions, domain.TaskCompletion{
+			ID: "done_headshot", TaskID: "task_headshot", SpeakerID: "spk_owner", Status: domain.TaskSubmitted,
+			FileName: "portrait.jpg", ContentType: "image/jpeg", StoredPath: filepath.ToSlash(storedPath), CompletedAt: now, UpdatedAt: now,
+		})
+		return nil
+	}); err != nil {
+		t.Fatalf("seed submitted completion: %v", err)
+	}
+	handler := publicHeadshot(uploadDir)
+
+	pending := httptest.NewRecorder()
+	handler.ServeHTTP(pending, httptest.NewRequest(http.MethodGet, "/public-headshot/spk_owner", nil))
+	if pending.Code != http.StatusNotFound {
+		t.Fatalf("submitted headshot status = %d, want 404", pending.Code)
+	}
+
+	if err := workspace.Update(func(state *domain.State) error {
+		completion, _ := state.Completion("task_headshot", "spk_owner")
+		completion.Status = domain.TaskApproved
+		return nil
+	}); err != nil {
+		t.Fatalf("approve completion: %v", err)
+	}
+	approved := httptest.NewRecorder()
+	handler.ServeHTTP(approved, httptest.NewRequest(http.MethodGet, "/public-headshot/spk_owner", nil))
+	if approved.Code != http.StatusOK || !bytes.Equal(approved.Body.Bytes(), payload) {
+		t.Fatalf("approved headshot status=%d body=%x", approved.Code, approved.Body.Bytes())
+	}
+	if got := approved.Header().Get("Content-Type"); got != "image/jpeg" {
+		t.Fatalf("approved headshot Content-Type = %q", got)
+	}
+	if got := approved.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Fatalf("approved headshot nosniff = %q", got)
+	}
+	if got := approved.Header().Get("Cache-Control"); got != "public, no-cache, must-revalidate" {
+		t.Fatalf("approved headshot cache = %q", got)
+	}
+}
+
+func TestPublicHeadshotRejectsOutsideMissingAndNonImageFiles(t *testing.T) {
+	_, workspace := testPortalWorkspace(t)
+	root := t.TempDir()
+	uploadDir := filepath.Join(root, "uploads")
+	if err := os.MkdirAll(uploadDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(root, "outside.jpg")
+	if err := os.WriteFile(outside, []byte{0xff, 0xd8, 0xff, 0xe0}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	if err := workspace.Update(func(state *domain.State) error {
+		state.TaskCompletions = append(state.TaskCompletions, domain.TaskCompletion{
+			ID: "done_headshot", TaskID: "task_headshot", SpeakerID: "spk_owner", Status: domain.TaskApproved,
+			FileName: "portrait.jpg", ContentType: "image/jpeg", StoredPath: filepath.ToSlash(outside), CompletedAt: now, UpdatedAt: now,
+		})
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	handler := publicHeadshot(uploadDir)
+	assertNotFound := func(label string) {
+		t.Helper()
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/public-headshot/spk_owner", nil))
+		if recorder.Code != http.StatusNotFound {
+			t.Fatalf("%s status = %d, want 404", label, recorder.Code)
+		}
+	}
+	assertNotFound("outside")
+
+	missing := filepath.Join(uploadDir, "missing.jpg")
+	if err := workspace.Update(func(state *domain.State) error {
+		completion, _ := state.Completion("task_headshot", "spk_owner")
+		completion.StoredPath = filepath.ToSlash(missing)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	assertNotFound("missing")
+
+	nonImage := filepath.Join(uploadDir, "portrait.jpg")
+	if err := os.WriteFile(nonImage, []byte("not an image"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := workspace.Update(func(state *domain.State) error {
+		completion, _ := state.Completion("task_headshot", "spk_owner")
+		completion.StoredPath = filepath.ToSlash(nonImage)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	assertNotFound("non-image")
 }
 
 func TestBrowserBehaviorHasNoBespokeJavaScript(t *testing.T) {

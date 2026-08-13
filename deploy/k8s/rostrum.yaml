@@ -1,12 +1,15 @@
 # Rostrum live — single-instance organizer deployment.
 #
-# For the anonymous fictional preview, use rostrum-demo.yaml instead. Never
-# point the preview at this workload's namespace or persistent volume.
+# Evaluation examples live under examples/demo. Never point any anonymous
+# preview at this workload's namespace or persistent volume.
 #
 # The JSON store is single-writer, so run exactly one replica against a
-# ReadWriteOnce volume and use the Recreate strategy. Substitute the four
-# __PLACEHOLDER__ values (image tag, hostname, ingress class, cert issuer),
-# then apply the rostrum-secrets Secret (see secret.example.yaml) before this.
+# ReadWriteOnce volume and use the Recreate strategy. Substitute the six
+# __PLACEHOLDER__ values (image digest, version, hostname, trusted proxy
+# CIDRs, Traefik ingress class, and cert issuer), then apply the
+# rostrum-secrets Secret (see
+# secret.example.yaml) before this. The cluster must have Traefik's Kubernetes
+# CRDs and kubernetesCRD provider enabled for the request-body middleware below.
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -42,6 +45,7 @@ spec:
       labels:
         app: rostrum
     spec:
+      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
@@ -51,7 +55,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: rostrum
-          image: harbor.draco.quest/m31labs.dev/rostrum:__IMAGE_TAG__
+          image: __ROSTRUM_IMAGE_BY_DIGEST__
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080
@@ -64,10 +68,18 @@ spec:
               value: "8080"
             - name: PUBLIC_URL
               value: "https://__HOSTNAME__"
+            - name: ROSTRUM_VERSION
+              value: "__ROSTRUM_VERSION__"
             - name: DATA_PATH
               value: "/app/data/rostrum.json"
-            - name: DEMO_MODE
-              value: "false"
+            - name: UPLOAD_DIR
+              value: "/app/data/uploads"
+            - name: INITIAL_WORKSPACE
+              value: "fresh"
+            # Set to the exact pod/service CIDR(s) from which Traefik reaches
+            # this pod. Never substitute a trust-all network.
+            - name: TRUSTED_PROXY_CIDRS
+              value: "__TRUSTED_PROXY_CIDRS__"
           envFrom:
             - secretRef:
                 name: rostrum-secrets
@@ -114,6 +126,19 @@ spec:
     - port: 80
       targetPort: 8080
 ---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: request-body-limit
+  namespace: rostrum
+spec:
+  buffering:
+    # 34 MiB admits Rostrum's 12 MiB portal-upload envelope and its 32 MiB
+    # workspace file plus multipart overhead. Per-route app limits remain the
+    # tighter authority; Traefik rejects anything larger before forwarding it.
+    maxRequestBodyBytes: 35651584
+    memRequestBodyBytes: 2097152
+---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -121,9 +146,8 @@ metadata:
   namespace: rostrum
   annotations:
     cert-manager.io/cluster-issuer: "__CLUSTER_ISSUER__"
-    # Keep the /live WebSocket connection open through the proxy.
-    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
-    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    traefik.ingress.kubernetes.io/router.middlewares: "rostrum-request-body-limit@kubernetescrd"
+    # Traefik handles the /live WebSocket upgrade without nginx annotations.
 spec:
   ingressClassName: __INGRESS_CLASS__
   tls:

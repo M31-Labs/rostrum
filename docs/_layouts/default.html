@@ -30,7 +30,7 @@
       <nav class="primary-nav" aria-label="Primary navigation">
         <a href="{{ '/judging-guide.html' | relative_url }}">Evaluate</a>
         <a href="{{ '/architecture.html' | relative_url }}">Understand</a>
-        <a href="{{ '/deployment.html' | relative_url }}">Operate</a>
+        <a href="{{ '/self-hosting.html' | relative_url }}">Operate</a>
       </nav>
 
       <a class="source-action" href="{{ site.github.repository_url }}">
@@ -58,14 +58,17 @@
           <a{% if page.url contains '/api' %} class="active" aria-current="page"{% endif %} href="{{ '/api.html' | relative_url }}">
             <span>04</span> Public API
           </a>
+          <a{% if page.url contains '/self-hosting' %} class="active" aria-current="page"{% endif %} href="{{ '/self-hosting.html' | relative_url }}">
+            <span>05</span> Self-hosting
+          </a>
           <a{% if page.url contains '/deployment' %} class="active" aria-current="page"{% endif %} href="{{ '/deployment.html' | relative_url }}">
-            <span>05</span> Deployment
+            <span>06</span> Deployment
           </a>
           <a{% if page.url contains '/launch-readiness' %} class="active" aria-current="page"{% endif %} href="{{ '/launch-readiness.html' | relative_url }}">
-            <span>06</span> Launch readiness
+            <span>07</span> Launch readiness
           </a>
           <a{% if page.url contains '/visual-system' %} class="active" aria-current="page"{% endif %} href="{{ '/visual-system.html' | relative_url }}">
-            <span>07</span> Visual system
+            <span>08</span> Visual system
           </a>
         </nav>
 

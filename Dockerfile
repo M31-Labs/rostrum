@@ -15,14 +15,17 @@ COPY --chown=rostrum:rostrum dist/server/app ./rostrum
 COPY --chown=rostrum:rostrum dist/app ./app
 COPY --chown=rostrum:rostrum dist/assets ./assets
 COPY --chown=rostrum:rostrum dist/public ./public
-COPY --chown=rostrum:rostrum dist/data ./data
 COPY --chown=rostrum:rostrum dist/build.json dist/gosx-grammar.blob ./
+# Build-time prerender data is deliberately excluded. A runtime image always
+# starts with an empty durable boundary so INITIAL_WORKSPACE (or a pinned
+# INITIAL_WORKSPACE_PATH) controls first boot.
 RUN mkdir -p /app/data/uploads && chown -R rostrum:rostrum /app
 
 USER 10001
 ENV PORT=8080 \
     DATA_PATH=/app/data/rostrum.json \
-    DEMO_MODE=false \
+    UPLOAD_DIR=/app/data/uploads \
+    INITIAL_WORKSPACE=fresh \
     ROSTRUM_VERSION=${ROSTRUM_VERSION}
 EXPOSE 8080
 

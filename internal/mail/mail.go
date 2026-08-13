@@ -4,9 +4,9 @@
 //
 // The package defines one Sender interface with three implementations:
 //
-//   - OutboxSender, the zero-credential demo default. It records every
-//     message instead of dialing a network relay, so a judge or a local run
-//     with no SMTP configuration still gets an observable "sent" record.
+//   - OutboxSender, the zero-credential local default. It records every
+//     message instead of dialing a network relay, so an offline installation
+//     still gets an observable delivery record without claiming real receipt.
 //   - SMTPSender, a real relay over the standard library's net/smtp. It
 //     keeps self-hosted and standards-based deployments fully viable.
 //   - ResendSender, a small HTTP API adapter for Resend-style transactional
@@ -70,7 +70,7 @@ type Named interface {
 	Name() string
 }
 
-// OutboxSender is the demo-safe default. It records every message it
+// OutboxSender is the network-free default. It records every message it
 // receives instead of dialing a network relay, so submitting a proposal
 // with no SMTP configuration still produces an observable "sent" row.
 // OutboxSender never performs network I/O and never fails.
@@ -105,14 +105,13 @@ func (o *OutboxSender) Sent() []Message {
 }
 
 // Name reports the sender identity for a Communication record's Provider
-// field. It matches the "demo-outbox" value the application already
-// records today.
+// field.
 func (o *OutboxSender) Name() string {
-	return "demo-outbox"
+	return "outbox"
 }
 
 // configurationErrorSender fails closed for an invalid explicit mail
-// configuration. Treating an unknown MAIL_DRIVER as the demo outbox would
+// configuration. Treating an unknown MAIL_DRIVER as the local outbox would
 // make a production deployment look as if it sent real mail when it did not.
 type configurationErrorSender struct {
 	err error
@@ -124,7 +123,7 @@ func (sender configurationErrorSender) Name() string       { return "mail-config
 // FromEnv builds the Sender the process should use. MAIL_DRIVER can select
 // outbox, smtp, or resend explicitly. When it is absent, Resend wins when a
 // RESEND_API_KEY exists, followed by SMTP when SMTP_HOST exists, followed by
-// the zero-credential demo outbox. That preserves older SMTP-only setups
+// the zero-credential local outbox. That preserves older SMTP-only setups
 // while making a Resend deployment require no application code fork.
 //
 // FromEnv performs no network I/O itself, so choosing a network provider
@@ -198,7 +197,7 @@ func driverFromEnv() (string, error) {
 			return "smtp", nil
 		}
 		return "outbox", nil
-	case "outbox", "demo-outbox", "fake":
+	case "outbox", "fake":
 		return "outbox", nil
 	case "smtp", "resend":
 		return driver, nil

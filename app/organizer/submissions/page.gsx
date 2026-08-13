@@ -35,13 +35,18 @@ func Page() Node {
 				</p>
 			</div>
 			<div class="workspace-header-actions">
-				<a class="button" href="/organizer/export/submissions.csv">Export CSV</a>
-				<a
-					class="button button-primary"
-					href={data.workspace.cfpHref}
-					data-gosx-link
-					hidden={!data.workspace.hasCFP}
-				>New submission</a>
+				<If cond={!data.workspace.readOnlyPreview}>
+					<a class="button" href="/organizer/export/submissions.csv">Export CSV</a>
+					<a
+						class="button button-primary"
+						href={data.workspace.cfpHref}
+						data-gosx-link
+						hidden={!data.workspace.hasCFP}
+					>New submission</a>
+				</If>
+				<If cond={data.workspace.readOnlyPreview && data.workspace.hasCFP}>
+					<a class="button" href={data.workspace.cfpHref} data-gosx-link>Preview public CFP</a>
+				</If>
 			</div>
 		</header>
 		<p class="flash-message">{flash.notice}</p>
@@ -108,7 +113,9 @@ func Page() Node {
 						<span class="mono" role="cell">{row.submitted}</span>
 						<div role="cell">
 							<span class={"status-pill status-" + row.tone}>{row.status}</span>
-							<SubmissionStatusForm id={row.id} title={row.title} status={row.statusValue}></SubmissionStatusForm>
+							<If cond={!data.workspace.readOnlyPreview}>
+								<SubmissionStatusForm id={row.id} title={row.title} status={row.statusValue}></SubmissionStatusForm>
+							</If>
 						</div>
 					</article>
 				</Each>

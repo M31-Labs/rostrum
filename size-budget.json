@@ -22,6 +22,6 @@
     "/organizer/agenda": ["navigation", "bootstrap", "wasm", "islands", "controllers"],
     "/organizer/portal": ["navigation", "bootstrap", "wasm", "islands", "controllers", "hubs"],
     "/organizer/review": ["navigation", "bootstrap", "wasm", "islands", "controllers"],
-    "/public/m31-systems-forum-2026/agenda": ["navigation", "bootstrap", "wasm", "islands", "controllers"]
+    "/public/your-event/agenda": ["navigation", "bootstrap", "wasm", "islands", "controllers"]
   }
 }

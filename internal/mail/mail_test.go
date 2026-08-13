@@ -25,8 +25,8 @@ func TestOutboxSenderRecordsMessages(t *testing.T) {
 	if sent[0].Subject != "one" || sent[1].Subject != "two" {
 		t.Fatalf("recorded messages out of order: %+v", sent)
 	}
-	if outbox.Name() != "demo-outbox" {
-		t.Fatalf("Name() = %q, want %q", outbox.Name(), "demo-outbox")
+	if outbox.Name() != "outbox" {
+		t.Fatalf("Name() = %q, want %q", outbox.Name(), "outbox")
 	}
 }
 

@@ -1,6 +1,6 @@
 ---
 description: The small, cacheable, read-only public data contract for Rostrum events, schedules, speakers, and calendars.
-nav_order: "04 / 07"
+nav_order: "04 / 08"
 eyebrow: Consume published records
 ---
 
@@ -85,8 +85,8 @@ curl -fsS http://localhost:8080/api/v1/workspace
 }
 ```
 
-Counts above describe the deterministic demo seed. A fresh or operator-owned
-workspace returns its own values. Cache: 60 seconds.
+Counts above describe the fictional evaluation fixture under `examples/demo/`.
+A fresh or operator-owned workspace returns its own values. Cache: 60 seconds.
 
 ## Published schedule
 

@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/m31-labs/rostrum/examples/demo/fixture"
 	"github.com/m31-labs/rostrum/internal/domain"
 )
 
@@ -34,7 +35,7 @@ func TestAllowedResourceEmbed(t *testing.T) {
 // confirmation checkbox, and a task with zero fields still falls back to
 // that checkbox.
 func TestSpeakerPortalRendersTaskFormFields(t *testing.T) {
-	state := domain.Seed(time.Now().UTC())
+	state := fixture.Seed(time.Now().UTC())
 	view, err := SpeakerPortal(state, "spk_theo", false)
 	if err != nil {
 		t.Fatalf("SpeakerPortal: %v", err)
@@ -136,7 +137,7 @@ func TestTaskFieldRowsPreFillsFromCompletionValues(t *testing.T) {
 // hasHeadshot false (the template's initials-fallback signal) when it is
 // empty, as it is for every seeded speaker until the upload path sets it.
 func TestSpeakerPortalHeadshotFallback(t *testing.T) {
-	state := domain.Seed(time.Now().UTC())
+	state := fixture.Seed(time.Now().UTC())
 	view, err := SpeakerPortal(state, "spk_maya", false)
 	if err != nil {
 		t.Fatalf("SpeakerPortal: %v", err)
@@ -168,7 +169,7 @@ func TestSpeakerPortalHeadshotFallback(t *testing.T) {
 }
 
 func TestSubmissionFormWithValuesKeepsConditionalSchemaAndDraftValues(t *testing.T) {
-	state := domain.Seed(time.Date(2026, time.August, 10, 12, 0, 0, 0, time.UTC))
+	state := fixture.Seed(time.Date(2026, time.August, 10, 12, 0, 0, 0, time.UTC))
 	view, err := SubmissionFormWithValues(state, "systems-forum-cfp", map[string]string{
 		"title":          "A saved title",
 		"format":         "Workshop",

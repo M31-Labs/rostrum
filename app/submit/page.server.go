@@ -18,6 +18,7 @@ import (
 	"github.com/m31-labs/rostrum/internal/domain"
 	"github.com/m31-labs/rostrum/internal/live"
 	"github.com/m31-labs/rostrum/internal/mail"
+	"github.com/m31-labs/rostrum/internal/mailtemplate"
 	"github.com/m31-labs/rostrum/internal/present"
 	"github.com/m31-labs/rostrum/internal/ratelimit"
 	"github.com/m31-labs/rostrum/internal/token"
@@ -283,17 +284,6 @@ func rateLimitFormKey(formID, identity string) string {
 }
 
 func submitProposal(ctx *action.Context) error {
-	// Rate caps come first (SE-3b): reject before touching the store or the
-	// schema, so a caller past their cap costs one map lookup, not a clone.
-	if !submissionLimiter.Allow(ratelimit.RequestIdentity(ctx.Request)) {
-		message := "You have reached the submission limit for this session. Contact the program team if you need to submit another proposal."
-		return action.Validation(message, map[string]string{"form": message}, ctx.FormData)
-	}
-	if ip := ratelimit.ClientIP(ctx.Request); ip != "" && !submissionIPLimiter.Allow(ip) {
-		message := "Too many submissions from this network right now. Please try again in a little while."
-		return action.Validation(message, map[string]string{"form": message}, ctx.FormData)
-	}
-
 	snapshot := appstate.MustGet().Snapshot()
 	engine, err := decisionrules.Shared()
 	if err != nil {
@@ -323,13 +313,14 @@ func submitProposal(ctx *action.Context) error {
 		}
 	}
 
+	requestIdentity := ratelimit.RequestIdentity(ctx.Request)
+	clientIP := ratelimit.ClientIP(ctx.Request)
 	speakerID := ""
 	submissionID := ""
-	speakerEmail := ""
-	speakerName := ""
 	submissionQueue := ""
-	title := strings.TrimSpace(ctx.FormData["title"])
-	confirmationID := domain.NewID("comm")
+	var submittedSpeaker domain.Speaker
+	var submittedRecord domain.Submission
+	var confirmationTemplate domain.EmailTemplate
 	auditAction := "submission.created"
 	auditSummary := "Submitted a proposal through the public CFP."
 	if draftID != "" {
@@ -355,6 +346,37 @@ func submitProposal(ctx *action.Context) error {
 		now := time.Now().UTC()
 		email := strings.ToLower(strings.TrimSpace(ctx.FormData["email"]))
 		if draftID != "" {
+			// Recheck ownership and draft state against the same current clone the
+			// schema validator just interpreted, before spending admission budget.
+			speaker, speakerFound := state.Speaker(draftSpeakerID)
+			draft, draftFound := state.Submission(draftID)
+			if !speakerFound || !strings.EqualFold(speaker.Email, email) || !draftFound || draft.Status != domain.SubmissionDraft || !contains(draft.SpeakerIDs, draftSpeakerID) {
+				return action.Validation("This draft is no longer available.", map[string]string{"form": "Please reopen your saved draft link."}, ctx.FormData)
+			}
+		}
+		if form.SendConfirmation {
+			var templateFound bool
+			confirmationTemplate, templateFound = submissionEmailTemplate(*state, form.ConfirmationTemplate)
+			if !templateFound {
+				return fmt.Errorf("submission form %s references missing confirmation template %s", form.ID, form.ConfirmationTemplate)
+			}
+			if err := mailtemplate.Validate(confirmationTemplate.Name, confirmationTemplate.Audience, confirmationTemplate.Subject, confirmationTemplate.Body, confirmationTemplate.ReplyTo); err != nil {
+				return fmt.Errorf("submission form %s has an invalid confirmation template: %w", form.ID, err)
+			}
+		}
+		// Admission budgets are spent only after the current transactional
+		// schema, conditional visibility, routing, and draft ownership checks
+		// all pass. A typo or concurrently edited field therefore cannot consume
+		// one of a speaker's five successful-submission slots.
+		if !submissionLimiter.Allow(requestIdentity) {
+			message := "You have reached the submission limit for this session. Contact the program team if you need to submit another proposal."
+			return action.Validation(message, map[string]string{"form": message}, ctx.FormData)
+		}
+		if clientIP != "" && !submissionIPLimiter.Allow(clientIP) {
+			message := "Too many submissions from this network right now. Please try again in a little while."
+			return action.Validation(message, map[string]string{"form": message}, ctx.FormData)
+		}
+		if draftID != "" {
 			// accessibleDraft verified a signed key for draftSpeakerID before this
 			// transaction. That possession proof, rather than the posted email, is
 			// what authorizes updating the draft's existing speaker identity.
@@ -364,8 +386,6 @@ func submitProposal(ctx *action.Context) error {
 			}
 			speakerID = speaker.ID
 			applySubmittedSpeakerFields(speaker, ctx.FormData, now)
-			speakerEmail = speaker.Email
-			speakerName = speaker.Name()
 		} else {
 			// A direct public submission has supplied no ownership proof. Even when
 			// its email matches a known speaker, create an isolated identity so the
@@ -375,8 +395,6 @@ func submitProposal(ctx *action.Context) error {
 			speaker := domain.Speaker{ID: speakerID, Email: email, CreatedAt: now, UpdatedAt: now}
 			applySubmittedSpeakerFields(&speaker, ctx.FormData, now)
 			state.Speakers = append(state.Speakers, speaker)
-			speakerEmail = email
-			speakerName = speaker.Name()
 		}
 		if draftID != "" && speakerID != draftSpeakerID {
 			return action.Validation("Draft ownership changed unexpectedly.", map[string]string{"form": "Please reopen your saved draft link."}, ctx.FormData)
@@ -394,6 +412,13 @@ func submitProposal(ctx *action.Context) error {
 			applySubmittedSubmission(&submission, state.Event.ID, form.ID, speakerID, ctx.FormData, current.Decision, current.VisibilityTrace, now, form.Fields, current.VisibleFields)
 			state.Submissions = append(state.Submissions, submission)
 		}
+		storedSpeaker, speakerFound := state.Speaker(speakerID)
+		storedSubmission, submissionFound := state.Submission(submissionID)
+		if !speakerFound || !submissionFound {
+			return fmt.Errorf("submitted speaker or proposal disappeared before commit")
+		}
+		submittedSpeaker = *storedSpeaker
+		submittedRecord = *storedSubmission
 		// Administrator notification rules enqueue only stable IDs while this
 		// same audited submission transaction commits. A later outbox runner
 		// resolves current merge data and performs the external delivery.
@@ -410,54 +435,97 @@ func submitProposal(ctx *action.Context) error {
 		return err
 	}
 
-	// Send the confirmation email outside the store lock — external I/O must
-	// never run under Update. The keyed portal link (PT-2 token) lets the
-	// speaker open their portal straight from the inbox. Record the true
-	// outcome as a Communication row in a second, small mutation; never store
-	// the raw provider error on the row (M8), only a sent/failed status.
-	sender := confirmationSender()
-	sendErr := mail.SendConfirmationWithKey(sender, publicBaseURL(), mail.Recipient{
-		SpeakerID: speakerID, Name: speakerName, Email: speakerEmail,
-	}, mail.Submission{Title: title}, token.New().Sign(speakerID), confirmationID)
-	sendStatus := "sent"
-	if sendErr != nil {
-		sendStatus = "failed"
-		log.Printf("submit: confirmation email to speaker %s failed: %v", speakerID, sendErr)
-	}
-	provider := "demo-outbox"
-	if named, ok := sender.(mail.Named); ok {
-		provider = named.Name()
-	}
-	if err := appstate.MustGet().UpdateAudit(domain.AuditMeta{
-		Actor:      "system:mail",
-		Action:     "communication.recorded",
-		EntityType: "communication",
-		EntityID:   confirmationID,
-		Summary:    "Recorded the public-submission confirmation delivery outcome.",
-		Origin:     "public-submission",
-	}, func(state *domain.State) error {
-		state.Communications = append(state.Communications, domain.Communication{
-			ID: confirmationID, TemplateID: form.ConfirmationTemplate, SpeakerID: speakerID,
-			Subject: "We received " + title, Status: sendStatus, Provider: provider, SentAt: time.Now().UTC(),
-		})
-		return nil
-	}); err != nil {
-		return err
+	// A form may deliberately disable confirmation delivery. When enabled,
+	// render the organizer-selected template from committed records and send
+	// outside the store lock. Only an actual attempt earns a Communication row.
+	confirmationAttempted := false
+	confirmationDelivered := false
+	if form.SendConfirmation {
+		confirmationAttempted = true
+		confirmationID := domain.NewID("comm")
+		portalKey := token.New().Sign(speakerID)
+		portalURL := mail.PortalURL(publicBaseURL(), speakerID, portalKey)
+		subject, body := present.RenderCommunicationContextWithPortalURL(
+			appstate.MustGet().Snapshot(), confirmationTemplate, submittedSpeaker,
+			domain.Session{}, submittedRecord, domain.Task{}, portalURL,
+		)
+		sender := confirmationSender()
+		attemptedAt := time.Now().UTC()
+		provider := "custom"
+		var sendErr error
+		if sender == nil {
+			sendErr = fmt.Errorf("confirmation sender is unavailable")
+		} else {
+			if named, ok := sender.(mail.Named); ok && strings.TrimSpace(named.Name()) != "" {
+				provider = strings.TrimSpace(named.Name())
+			}
+			sendErr = sender.Send(mail.Message{
+				To: submittedSpeaker.Email, ToName: submittedSpeaker.Name(),
+				Subject: subject, TextBody: body, IdempotencyKey: confirmationID,
+			})
+		}
+		status := domain.CommunicationSent
+		failureCategory := ""
+		if sendErr != nil {
+			status = domain.CommunicationFailed
+			failureCategory = "delivery_failed"
+			log.Printf("submit: confirmation delivery for speaker %s failed: %v", speakerID, sendErr)
+		} else {
+			confirmationDelivered = true
+		}
+		if err := appstate.MustGet().UpdateAudit(domain.AuditMeta{
+			Actor:      "system:mail",
+			Action:     "communication.recorded",
+			EntityType: "communication",
+			EntityID:   confirmationID,
+			Summary:    "Recorded the public-submission confirmation delivery outcome.",
+			Origin:     "public-submission",
+		}, func(state *domain.State) error {
+			state.Communications = append(state.Communications, domain.Communication{
+				ID: confirmationID, TemplateID: confirmationTemplate.ID,
+				SpeakerID: speakerID, SubmissionID: submissionID,
+				RecipientEmail: submittedSpeaker.Email, RecipientName: submittedSpeaker.Name(),
+				Subject: subject, Status: status, Provider: provider,
+				DeliveryMode: domain.DeliveryAutomatic, Trigger: "submission.confirmation",
+				IdempotencyKey: confirmationID, LastAttemptAt: attemptedAt,
+				SentAt: attemptedAt, CreatedAt: attemptedAt,
+				AttemptCount: 1, MaxAttempts: 1, Error: failureCategory,
+			})
+			return nil
+		}); err != nil {
+			// The proposal is already durable and delivery has already been
+			// attempted. Do not turn a bookkeeping failure into a retry prompt
+			// that could create a duplicate proposal or message.
+			log.Printf("submit: could not record confirmation attempt %s: %v", confirmationID, err)
+		}
+		live.Broadcast("communication:queued", map[string]string{"speaker": speakerID, "provider": provider})
 	}
 
-	session.AddFlash(ctx.Request, "notice", "Proposal received. We sent a confirmation and opened your portal.")
-	live.Broadcast("submission:created", map[string]string{"submission": submissionID, "speaker": speakerID, "queue": submissionQueue})
-	live.Broadcast("communication:queued", map[string]string{"speaker": speakerID})
-	if form.RedirectToPortal {
-		// FB-5: land on the customizable success page first. Its meta
-		// refresh (thanksMetadata) carries the visitor on to the portal
-		// after ~10s; the signed PT-2 token travels in the URL so that
-		// later hop authenticates the portal session on arrival.
-		actionflow.Redirect(ctx, thanksRedirectURL(form.Slug, speakerID))
-	} else {
-		actionflow.Redirect(ctx, "/portal/"+speakerID+"?submitted=1")
+	notice := "Proposal received."
+	if confirmationAttempted && confirmationDelivered {
+		notice += " Your confirmation was handed to the configured mail service."
+	} else if confirmationAttempted {
+		notice += " The confirmation could not be delivered just now, but your proposal is safely stored."
 	}
+	if form.RedirectToPortal {
+		notice += " Your secure speaker portal is ready."
+	}
+	session.AddFlash(ctx.Request, "notice", notice)
+	live.Broadcast("submission:created", map[string]string{"submission": submissionID, "speaker": speakerID, "queue": submissionQueue})
+	// Every successful proposal lands on the organizer-customizable receipt.
+	// RedirectToPortal controls only the safe keyed follow-on, never whether
+	// the browser is sent to an unkeyed private route.
+	actionflow.Redirect(ctx, thanksRedirectURL(form.Slug, speakerID))
 	return nil
+}
+
+func submissionEmailTemplate(state domain.State, templateID string) (domain.EmailTemplate, bool) {
+	for _, template := range state.EmailTemplates {
+		if template.ID == templateID {
+			return template, true
+		}
+	}
+	return domain.EmailTemplate{}, false
 }
 
 // submittedProposalValidation is the complete, current form interpretation
@@ -500,6 +568,11 @@ func validateSubmittedProposal(state domain.State, formID string, formData map[s
 	if err != nil {
 		return submittedProposalValidation{}, err
 	}
+	if decision.Track != "" {
+		if _, found := state.Track(decision.Track); !found {
+			return submittedProposalValidation{}, fmt.Errorf("routing policy selected unknown track %q", decision.Track)
+		}
+	}
 	return submittedProposalValidation{
 		Form:            *form,
 		Decision:        decision,
@@ -509,11 +582,9 @@ func validateSubmittedProposal(state domain.State, formID string, formData map[s
 }
 
 // thanksRedirectURL builds the /submit/{slug}/thanks target submitProposal
-// redirects to on success. The key is a fresh PT-2 portal token
-// (token.New().Sign) bound to speakerID, so the thanks page's meta refresh
-// and its visible portal link both carry an authenticated session forward —
-// with no separate sign-in step and no reliance on a cookie the redirect
-// response itself does not set.
+// redirects to on success. The fresh PT-2 token proves which receipt may name
+// the submitted proposal. When RedirectToPortal is enabled, that same proof
+// also powers the thanks page's safe follow-on link and meta refresh.
 func thanksRedirectURL(formSlug, speakerID string) string {
 	target := url.URL{Path: "/submit/" + formSlug + "/thanks"}
 	values := url.Values{}
@@ -537,13 +608,28 @@ func loadThanks(ctx *route.RouteContext, page route.FilePage) (any, error) {
 		// routing miss, so this renders the branded 404, not a 500.
 		return nil, route.NotFound("submission form not found")
 	}
-	speakerID := strings.TrimSpace(ctx.Query("speaker"))
-	portalURL := thanksPortalURL(speakerID, ctx.Query("key"))
+	speakerID, hasReceipt := verifiedThanksSpeaker(ctx.Query("speaker"), ctx.Query("key"))
+	portalURL := ""
+	if hasReceipt && form.RedirectToPortal {
+		portalURL = thanksPortalURL(speakerID, ctx.Query("key"))
+	}
 	hasPortal := portalURL != ""
-	if !hasPortal {
+	if !hasReceipt {
 		// A bare public speaker ID is enumerable and conveys no authority. Keep
 		// the response generic unless the key proves the same speaker subject.
 		speakerID = ""
+	}
+	submission, hasSubmission := latestSubmission(snapshot, form.ID, speakerID)
+	confirmationStatus := "disabled"
+	if form.SendConfirmation {
+		confirmationStatus = "enabled"
+	}
+	if hasSubmission {
+		for _, communication := range snapshot.Communications {
+			if communication.SubmissionID == submission.ID && communication.Trigger == "submission.confirmation" {
+				confirmationStatus = communication.Status
+			}
+		}
 	}
 	return map[string]any{
 		"workspace": present.WorkspaceIdentity(snapshot),
@@ -551,10 +637,12 @@ func loadThanks(ctx *route.RouteContext, page route.FilePage) (any, error) {
 			"heading": form.SuccessPageHeading(),
 			"body":    form.SuccessPageBody(),
 		},
-		"submission": map[string]any{"title": latestSubmissionTitle(snapshot, form.ID, speakerID)},
-		"formSlug":   form.Slug,
-		"portalURL":  portalURL,
-		"hasPortal":  hasPortal,
+		"submission":          map[string]any{"title": submission.Title},
+		"formSlug":            form.Slug,
+		"portalURL":           portalURL,
+		"hasPortal":           hasPortal,
+		"confirmationEnabled": form.SendConfirmation,
+		"confirmationStatus":  confirmationStatus,
 	}, nil
 }
 
@@ -565,14 +653,18 @@ func loadThanks(ctx *route.RouteContext, page route.FilePage) (any, error) {
 // document metadata, not a <script>, so it holds the zero-bespoke-JavaScript
 // invariant and needs no CSP change.
 func thanksMetadata(ctx *route.RouteContext, page route.FilePage, data any) (server.Metadata, error) {
-	speakerID := strings.TrimSpace(ctx.Query("speaker"))
-	if portalURL := thanksPortalURL(speakerID, ctx.Query("key")); portalURL != "" {
+	description := "Your proposal has been received."
+	fields, _ := data.(map[string]any)
+	portalURL, _ := fields["portalURL"].(string)
+	hasPortal, _ := fields["hasPortal"].(bool)
+	if hasPortal && portalURL != "" {
 		ctx.AddHead(gosx.El("meta", gosx.Attrs(
 			gosx.Attr("http-equiv", "refresh"),
 			gosx.Attr("content", "10;url="+portalURL),
 		)))
+		description = "Your proposal is in, and your secure speaker portal is one click away."
 	}
-	return server.Metadata{Title: server.Title{Default: "Proposal received — Rostrum"}, Description: "Your proposal is in, and your speaker portal is one click away."}, nil
+	return server.Metadata{Title: server.Title{Default: "Proposal received — Rostrum"}, Description: description}, nil
 }
 
 // thanksPortalURL builds the keyed portal URL the success page's meta refresh
@@ -580,9 +672,8 @@ func thanksMetadata(ctx *route.RouteContext, page route.FilePage, data any) (ser
 // A speaker ID by itself is public metadata, not authorization, so invalid,
 // absent, and cross-speaker keys all produce an empty URL.
 func thanksPortalURL(speakerID, key string) string {
-	speakerID = strings.TrimSpace(speakerID)
-	keySpeakerID, ok := token.New().Verify(strings.TrimSpace(key))
-	if speakerID == "" || !ok || keySpeakerID != speakerID {
+	speakerID, ok := verifiedThanksSpeaker(speakerID, key)
+	if !ok {
 		return ""
 	}
 	target := url.URL{Path: "/portal/" + speakerID}
@@ -592,14 +683,21 @@ func thanksPortalURL(speakerID, key string) string {
 	return target.String()
 }
 
-// latestSubmissionTitle returns the title of the most recently submitted
-// proposal speakerID has on formID, or "" when speakerID is empty or has no
-// matching submission. The thanks page uses this only to name the proposal
-// in its confirmation copy; it never uses the returned submission's other
-// fields, so no other Answers or routing data leaves this function.
-func latestSubmissionTitle(state domain.State, formID, speakerID string) string {
+func verifiedThanksSpeaker(speakerID, key string) (string, bool) {
+	speakerID = strings.TrimSpace(speakerID)
+	keySpeakerID, ok := token.New().Verify(strings.TrimSpace(key))
+	if speakerID == "" || !ok || keySpeakerID != speakerID {
+		return "", false
+	}
+	return speakerID, true
+}
+
+// latestSubmission returns the most recently submitted proposal speakerID
+// has on formID. The thanks page uses only its title and stable ID (to find
+// the matching confirmation outcome); it never renders answers or routing.
+func latestSubmission(state domain.State, formID, speakerID string) (domain.Submission, bool) {
 	if speakerID == "" {
-		return ""
+		return domain.Submission{}, false
 	}
 	var latest domain.Submission
 	found := false
@@ -612,7 +710,7 @@ func latestSubmissionTitle(state domain.State, formID, speakerID string) string 
 			found = true
 		}
 	}
-	return latest.Title
+	return latest, found
 }
 
 // accessibleDraft requires both a draft-shaped record and a valid signed key

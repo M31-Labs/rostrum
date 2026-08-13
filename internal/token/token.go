@@ -28,20 +28,20 @@ const developmentSecret = "rostrum-development-secret-change-me"
 const TTL = 90 * 24 * time.Hour
 
 // keyPurpose separates the derived signing key from any other key HMAC-SHA256
-// might derive from the same SESSION_SECRET elsewhere in the process. Demo
-// tour links use a second purpose so they can never authenticate against a
-// live process, even when demo and live deployments share SESSION_SECRET.
+// might derive from the same SESSION_SECRET elsewhere in the process. Preview
+// persona links use a second purpose so they can never authenticate against a
+// live process, even when deployments share SESSION_SECRET.
 const (
-	keyPurpose     = "rostrum.portal.token.v1:"
-	demoKeyPurpose = "rostrum.portal.demo-token.v1:"
-	demoAudience   = "rostrum-demo"
+	keyPurpose        = "rostrum.portal.token.v1:"
+	previewKeyPurpose = "rostrum.portal.preview-token.v1:"
+	previewAudience   = "rostrum-preview"
 )
 
 // Token signs and verifies portal identity tokens for one process.
 type Token struct {
-	key     []byte
-	demoKey []byte
-	ttl     time.Duration
+	key        []byte
+	previewKey []byte
+	ttl        time.Duration
 }
 
 var (
@@ -64,8 +64,8 @@ func newToken(secret string) *Token {
 		secret = developmentSecret
 	}
 	sum := sha256.Sum256([]byte(keyPurpose + secret))
-	demoSum := sha256.Sum256([]byte(demoKeyPurpose + secret))
-	return &Token{key: sum[:], demoKey: demoSum[:], ttl: TTL}
+	previewSum := sha256.Sum256([]byte(previewKeyPurpose + secret))
+	return &Token{key: sum[:], previewKey: previewSum[:], ttl: TTL}
 }
 
 // claims is the signed payload. Its fields are exported to JSON so the MAC
@@ -90,19 +90,19 @@ func (t *Token) Sign(speakerID string) string {
 	return encodeSegment(body) + "." + encodeSegment(t.sign(body))
 }
 
-// SignDemo returns a demo-only portal token for a persona link on /tour. Its
+// SignPreview returns a preview-only portal token for a persona link on /tour. Its
 // explicit audience and separately derived key make it invalid anywhere that
-// is not currently running with APP_MODE=demo.
-func (t *Token) SignDemo(speakerID string) string {
+// is not currently running with APP_MODE=preview.
+func (t *Token) SignPreview(speakerID string) string {
 	body, err := json.Marshal(claims{
 		SpeakerID: strings.TrimSpace(speakerID),
 		ExpiresAt: time.Now().Add(t.ttl).Unix(),
-		Audience:  demoAudience,
+		Audience:  previewAudience,
 	})
 	if err != nil {
 		return ""
 	}
-	return encodeSegment(body) + "." + encodeSegment(t.signDemo(body))
+	return encodeSegment(body) + "." + encodeSegment(t.signPreview(body))
 }
 
 // Verify reports the speaker ID bound to tok when tok carries a valid
@@ -123,14 +123,14 @@ func (t *Token) Verify(tok string) (speakerID string, ok bool) {
 	if err != nil {
 		return "", false
 	}
-	// Authenticate before parsing the body. Normal and demo tokens have
-	// separate derived keys; the demo key is considered only by demo-mode
+	// Authenticate before parsing the body. Normal and preview tokens have
+	// separate derived keys; the preview key is considered only by preview-mode
 	// processes. hmac.Equal keeps both comparisons constant-time.
 	wantAudience := ""
 	switch {
 	case hmac.Equal(sig, t.sign(body)):
-	case demoModeEnabled() && hmac.Equal(sig, t.signDemo(body)):
-		wantAudience = demoAudience
+	case previewModeEnabled() && hmac.Equal(sig, t.signPreview(body)):
+		wantAudience = previewAudience
 	default:
 		return "", false
 	}
@@ -151,8 +151,8 @@ func (t *Token) sign(body []byte) []byte {
 	return signWithKey(t.key, body)
 }
 
-func (t *Token) signDemo(body []byte) []byte {
-	return signWithKey(t.demoKey, body)
+func (t *Token) signPreview(body []byte) []byte {
+	return signWithKey(t.previewKey, body)
 }
 
 func signWithKey(key, body []byte) []byte {
@@ -161,8 +161,8 @@ func signWithKey(key, body []byte) []byte {
 	return mac.Sum(nil)
 }
 
-func demoModeEnabled() bool {
-	return strings.EqualFold(strings.TrimSpace(os.Getenv("APP_MODE")), "demo")
+func previewModeEnabled() bool {
+	return strings.EqualFold(strings.TrimSpace(os.Getenv("APP_MODE")), "preview")
 }
 
 func encodeSegment(b []byte) string {

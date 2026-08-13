@@ -5,11 +5,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/m31-labs/rostrum/internal/domain"
+	"github.com/m31-labs/rostrum/examples/demo/fixture"
 )
 
 func TestPresenterDatesFollowConfiguredCalendarValues(t *testing.T) {
-	state := domain.Seed(time.Date(2026, time.August, 9, 12, 0, 0, 0, time.UTC))
+	state := fixture.Seed(time.Date(2026, time.August, 9, 12, 0, 0, 0, time.UTC))
 	state.Event.StartsAt = time.Date(2027, time.March, 4, 9, 0, 0, 0, time.UTC)
 	state.Event.EndsAt = time.Date(2027, time.March, 6, 17, 0, 0, 0, time.UTC)
 	state.Tasks[0].DueAt = time.Date(2027, time.November, 8, 17, 0, 0, 0, time.UTC)

@@ -4,14 +4,13 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/m31-labs/rostrum/internal/actionflow"
 	"github.com/m31-labs/rostrum/internal/appstate"
-	programcalendar "github.com/m31-labs/rostrum/internal/calendar"
+	delivery "github.com/m31-labs/rostrum/internal/communications"
 	"github.com/m31-labs/rostrum/internal/domain"
 	"github.com/m31-labs/rostrum/internal/identity"
 	"github.com/m31-labs/rostrum/internal/live"
@@ -65,7 +64,6 @@ func updateStatus(ctx *action.Context) error {
 		return err
 	}
 	title := ""
-	acceptedSessionID := ""
 	var acceptedSpeakerIDs []string
 	audit := domain.AuditMeta{
 		Actor:      decision.Actor,
@@ -102,7 +100,6 @@ func updateStatus(ctx *action.Context) error {
 			state.AddSessionForSubmission(id)
 			state.AssignAcceptedOnlyTasks(submission.SpeakerIDs)
 			if accepted, found := state.SessionBySubmission(submission.ID); found {
-				acceptedSessionID = accepted.ID
 				// Collect only the speakers who do not already carry an
 				// acceptance Communication for this session -- the same
 				// pair QueueAcceptanceCommunication is about to check --
@@ -122,15 +119,14 @@ func updateStatus(ctx *action.Context) error {
 		return err
 	}
 
-	// Send the acceptance communication -- the merged tpl_acceptance text
-	// plus, since that template has AttachCalendar set, the session's
-	// calendar invite -- outside the store lock: Send is a network
-	// operation and must never run while a lock is held (see internal/mail's
-	// package doc comment). The row itself was already queued above by
-	// QueueAcceptanceCommunication; sendAcceptanceInvite records the real
-	// outcome onto that same row afterward.
-	for _, speakerID := range acceptedSpeakerIDs {
-		sendAcceptanceInvite(acceptedSessionID, speakerID)
+	// The acceptance row is durable before any provider call. Ask the single
+	// communications runner to claim and deliver it immediately; the same
+	// lease, idempotency key, and retry/backoff path handles startup recovery
+	// and background delivery, so there is never a second direct-send race.
+	if len(acceptedSpeakerIDs) > 0 {
+		if _, err := (delivery.Runner{Store: appstate.MustGet(), Sender: acceptanceSender()}).RunDue(); err != nil {
+			log.Printf("submissions: acceptance delivery runner: %v", err)
+		}
 	}
 
 	session.AddFlash(ctx.Request, "notice", "“"+title+"” moved to "+present.StatusLabel(status)+".")
@@ -248,94 +244,4 @@ func organizerActor(request *http.Request) string {
 		return "organizer"
 	}
 	return "organizer:" + strings.TrimSpace(user.ID)
-}
-
-// sendAcceptanceInvite sends the queued acceptance Communication
-// QueueAcceptanceCommunication already appended for speakerID on
-// sessionID: the merged tpl_acceptance template text, plus -- when the
-// session carries a schedule -- a calendar invite attached as the
-// message's text/calendar part (RFC 5545). It records the real outcome
-// (sent or failed) back onto that same row through
-// domain.State.MarkCommunicationSent. A missing speaker, session, or
-// template is a no-op: updateStatus already validated the submission
-// before calling this, so a miss here means nothing was queued to send.
-func sendAcceptanceInvite(sessionID, speakerID string) {
-	if sessionID == "" || speakerID == "" {
-		return
-	}
-	snapshot := appstate.MustGet().Snapshot()
-	speaker, found := snapshot.Speaker(speakerID)
-	if !found {
-		return
-	}
-	sessionItem, found := snapshot.Session(sessionID)
-	if !found {
-		return
-	}
-	template, found := emailTemplate(snapshot, domain.AcceptanceTemplateID)
-	if !found {
-		return
-	}
-	communication, found := snapshot.Communication(domain.AcceptanceTemplateID, speakerID, sessionID)
-	if !found {
-		return
-	}
-	subject, body := present.RenderCommunication(snapshot, template, *speaker, *sessionItem)
-
-	msg := mail.Message{To: speaker.Email, ToName: speaker.Name(), Subject: subject, TextBody: body, IdempotencyKey: communication.ID}
-	if template.AttachCalendar && sessionItem.Scheduled() {
-		ics, err := programcalendar.Invite(snapshot, *sessionItem, *speaker, organizerEmail(template))
-		if err != nil {
-			// A session with no room, or an organizer address that never
-			// got configured, never blocks the acceptance message itself
-			// -- the speaker still gets the merged template text, just
-			// without the attachment.
-			log.Printf("submissions: could not build the calendar invite for speaker %s: %v", speakerID, err)
-		} else {
-			msg.Calendar = ics
-		}
-	}
-
-	sender := acceptanceSender()
-	sendErr := sender.Send(msg)
-	if sendErr != nil {
-		log.Printf("submissions: acceptance send to speaker %s failed: %v", speakerID, sendErr)
-	}
-	provider := "demo-outbox"
-	if named, ok := sender.(mail.Named); ok {
-		provider = named.Name()
-	}
-	if err := appstate.MustGet().Update(func(state *domain.State) error {
-		state.MarkCommunicationSent(domain.AcceptanceTemplateID, speakerID, sessionID, provider, sendErr)
-		return nil
-	}); err != nil {
-		log.Printf("submissions: could not record the acceptance send outcome for speaker %s: %v", speakerID, err)
-	}
-}
-
-// emailTemplate finds the EmailTemplate named id in state, if any. Mirrors
-// app/organizer/communications/page.server.go's helper of the same name;
-// duplicated rather than shared because a page.server.go package
-// deliberately stays a self-contained action module (compare
-// publicBaseURL, duplicated the same way between app/submit and
-// app/organizer/review).
-func emailTemplate(state domain.State, id string) (domain.EmailTemplate, bool) {
-	for _, template := range state.EmailTemplates {
-		if template.ID == id {
-			return template, true
-		}
-	}
-	return domain.EmailTemplate{}, false
-}
-
-// organizerEmail resolves the address a calendar invite's ORGANIZER line
-// names: template's configured reply-to address when set (every seeded
-// template carries one, for example "program@example.com"), otherwise the
-// process-wide MAIL_FROM address reduced to a bare address. Mirrors
-// app/organizer/communications/page.server.go's helper of the same name.
-func organizerEmail(template domain.EmailTemplate) string {
-	if replyTo := strings.TrimSpace(template.ReplyTo); replyTo != "" {
-		return replyTo
-	}
-	return mail.AddressOnly(strings.TrimSpace(os.Getenv("MAIL_FROM")))
 }

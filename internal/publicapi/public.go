@@ -1,7 +1,6 @@
 package publicapi
 
 import (
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -58,36 +57,13 @@ func Speakers(state domain.State) map[string]any {
 
 // approvedHeadshotURL mirrors the public gallery's consent boundary. The
 // speaker model carries an authenticated portal-file link for its owner; the
-// public API must instead expose the static copy created only after organizer
-// approval, or no URL at all.
+// public API instead exposes the state-authenticated public route only after
+// organizer approval, or no URL at all.
 func approvedHeadshotURL(state domain.State, speakerID string) string {
-	headshotTaskID := ""
-	for _, task := range state.Tasks {
-		if task.Active() && (task.Type == "headshot" || task.ID == "task_headshot") {
-			headshotTaskID = task.ID
-			break
-		}
-	}
-	if headshotTaskID == "" {
+	if _, found := state.ApprovedHeadshot(speakerID); !found || strings.TrimSpace(speakerID) == "" || strings.ContainsAny(speakerID, "/\\?#") {
 		return ""
 	}
-	for _, completion := range state.TaskCompletions {
-		if completion.TaskID != headshotTaskID || completion.SpeakerID != speakerID || completion.Status != domain.TaskApproved || strings.TrimSpace(completion.FileName) == "" {
-			continue
-		}
-		if state.Event.ID == "evt_m31_forum_2026" && strings.TrimSpace(completion.StoredPath) == "" {
-			switch speakerID {
-			case "spk_maya", "spk_theo", "spk_priya":
-				return "/demo-headshots/" + speakerID + ".webp"
-			}
-		}
-		extension := strings.ToLower(filepath.Ext(completion.FileName))
-		if extension == "" {
-			extension = ".jpg"
-		}
-		return "/headshots/" + speakerID + extension
-	}
-	return ""
+	return "/public-headshot/" + speakerID
 }
 
 func Schedule(state domain.State) map[string]any {

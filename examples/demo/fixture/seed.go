@@ -1,6 +1,16 @@
-package domain
+package fixture
 
-import "time"
+import (
+	"time"
+
+	. "github.com/m31-labs/rostrum/internal/domain"
+)
+
+// SeedTime fixes every relative fixture timestamp so the example is
+// reproducible across machines and deployments.
+func SeedTime() time.Time {
+	return time.Date(2026, time.August, 11, 0, 0, 0, 0, time.UTC)
+}
 
 // Seed returns a complete demo workspace. The records intentionally include a
 // few incomplete tasks and schedule collisions so the primary workflows have
@@ -142,7 +152,7 @@ func Seed(now time.Time) State {
 			// Profile completion is intentionally available before a final program
 			// decision. Every other seeded task is acceptance-gated.
 			{ID: "task_profile", Title: "Confirm your public profile", Description: "Review your role, company, biography, pronouns, and links.", Type: "profile", Required: true, DueAt: at(2026, time.September, 2, 17, 0), AssignedSpeakerIDs: acceptedSpeakers, AcceptedOnly: false},
-			{ID: "task_headshot", Title: "Add a high-resolution headshot", Description: "Provide a square or portrait image at least 1200 pixels wide.", Type: "file", Required: true, DueAt: at(2026, time.September, 2, 17, 0), AssignedSpeakerIDs: acceptedSpeakers, AcceptedOnly: true},
+			{ID: "task_headshot", Title: "Add a high-resolution headshot", Description: "Provide a square or portrait image at least 1200 pixels wide.", Type: "headshot", Required: true, DueAt: at(2026, time.September, 2, 17, 0), AssignedSpeakerIDs: acceptedSpeakers, AcceptedOnly: true},
 			{ID: "task_agreement", Title: "Accept the speaker agreement", Description: "Review recording, conduct, and cancellation terms.", Type: "form", Required: true, DueAt: at(2026, time.September, 10, 17, 0), AssignedSpeakerIDs: acceptedSpeakers, AcceptedOnly: true, FormFields: []FormField{{ID: "agreement", Label: "I accept the speaker agreement", Type: "checkbox", Required: true}}},
 			{ID: "task_av", Title: "Tell us about your AV needs", Description: "Share microphones, adapters, demos, and accessibility requirements.", Type: "form", Required: true, DueAt: at(2026, time.September, 15, 17, 0), AssignedSpeakerIDs: acceptedSpeakers, AcceptedOnly: true, FormFields: []FormField{{ID: "microphone", Label: "Microphone preference", Type: "select", Required: true, Options: []string{"Lavalier", "Handheld", "Lectern"}}, {ID: "demo", Label: "Will you run a live demo?", Type: "checkbox"}, {ID: "notes", Label: "Other requirements", Type: "textarea"}}},
 			{ID: "task_slides", Title: "Upload presentation slides", Description: "PDF is preferred. Final revisions remain open through event week.", Type: "file", Required: true, DueAt: at(2026, time.October, 5, 17, 0), AssignedSpeakerIDs: acceptedSpeakers, AcceptedOnly: true},
@@ -154,8 +164,12 @@ func Seed(now time.Time) State {
 			{ID: "res_reference", Title: "Program reference walkthrough", Kind: "embed", Summary: "A walkthrough embedded from an allowlisted video origin.", EmbedURL: "https://www.youtube-nocookie.com/embed/vUuK4Knl7oc", SortOrder: 4},
 		},
 		EmailTemplates: []EmailTemplate{
-			{ID: "tpl_submission_confirmation", Name: "Submission confirmation", Audience: "submitter", Subject: "We received {{submission.title}}", Body: "Hi {{speaker.first_name}},\n\nYour proposal, {{submission.title}}, is safely in our review queue. You can update your profile and follow progress in the speaker portal.\n\nProgram team", ReplyTo: "program@example.com", System: true},
-			{ID: "tpl_acceptance", Name: "Acceptance and next steps", Audience: "speaker", Subject: "You're joining {{event.name}}", Body: "Hi {{speaker.first_name}},\n\nWe would love to include {{session.title}} in {{event.name}}. Your portal contains the profile, agreement, AV, and slide tasks. A calendar invite is attached.\n\nProgram team", ReplyTo: "program@example.com", AttachCalendar: true, System: true},
+			{ID: "tpl_submission_confirmation", Name: "Submission confirmation", Audience: "submitter", Subject: "We received {{submission.title}}", Body: "Hi {{speaker.first_name}},\n\nYour proposal, {{submission.title}}, is safely in our review queue. You can update your profile and follow progress in the speaker portal:\n{{speaker.portal_url}}\n\nProgram team", ReplyTo: "program@example.com", System: true},
+			func() EmailTemplate {
+				template := AcceptanceTemplate()
+				template.Body = "Hi {{speaker.first_name}},\n\nWe would love to include {{session.title}} in {{event.name}}. Your portal contains the profile, agreement, AV, and slide tasks. A calendar invite is attached.\n\nProgram team"
+				return template
+			}(),
 			PublishedInviteTemplate(),
 			{ID: "tpl_five_day", Name: "Five-day task reminder", Audience: "speaker", Subject: "A speaker task is due in five days", Body: "Hi {{speaker.first_name}},\n\n{{task.title}} is due on {{task.due_date}}. Open your portal to finish it.\n\nProgram team", ReplyTo: "program@example.com", System: true},
 			{ID: "tpl_one_day", Name: "One-day session reminder", Audience: "speaker", Subject: "Tomorrow: {{session.title}}", Body: "Hi {{speaker.first_name}},\n\nYour session begins at {{session.start_time}} in {{session.room}}. Please arrive 45 minutes early. The calendar update is attached.\n\nProgram team", ReplyTo: "program@example.com", AttachCalendar: true, System: true},
@@ -278,9 +292,9 @@ func seedTaskCompletions(now time.Time) []TaskCompletion {
 
 func seedCommunications(now time.Time, at func(int, time.Month, int, int, int) time.Time) []Communication {
 	return []Communication{
-		{ID: "comm_accept_maya", TemplateID: "tpl_acceptance", SpeakerID: "spk_maya", SessionID: "ses_memory", Subject: "You're joining M31 Systems Forum 2026", Status: "sent", Provider: "demo-outbox", SentAt: now.Add(-12 * 24 * time.Hour)},
-		{ID: "comm_accept_theo", TemplateID: "tpl_acceptance", SpeakerID: "spk_theo", SessionID: "ses_rules", Subject: "You're joining M31 Systems Forum 2026", Status: "sent", Provider: "demo-outbox", SentAt: now.Add(-11 * 24 * time.Hour)},
-		{ID: "comm_accept_lina", TemplateID: "tpl_acceptance", SpeakerID: "spk_lina", SessionID: "ses_browser", Subject: "You're joining M31 Systems Forum 2026", Status: "sent", Provider: "demo-outbox", SentAt: now.Add(-11 * 24 * time.Hour)},
+		{ID: "comm_accept_maya", TemplateID: "tpl_acceptance", SpeakerID: "spk_maya", SessionID: "ses_memory", Subject: "You're joining M31 Systems Forum 2026", Status: "sent", Provider: "outbox", SentAt: now.Add(-12 * 24 * time.Hour)},
+		{ID: "comm_accept_theo", TemplateID: "tpl_acceptance", SpeakerID: "spk_theo", SessionID: "ses_rules", Subject: "You're joining M31 Systems Forum 2026", Status: "sent", Provider: "outbox", SentAt: now.Add(-11 * 24 * time.Hour)},
+		{ID: "comm_accept_lina", TemplateID: "tpl_acceptance", SpeakerID: "spk_lina", SessionID: "ses_browser", Subject: "You're joining M31 Systems Forum 2026", Status: "sent", Provider: "outbox", SentAt: now.Add(-11 * 24 * time.Hour)},
 		{ID: "comm_profile_samira", TemplateID: "tpl_five_day", SpeakerID: "spk_samira", Subject: "A speaker task is due in five days", Status: "queued", Provider: "scheduler", ScheduledFor: at(2026, time.August, 28, 9, 0)},
 		{ID: "comm_profile_elliot", TemplateID: "tpl_five_day", SpeakerID: "spk_elliot", Subject: "A speaker task is due in five days", Status: "queued", Provider: "scheduler", ScheduledFor: at(2026, time.August, 28, 9, 0)},
 		{ID: "comm_session_maya", TemplateID: "tpl_one_day", SpeakerID: "spk_maya", SessionID: "ses_memory", Subject: "Tomorrow: Memory Without Mystery", Status: "scheduled", Provider: "scheduler", ScheduledFor: at(2026, time.October, 14, 9, 0)},

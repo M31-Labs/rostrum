@@ -1,17 +1,58 @@
 package store
 
 import (
+	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/m31-labs/rostrum/examples/demo/fixture"
 	"github.com/m31-labs/rostrum/internal/domain"
 )
 
+func TestSQLiteStoreSecuresExistingDataPath(t *testing.T) {
+	directory := filepath.Join(t.TempDir(), "data")
+	if err := os.Mkdir(directory, 0o755); err != nil {
+		t.Fatalf("create permissive data directory: %v", err)
+	}
+	path := filepath.Join(directory, "rostrum.sqlite")
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
+		t.Fatalf("create permissive data file: %v", err)
+	}
+	workspace, err := OpenSQLite(path, domain.FreshState(time.Now().UTC()))
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	defer workspace.Close()
+
+	for target, want := range map[string]os.FileMode{directory: 0o755, path: 0o600} {
+		info, err := os.Stat(target)
+		if err != nil {
+			t.Fatalf("stat %s: %v", target, err)
+		}
+		if got := info.Mode().Perm(); got != want {
+			t.Errorf("permissions for %s = %04o, want %04o", filepath.Base(target), got, want)
+		}
+	}
+	for _, sidecar := range []string{path + "-wal", path + "-shm"} {
+		info, err := os.Stat(sidecar)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			t.Fatalf("stat sqlite sidecar: %v", err)
+		}
+		if got := info.Mode().Perm(); got != 0o600 {
+			t.Errorf("permissions for %s = %04o, want 0600", filepath.Base(sidecar), got)
+		}
+	}
+}
+
 func TestSQLiteStorePersistsStateAndAuditAcrossReopen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "rostrum.sqlite")
-	seed := domain.Seed(time.Now().UTC())
+	seed := fixture.Seed(time.Now().UTC())
 	workspace, err := OpenSQLite(path, seed)
 	if err != nil {
 		t.Fatalf("OpenSQLite: %v", err)
@@ -65,13 +106,13 @@ func TestSQLiteStorePersistsStateAndAuditAcrossReopen(t *testing.T) {
 }
 
 func TestSQLiteStoreReplaceRecordsRestoreProvenance(t *testing.T) {
-	workspace, err := OpenSQLite(":memory:", domain.Seed(time.Now().UTC()))
+	workspace, err := OpenSQLite(":memory:", fixture.Seed(time.Now().UTC()))
 	if err != nil {
 		t.Fatalf("OpenSQLite: %v", err)
 	}
 	defer workspace.Close()
 
-	replacement := domain.Seed(time.Now().UTC().Add(time.Hour))
+	replacement := fixture.Seed(time.Now().UTC().Add(time.Hour))
 	replacement.Event.Name = "Restored workspace"
 	if err := workspace.Replace(replacement, domain.AuditMeta{
 		Actor:      "organizer:test",

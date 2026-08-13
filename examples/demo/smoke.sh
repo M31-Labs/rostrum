@@ -1,15 +1,15 @@
 #!/usr/bin/env sh
 # Judge-facing contract smoke test.
 #
-# With no argument, this script builds and boots a disposable APP_MODE=demo
-# process that uses the canonical fixed fixture. With a URL, it verifies that
+# With no argument, this script prepares and boots a disposable APP_MODE=preview
+# process using this example's canonical fixed fixture. With a URL, it verifies that
 # exact remote deployment. Remote mode requires an immutable version match;
 # set SMOKE_EXPECTED_VERSION explicitly for a release tag, otherwise the
 # current Git HEAD is expected. The test never follows redirects.
 set -eu
 
-SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
+SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+ROOT=$(CDPATH='' cd -- "$SCRIPT_DIR/../.." && pwd)
 BASE=${1:-}
 SERVER_PID=""
 SMOKE_DIR=$(mktemp -d "${TMPDIR:-/tmp}/rostrum-smoke.XXXXXX")
@@ -20,6 +20,17 @@ BODY="$SMOKE_DIR/body"
 FAIL=0
 IDENTITY_OK=1
 LAST_CODE=""
+
+sha256_file() {
+	if command -v sha256sum >/dev/null 2>&1; then
+		sha256sum "$1" | awk '{print $1}'
+	elif command -v shasum >/dev/null 2>&1; then
+		shasum -a 256 "$1" | awk '{print $1}'
+	else
+		echo "smoke: install sha256sum or shasum." >&2
+		return 1
+	fi
+}
 
 cleanup() {
 	if [ -n "$SERVER_PID" ] && kill -0 "$SERVER_PID" 2>/dev/null; then
@@ -121,6 +132,45 @@ assert_body_text() {
 	fi
 }
 
+assert_body_lacks_text() {
+	label=$1
+	unwanted=$2
+	if html_text | grep -Fq "$unwanted"; then
+		fail "$label unexpectedly contains '$unwanted'"
+	else
+		pass "$label omits '$unwanted'"
+	fi
+}
+
+assert_body_lacks_markup() {
+	label=$1
+	unwanted=$2
+	if grep -Fq "$unwanted" "$BODY"; then
+		fail "$label unexpectedly contains markup '$unwanted'"
+	else
+		pass "$label omits markup '$unwanted'"
+	fi
+}
+
+assert_observer_page() {
+	label=$1
+	if grep -Eq '<form[^>]*method="post"' "$BODY"; then
+		fail "$label still renders a mutation form in observer mode"
+	else
+		pass "$label renders no mutation form"
+	fi
+	if grep -Eq '<input[^>]*type="file"' "$BODY"; then
+		fail "$label still renders a file input in observer mode"
+	else
+		pass "$label renders no file input"
+	fi
+	if grep -Eq 'href="/organizer/(export|import)|href="/portal-file/' "$BODY"; then
+		fail "$label still links to a protected export, import, or private file"
+	else
+		pass "$label renders no protected workspace-data link"
+	fi
+}
+
 count_occurrences() {
 	awk -v needle="$1" '
 		{
@@ -162,8 +212,8 @@ assert_forbidden() {
 		fail "$label returned HTTP $LAST_CODE, want 403"
 		return
 	fi
-	if ! grep -Fq "read-only demo" "$BODY"; then
-		fail "$label returned 403 without the read-only demo reason"
+	if ! grep -Fq "read-only preview" "$BODY"; then
+		fail "$label returned 403 without the read-only preview reason"
 		return
 	fi
 	pass "$label is blocked with HTTP 403"
@@ -189,25 +239,47 @@ if [ -z "$BASE" ]; then
 		REVISION="worktree"
 	fi
 	EXPECTED_VERSION="smoke-$REVISION"
+	TEMPLATE="$SMOKE_DIR/initial-workspace.json"
+	CHECKSUM="$SMOKE_DIR/initial-workspace.sha256"
+	UPLOAD_CHECKSUMS="$SMOKE_DIR/uploads.sha256"
+	UPLOADS="$SMOKE_DIR/uploads"
+	ROUTING_POLICY="$SCRIPT_DIR/rules/cfp-routing.arb"
+	ROUTING_POLICY_SHA256=$(sha256_file "$ROUTING_POLICY")
 	echo "smoke: building disposable demo binary..."
 	(cd "$ROOT" && CGO_ENABLED=0 go build -trimpath -o "$BIN" .)
+	(cd "$ROOT" && go run ./examples/demo/prepare \
+		-workspace "$TEMPLATE" \
+		-checksum "$CHECKSUM" \
+		-upload-checksums "$UPLOAD_CHECKSUMS" \
+		-assets "$SCRIPT_DIR/assets/headshots" \
+		-uploads "$UPLOADS")
 	env \
 		APP_ENV=development \
-		APP_MODE=demo \
-		SEED=demo \
-		DEMO_MODE=true \
+		APP_MODE=preview \
+		INITIAL_WORKSPACE=fresh \
+		INITIAL_WORKSPACE_PATH="$TEMPLATE" \
+		INITIAL_WORKSPACE_SHA256= \
+		INITIAL_WORKSPACE_SHA256_FILE="$CHECKSUM" \
 		STORE_DRIVER=json \
 		DATA_PATH="$SMOKE_DIR/workspace.json" \
+		UPLOAD_DIR="$UPLOADS" \
+		CFP_ROUTING_POLICY_PATH="$ROUTING_POLICY" \
+		CFP_ROUTING_POLICY_SHA256="$ROUTING_POLICY_SHA256" \
+		CFP_ROUTING_POLICY_SHA256_FILE= \
 		AUDIT_LOG_PATH="$SMOKE_DIR/audit.log" \
 		BACKUP_DIR="$SMOKE_DIR/backups" \
 		PORT="$PORT" \
 		PUBLIC_URL="$BASE" \
 		ROSTRUM_VERSION="$EXPECTED_VERSION" \
 		SESSION_SECRET=rostrum-smoke-local-only-session-0001 \
+		PREVIEW_LABEL="Observer demo" \
+		PREVIEW_MESSAGE="Explore the full organizer workspace with fictional data. Controls that create, move, publish, upload, or save are not shown." \
 		MAIL_DRIVER=outbox \
 		MAIL_FROM= \
 		ORGANIZER_EMAILS= \
 		RESET_SECRET= \
+		TRUSTED_PROXY_CIDRS= \
+		PRINCIPAL_ROLES= \
 		DATABASE_URL= \
 		RESEND_API_KEY= \
 		SMTP_HOST= \
@@ -217,8 +289,12 @@ if [ -z "$BASE" ]; then
 		ACCELEVENTS_API_KEY= \
 		ACCELEVENTS_API_TOKEN= \
 		ACCELEVENTS_EVENT_URL= \
+		ACCELEVENTS_BASE_URL= \
 		AIRTABLE_PAT= \
 		AIRTABLE_BASE_ID= \
+		AIRTABLE_API_BASE_URL= \
+		AIRTABLE_SPEAKERS_TABLE= \
+		AIRTABLE_SESSIONS_TABLE= \
 		AUTH_GITHUB_CLIENT_ID= \
 		AUTH_GITHUB_CLIENT_SECRET= \
 		AUTH_GOOGLE_CLIENT_ID= \
@@ -276,7 +352,7 @@ if fetch GET "/api/health"; then
 		fi
 		ROBOTS=$(response_header "X-Robots-Tag")
 		if [ "$ROBOTS" = "noindex, nofollow, noarchive" ]; then
-			pass "/api/health carries the read-only demo robots policy"
+			pass "/api/health carries the read-only preview robots policy"
 		else
 			identity_fail "/api/health X-Robots-Tag is '${ROBOTS:-missing}', so this is not the expected demo deployment"
 		fi
@@ -308,28 +384,60 @@ assert_body_text "public home seed" "10 participants"
 assert_body_text "public home seed" "8 sessions"
 
 assert_page "/organizer" "organizer overview" "Agenda pulse"
-if ! grep -Fq "Read-only demo" "$BODY"; then
-	identity_fail "organizer overview is missing the Read-only demo banner"
+assert_observer_page "organizer overview"
+if ! grep -Fq "Observer demo" "$BODY"; then
+	identity_fail "organizer overview is missing the Observer demo banner"
 else
-	pass "organizer overview exposes the Read-only demo banner"
+	pass "organizer overview exposes the Observer demo banner"
 fi
 
 assert_page "/organizer/forms" "organizer forms" "Question structure"
+assert_observer_page "organizer forms"
 assert_page "/organizer/submissions" "organizer submissions" "Proposal inventory"
+assert_observer_page "organizer submissions"
 assert_body_text "organizer submissions seed" "12 shown of 12 proposals"
+SUBMISSION_PATH=$(extract_href "/organizer/submissions/")
+if [ -n "$SUBMISSION_PATH" ]; then
+	assert_page "$SUBMISSION_PATH" "organizer submission detail" "What the speaker proposed"
+	assert_observer_page "organizer submission detail"
+else
+	fail "organizer submissions does not expose a detail route"
+fi
 assert_page "/organizer/review" "organizer review" "Multi-round review"
+assert_observer_page "organizer review"
 assert_page "/organizer/speakers" "organizer speakers" "Participant operations"
+assert_observer_page "organizer speakers"
 assert_body_text "organizer speakers seed" "10 shown of 10"
 assert_page "/organizer/agenda" "organizer agenda" "Conflict-aware scheduling"
+assert_observer_page "organizer agenda"
 assert_body_text "organizer agenda seed" "8 sessions"
+assert_body_text "organizer agenda observer view" "Read-only schedule snapshot."
+assert_body_text "organizer agenda observer view" "Schedule controls are available in the local interactive run."
+assert_body_text "organizer agenda observer view" "Conflict inspector"
+assert_body_lacks_text "organizer agenda observer view" "Publish agenda"
+assert_body_lacks_text "organizer agenda observer view" "Add a manual session"
+assert_body_lacks_text "organizer agenda observer view" "Check & move"
+assert_body_lacks_text "organizer agenda observer view" "Return to bank"
+assert_body_lacks_text "organizer agenda observer view" "Move a session without drag and drop"
+assert_body_lacks_markup "organizer agenda observer view" 'draggable="true"'
+assert_body_lacks_markup "organizer agenda observer view" 'id="agenda-drag-form"'
 assert_page "/organizer/communications" "organizer communications" "Reusable templates"
+assert_observer_page "organizer communications"
 assert_page "/organizer/portal" "organizer portal operations" "Live completion matrix"
+assert_observer_page "organizer portal operations"
 assert_page "/organizer/embeds" "organizer embeds" "Publish everywhere"
+assert_observer_page "organizer embeds"
 assert_page "/organizer/integrations" "organizer integrations" "One-way publishing"
+assert_observer_page "organizer integrations"
 assert_page "/organizer/settings" "organizer settings" "Event configuration"
+assert_observer_page "organizer settings"
 
-assert_page "/login" "identity explanation" "This hosted preview uses fictional data and is read-only."
-assert_page "/submit/systems-forum-cfp" "submitter CFP" "Submit proposal"
+assert_page "/login" "identity explanation" "Sign-in and identity setup are disabled."
+assert_body_text "identity explanation" "Explore the full organizer workspace with fictional data."
+assert_page "/submit/systems-forum-cfp" "submitter CFP" "Submission journey preview."
+assert_observer_page "submitter CFP"
+assert_body_lacks_text "submitter CFP" "Save draft"
+assert_body_lacks_text "submitter CFP" "Submit proposal"
 
 # The product tour is also the safe credential-free bridge into the two
 # signed-link personas. Extract its generated URLs rather than hardcoding a
@@ -339,11 +447,18 @@ REVIEWER_PATH=$(extract_href "/review/")
 SPEAKER_PATH=$(extract_href "/portal/")
 if [ -n "$REVIEWER_PATH" ]; then
 	assert_page "$REVIEWER_PATH" "signed reviewer desk" "Weighted criteria"
+	assert_body_text "signed reviewer desk" "Reviewer journey preview."
+	assert_observer_page "signed reviewer desk"
+	assert_body_lacks_text "signed reviewer desk" "Save your review"
 else
 	fail "product tour does not expose a signed reviewer route in demo mode"
 fi
 if [ -n "$SPEAKER_PATH" ]; then
 	assert_page "$SPEAKER_PATH" "signed speaker portal" "Your checklist"
+	assert_body_text "signed speaker portal" "Speaker journey preview."
+	assert_observer_page "signed speaker portal"
+	assert_body_lacks_text "signed speaker portal" "Upload selected file"
+	assert_body_lacks_text "signed speaker portal" "Save public profile"
 else
 	fail "product tour does not expose a signed speaker route in demo mode"
 fi
@@ -357,7 +472,7 @@ assert_page "/public/m31-systems-forum-2026/agenda" "public agenda" "Build your 
 assert_body_text "public agenda seed" "6 sessions across 4 tracks"
 assert_page "/public/m31-systems-forum-2026/speakers" "public speaker gallery" "builders sharing work from the field."
 assert_body_text "public speaker gallery seed" "6 builders sharing work from the field."
-if grep -Fq 'src="/demo-headshots/spk_maya.webp"' "$BODY" && ! grep -Fq 'example.com/' "$BODY"; then
+if grep -Fq 'src="/public-headshot/spk_maya"' "$BODY" && ! grep -Fq 'example.com/' "$BODY"; then
 	pass "public speaker gallery renders an approved portrait without fictional dead-end links"
 else
 	fail "public speaker gallery is missing an approved portrait or still contains a fictional outbound link"
@@ -365,7 +480,7 @@ fi
 assert_page "/public/m31-systems-forum-2026/agenda?embed=1" "agenda embed" "Build your day."
 assert_page "/public/m31-systems-forum-2026/speakers?embed=1" "speaker embed" "builders sharing work from the field."
 
-if fetch GET "/demo-headshots/spk_maya.webp"; then
+if fetch GET "/public-headshot/spk_maya"; then
 	HEADSHOT_TYPE=$(response_header "Content-Type")
 	if [ "$LAST_CODE" = "200" ] && [ "$HEADSHOT_TYPE" = "image/webp" ]; then
 		pass "approved fictional portrait asset is deployable"
@@ -421,22 +536,41 @@ if [ "$IDENTITY_OK" -eq 1 ]; then
 	assert_forbidden GET "/organizer/export/submissions.csv" "private export surface"
 
 	# A mutation method aimed at a deliberately nonexistent path cannot change
-	# live application state. In demo mode the global gate still catches it
+	# live application state. In preview mode the global gate still catches it
 	# before routing, so this is a safe final proof before sending representative
 	# POSTs to real action paths.
 	DEMO_GATE_OK=0
 	if fetch DELETE "/__rostrum_smoke_read_only_probe__"; then
-		if [ "$LAST_CODE" = "403" ] && grep -Fq "read-only demo" "$BODY"; then
+		if [ "$LAST_CODE" = "403" ] && grep -Fq "read-only preview" "$BODY"; then
 			pass "global read-only mutation gate blocks a non-routable DELETE"
 			assert_robots "global read-only mutation gate"
 			DEMO_GATE_OK=1
 		else
-			fail "global read-only mutation gate returned HTTP $LAST_CODE without the demo reason"
+			fail "global read-only mutation gate returned HTTP $LAST_CODE without the preview reason"
 		fi
 	fi
 	if [ "$DEMO_GATE_OK" -eq 1 ]; then
 		assert_forbidden POST "/submit/systems-forum-cfp/__actions/submitProposal" "public CFP mutation"
-		assert_forbidden POST "/demo/reset" "demo reset mutation"
+		assert_forbidden POST "/organizer/agenda/__actions/createSession" "agenda create mutation"
+		assert_forbidden POST "/organizer/agenda/__actions/moveSession" "agenda move mutation"
+		assert_forbidden POST "/organizer/agenda/__actions/unscheduleSession" "agenda unschedule mutation"
+		assert_forbidden POST "/organizer/agenda/__actions/publishAgenda" "agenda publish mutation"
+		assert_forbidden POST "/portal-upload/spk_maya/task_headshot" "speaker upload mutation"
+		assert_forbidden POST "/workspace/reset" "workspace reset mutation"
+
+		# Prove the representative blocked writes did not grow either private
+		# organizer inventory or the published projections a judge can inspect.
+		assert_page "/organizer/submissions" "post-probe organizer submissions" "Proposal inventory"
+		assert_body_text "post-probe organizer submissions" "12 shown of 12 proposals"
+		assert_page "/organizer/agenda" "post-probe organizer agenda" "Conflict-aware scheduling"
+		assert_body_text "post-probe organizer agenda" "8 sessions"
+		if fetch GET "/api/v1/workspace"; then
+			if [ "$LAST_CODE" = "200" ] && grep -Fq '"publishedSessions":6' "$BODY" && grep -Fq '"publishedSpeakers":6' "$BODY"; then
+				pass "blocked mutation probes leave canonical public counts unchanged"
+			else
+				fail "public counts changed after blocked mutation probes"
+			fi
+		fi
 	else
 		fail "real action POST probes skipped because the global demo mutation gate was not proven"
 	fi

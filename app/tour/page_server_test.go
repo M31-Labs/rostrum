@@ -7,17 +7,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/m31-labs/rostrum/examples/demo/fixture"
 	"github.com/m31-labs/rostrum/internal/appstate"
-	"github.com/m31-labs/rostrum/internal/domain"
 	"github.com/m31-labs/rostrum/internal/store"
 	"github.com/m31-labs/rostrum/internal/token"
 	"m31labs.dev/gosx/route"
 	"m31labs.dev/gosx/server"
 )
 
-func TestTourDataExposesSignedPersonaLinksOnlyInReadOnlyDemo(t *testing.T) {
-	t.Setenv("APP_MODE", "demo")
-	state := domain.Seed(time.Now().UTC())
+func TestTourDataExposesSignedPersonaLinksOnlyInReadOnlyPreview(t *testing.T) {
+	t.Setenv("APP_MODE", "preview")
+	state := fixture.Seed(time.Now().UTC())
 
 	live := tourData(state, false)
 	livePersonas := live["personas"].([]map[string]any)
@@ -28,25 +28,25 @@ func TestTourDataExposesSignedPersonaLinksOnlyInReadOnlyDemo(t *testing.T) {
 		t.Fatalf("live speaker href = %q, want organizer surface", got)
 	}
 
-	demo := tourData(state, true)
-	demoPersonas := demo["personas"].([]map[string]any)
-	reviewerHref := demoPersonas[2]["href"].(string)
+	preview := tourData(state, true)
+	previewPersonas := preview["personas"].([]map[string]any)
+	reviewerHref := previewPersonas[2]["href"].(string)
 	if !strings.HasPrefix(reviewerHref, "/review/") {
-		t.Fatalf("demo reviewer href = %q, want signed reviewer route", reviewerHref)
+		t.Fatalf("preview reviewer href = %q, want signed reviewer route", reviewerHref)
 	}
 	reviewerToken := strings.TrimPrefix(reviewerHref, "/review/")
 	if reviewerID, ok := token.NewReviewer().VerifyReviewer(reviewerToken); !ok || reviewerID == "" {
-		t.Fatalf("demo reviewer link did not verify: id=%q ok=%v", reviewerID, ok)
+		t.Fatalf("preview reviewer link did not verify: id=%q ok=%v", reviewerID, ok)
 	}
 
-	speakerHref := demoPersonas[3]["href"].(string)
+	speakerHref := previewPersonas[3]["href"].(string)
 	parts := strings.SplitN(speakerHref, "?key=", 2)
 	if len(parts) != 2 || !strings.HasPrefix(parts[0], "/portal/") {
-		t.Fatalf("demo speaker href = %q, want signed portal route", speakerHref)
+		t.Fatalf("preview speaker href = %q, want signed portal route", speakerHref)
 	}
 	speakerID := strings.TrimPrefix(parts[0], "/portal/")
 	if verifiedID, ok := token.New().Verify(parts[1]); !ok || verifiedID != speakerID {
-		t.Fatalf("demo speaker link verified as %q/%v, want %q", verifiedID, ok, speakerID)
+		t.Fatalf("preview speaker link verified as %q/%v, want %q", verifiedID, ok, speakerID)
 	}
 
 	// These exact bearer links must not cross into a live deployment, even if
@@ -61,7 +61,7 @@ func TestTourDataExposesSignedPersonaLinksOnlyInReadOnlyDemo(t *testing.T) {
 }
 
 func TestLoadTourDisablesResponseStorage(t *testing.T) {
-	state := domain.Seed(time.Now().UTC())
+	state := fixture.Seed(time.Now().UTC())
 	workspace, err := store.Open(":memory:", state)
 	if err != nil {
 		t.Fatalf("open workspace: %v", err)
@@ -83,7 +83,7 @@ func TestLoadTourDisablesResponseStorage(t *testing.T) {
 }
 
 func TestFirstHumanReviewerPrefersActivePlan(t *testing.T) {
-	state := domain.Seed(time.Now().UTC())
+	state := fixture.Seed(time.Now().UTC())
 	id := firstHumanReviewer(state)
 	if id == "" {
 		t.Fatal("expected a human reviewer in the seeded active plan")

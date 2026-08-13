@@ -16,7 +16,7 @@ import (
 )
 
 // MailSender adapts internal/mail.Sender to auth.MagicLinkSender, so the
-// magic-link flow sends through the same transport (demo outbox or SMTP)
+// magic-link flow sends through the same transport (local outbox or SMTP)
 // every other Rostrum email already uses.
 type MailSender struct {
 	Sender mail.Sender

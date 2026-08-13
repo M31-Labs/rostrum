@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/m31-labs/rostrum/examples/demo/fixture"
 	"github.com/m31-labs/rostrum/internal/domain"
 	"github.com/m31-labs/rostrum/internal/mail"
 	"github.com/m31-labs/rostrum/internal/store"
@@ -29,7 +30,7 @@ func (sender *testSender) Send(message mail.Message) error {
 
 func schedulerWorkspace(t *testing.T, now time.Time) *store.JSONStore {
 	t.Helper()
-	state := domain.Seed(now)
+	state := fixture.Seed(now)
 	state.Communications = nil
 	state.Tasks = []domain.Task{{
 		ID: "task_due", Title: "Submit final slides", Type: "file", DueAt: now.Add(24 * time.Hour),
@@ -72,7 +73,7 @@ func TestRunnerPersistsThenDeliversDerivedTaskReminder(t *testing.T) {
 
 func TestRunnerDeliversPublishedAgendaInvites(t *testing.T) {
 	now := time.Date(2026, time.August, 10, 12, 0, 0, 0, time.UTC)
-	state := domain.Seed(now)
+	state := fixture.Seed(now)
 	state.Communications = nil
 	scheduled, found := state.Session("ses_maintainers")
 	if !found {
@@ -167,7 +168,7 @@ func TestRunnerRecordsOptOutAsSuppressedWithoutCallingSender(t *testing.T) {
 
 func TestNotificationRulesAreIdempotentAndAuditableAsOutboxRows(t *testing.T) {
 	now := time.Date(2026, time.August, 10, 12, 0, 0, 0, time.UTC)
-	state := domain.Seed(now)
+	state := fixture.Seed(now)
 	state.Communications = nil
 	created := EnqueueNotificationRules(&state, Trigger{
 		Name: "submission.created", SubmissionID: "sub_memory", SpeakerID: "spk_maya",

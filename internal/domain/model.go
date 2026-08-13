@@ -133,7 +133,7 @@ type QuestionRule struct {
 // workspace shows this copy until an organizer customizes it.
 const (
 	DefaultSuccessHeading = "Thanks — we have your proposal"
-	DefaultSuccessBody    = "Your proposal is safely in our review queue and a confirmation is on its way. You can finish your speaker profile in the portal while review begins."
+	DefaultSuccessBody    = "Your proposal is safely in our review queue. The program team will follow up with next steps."
 )
 
 // SuccessPageHeading returns the form's customized success-page heading, or
@@ -486,7 +486,7 @@ func (state *State) QueueAcceptanceCommunication(sessionID string, speakerIDs []
 			SessionID:  sessionID,
 			Subject:    "You're joining " + state.Event.Name,
 			Status:     "queued",
-			Provider:   "demo-outbox",
+			Provider:   "outbox",
 		})
 		queued++
 	}
@@ -873,11 +873,29 @@ func auditText(value string, limit int) string {
 	return string([]rune(value)[:limit])
 }
 
-// AcceptanceTemplateID names the seeded EmailTemplate ("tpl_acceptance",
-// internal/domain/seed.go) that QueueAcceptanceCommunication and the
-// accept-time transition in app/organizer/submissions/page.server.go send
-// an accepted speaker.
-const AcceptanceTemplateID = "tpl_acceptance"
+// AcceptanceTemplateID names the conventional EmailTemplate that
+// QueueAcceptanceCommunication and the accept-time transition in
+// app/organizer/submissions/page.server.go send to an accepted speaker.
+const (
+	AcceptanceTemplateID      = "tpl_acceptance"
+	AcceptanceTemplateSubject = "You're joining {{event.name}}"
+)
+
+// AcceptanceTemplate returns the generic system message used when a proposal
+// is accepted. Event-specific wording stays editable in the workspace, while
+// every fresh or empty installation has a valid delivery target on day one.
+func AcceptanceTemplate() EmailTemplate {
+	return EmailTemplate{
+		ID:             AcceptanceTemplateID,
+		Name:           "Acceptance and next steps",
+		Audience:       "speaker",
+		Subject:        AcceptanceTemplateSubject,
+		Body:           "Hi {{speaker.first_name}},\n\nWe would love to include {{session.title}} in {{event.name}}. Open your speaker portal for the latest program details and next steps.\n\nProgram team",
+		ReplyTo:        "program@example.com",
+		AttachCalendar: true,
+		System:         true,
+	}
+}
 
 // PublishedInviteTemplateID names the system template used when a scheduled
 // session crosses from draft to published. It is separate from acceptance so
@@ -1087,7 +1105,7 @@ func (state State) TaskAssignedToSpeaker(task Task, speakerID string) bool {
 // SpeakerEligibleForAcceptedTasks returns whether the speaker has at least
 // one proposal in an accepted program state. Accepted queue is included: it
 // is already an acceptance-stage state throughout Rostrum's integrations and
-// seed data, while pending or declined proposals never unlock accepted-only
+// workflows, while pending or declined proposals never unlock accepted-only
 // work.
 func (state State) SpeakerEligibleForAcceptedTasks(speakerID string) bool {
 	for _, submission := range state.Submissions {
@@ -1137,6 +1155,9 @@ func (state State) Validate() error {
 	if err := validateSubmissionForms(state); err != nil {
 		return err
 	}
+	if err := validateWorkspaceReferences(state); err != nil {
+		return err
+	}
 	if err := validateCommunications(state); err != nil {
 		return err
 	}
@@ -1160,6 +1181,87 @@ func (state State) Validate() error {
 		}
 		if session.DurationMinutes < 0 || session.DurationMinutes > 12*60 {
 			return fmt.Errorf("session %s has an invalid duration", session.ID)
+		}
+	}
+	return nil
+}
+
+// validateWorkspaceReferences rejects imported or policy-produced state that
+// points at records which do not exist. Optional placement fields may remain
+// blank while a proposal or session is unscheduled; any non-blank reference
+// is authoritative and must resolve.
+func validateWorkspaceReferences(state State) error {
+	tracks := make(map[string]bool, len(state.Event.Tracks))
+	rooms := make(map[string]bool, len(state.Event.Rooms))
+	categories := make(map[string]bool, len(state.Event.Categories))
+	forms := make(map[string]bool, len(state.Forms))
+	speakers := make(map[string]bool, len(state.Speakers))
+	submissions := make(map[string]bool, len(state.Submissions))
+	templates := make(map[string]bool, len(state.EmailTemplates))
+	for _, track := range state.Event.Tracks {
+		tracks[track.ID] = true
+	}
+	for _, room := range state.Event.Rooms {
+		rooms[room.ID] = true
+	}
+	for _, category := range state.Event.Categories {
+		categories[category.ID] = true
+		if category.TrackID != "" && !tracks[category.TrackID] {
+			return fmt.Errorf("category %s references unknown track %s", category.ID, category.TrackID)
+		}
+	}
+	for _, template := range state.EmailTemplates {
+		templates[template.ID] = true
+	}
+	for _, form := range state.Forms {
+		forms[form.ID] = true
+		if form.EventID != state.Event.ID {
+			return fmt.Errorf("submission form %s references unknown event %s", form.ID, form.EventID)
+		}
+		if form.SendConfirmation && !templates[form.ConfirmationTemplate] {
+			return fmt.Errorf("submission form %s references unknown confirmation template %s", form.ID, form.ConfirmationTemplate)
+		}
+	}
+	for _, speaker := range state.Speakers {
+		speakers[speaker.ID] = true
+	}
+	for _, submission := range state.Submissions {
+		submissions[submission.ID] = true
+		if submission.EventID != state.Event.ID {
+			return fmt.Errorf("submission %s references unknown event %s", submission.ID, submission.EventID)
+		}
+		if !forms[submission.FormID] {
+			return fmt.Errorf("submission %s references unknown form %s", submission.ID, submission.FormID)
+		}
+		if submission.CategoryID != "" && !categories[submission.CategoryID] {
+			return fmt.Errorf("submission %s references unknown category %s", submission.ID, submission.CategoryID)
+		}
+		if submission.TrackID != "" && !tracks[submission.TrackID] {
+			return fmt.Errorf("submission %s references unknown track %s", submission.ID, submission.TrackID)
+		}
+		for _, speakerID := range submission.SpeakerIDs {
+			if !speakers[speakerID] {
+				return fmt.Errorf("submission %s references unknown speaker %s", submission.ID, speakerID)
+			}
+		}
+	}
+	for _, session := range state.Sessions {
+		if session.EventID != state.Event.ID {
+			return fmt.Errorf("session %s references unknown event %s", session.ID, session.EventID)
+		}
+		if session.SubmissionID != "" && !submissions[session.SubmissionID] {
+			return fmt.Errorf("session %s references unknown submission %s", session.ID, session.SubmissionID)
+		}
+		if session.TrackID != "" && !tracks[session.TrackID] {
+			return fmt.Errorf("session %s references unknown track %s", session.ID, session.TrackID)
+		}
+		if session.RoomID != "" && !rooms[session.RoomID] {
+			return fmt.Errorf("session %s references unknown room %s", session.ID, session.RoomID)
+		}
+		for _, speakerID := range session.SpeakerIDs {
+			if !speakers[speakerID] {
+				return fmt.Errorf("session %s references unknown speaker %s", session.ID, speakerID)
+			}
 		}
 	}
 	return nil

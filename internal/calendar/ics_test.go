@@ -5,11 +5,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/m31-labs/rostrum/examples/demo/fixture"
 	"github.com/m31-labs/rostrum/internal/domain"
 )
 
 func TestEventCalendarContainsOnlyPublishedScheduledProgram(t *testing.T) {
-	state := domain.Seed(time.Now().UTC())
+	state := fixture.Seed(time.Now().UTC())
 	data, name, err := EventCalendar(state, state.Event.Slug)
 	if err != nil {
 		t.Fatal(err)
@@ -30,14 +31,14 @@ func TestEventCalendarContainsOnlyPublishedScheduledProgram(t *testing.T) {
 }
 
 func TestEventCalendarRejectsUnknownSlug(t *testing.T) {
-	state := domain.Seed(time.Now().UTC())
+	state := fixture.Seed(time.Now().UTC())
 	if _, _, err := EventCalendar(state, "another-event"); err == nil {
 		t.Fatal("EventCalendar accepted an unknown event slug")
 	}
 }
 
 func TestSpeakerCalendarContainsAssignedSessions(t *testing.T) {
-	state := domain.Seed(time.Now().UTC())
+	state := fixture.Seed(time.Now().UTC())
 	data, name, err := SpeakerCalendar(state, "spk_maya")
 	if err != nil {
 		t.Fatal(err)
@@ -52,7 +53,7 @@ func TestSpeakerCalendarContainsAssignedSessions(t *testing.T) {
 }
 
 func TestSpeakerCalendarUsesPublishMethod(t *testing.T) {
-	state := domain.Seed(time.Now().UTC())
+	state := fixture.Seed(time.Now().UTC())
 	data, _, err := SpeakerCalendar(state, "spk_maya")
 	if err != nil {
 		t.Fatal(err)
@@ -66,7 +67,7 @@ func TestSpeakerCalendarUsesPublishMethod(t *testing.T) {
 // session assigned to the speaker never reaches the feed, and the feed
 // never stamps a draft CONFIRMED because it never emits the event at all.
 func TestSpeakerCalendarExcludesDraftSessions(t *testing.T) {
-	state := domain.Seed(time.Now().UTC())
+	state := fixture.Seed(time.Now().UTC())
 	draftFound := false
 	for _, session := range state.Sessions {
 		if session.Status == "draft" && contains(session.SpeakerIDs, "spk_samira") {
@@ -90,7 +91,7 @@ func TestSpeakerCalendarExcludesDraftSessions(t *testing.T) {
 }
 
 func TestSpeakerCalendarUnknownSpeaker(t *testing.T) {
-	state := domain.Seed(time.Now().UTC())
+	state := fixture.Seed(time.Now().UTC())
 	if _, _, err := SpeakerCalendar(state, "spk_does_not_exist"); err == nil {
 		t.Fatal("SpeakerCalendar with an unknown speaker returned nil error, want an error")
 	}
@@ -98,7 +99,7 @@ func TestSpeakerCalendarUnknownSpeaker(t *testing.T) {
 
 func seedInviteFixture(t *testing.T) (domain.State, domain.Session, domain.Speaker) {
 	t.Helper()
-	state := domain.Seed(time.Now().UTC())
+	state := fixture.Seed(time.Now().UTC())
 	var session domain.Session
 	found := false
 	for _, item := range state.Sessions {

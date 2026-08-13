@@ -85,7 +85,6 @@ func Overview(state domain.State) map[string]any {
 
 	return map[string]any{
 		"section":   "overview",
-		"demoMode":  DemoMode(),
 		"workspace": WorkspaceIdentity(state),
 		"event": map[string]any{
 			"name":       state.Event.Name,

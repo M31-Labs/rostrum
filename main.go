@@ -19,22 +19,24 @@ import (
 	"strings"
 	"time"
 
+	organizerportal "github.com/m31-labs/rostrum/app/organizer/portal"
 	"github.com/m31-labs/rostrum/internal/appstate"
 	workspacearchive "github.com/m31-labs/rostrum/internal/archive"
 	"github.com/m31-labs/rostrum/internal/audit"
 	programcalendar "github.com/m31-labs/rostrum/internal/calendar"
 	delivery "github.com/m31-labs/rostrum/internal/communications"
-	"github.com/m31-labs/rostrum/internal/demomode"
 	"github.com/m31-labs/rostrum/internal/domain"
 	"github.com/m31-labs/rostrum/internal/identity"
 	"github.com/m31-labs/rostrum/internal/live"
 	"github.com/m31-labs/rostrum/internal/mail"
 	"github.com/m31-labs/rostrum/internal/present"
+	"github.com/m31-labs/rostrum/internal/previewmode"
 	"github.com/m31-labs/rostrum/internal/publicapi"
 	"github.com/m31-labs/rostrum/internal/ratelimit"
 	"github.com/m31-labs/rostrum/internal/store"
 	"github.com/m31-labs/rostrum/internal/token"
 	_ "github.com/m31-labs/rostrum/modules"
+	decisionrules "github.com/m31-labs/rostrum/rules"
 	"m31labs.dev/gosx"
 	"m31labs.dev/gosx/auth"
 	"m31labs.dev/gosx/controller"
@@ -70,9 +72,27 @@ func main() {
 		defaultDataPath = filepath.Join(root, "data", "rostrum.sqlite")
 	}
 	dataPath := getenv("DATA_PATH", defaultDataPath)
-	if strings.EqualFold(getenv("DEMO_MODE", "true"), "memory") {
-		dataPath = ":memory:"
+	uploadDir, err := resolveUploadDirectory(root, os.Getenv("UPLOAD_DIR"))
+	if err != nil {
+		log.Fatal(err)
 	}
+	organizerportal.ConfigureHeadshotApprovalValidator(func(completion domain.TaskCompletion) error {
+		file, _, err := openStoredUpload(uploadDir, completion.StoredPath)
+		if err != nil {
+			return err
+		}
+		defer file.Close()
+		prefix := make([]byte, 512)
+		count, err := file.Read(prefix)
+		if err != nil && !errors.Is(err, io.EOF) {
+			return err
+		}
+		contentType := http.DetectContentType(prefix[:count])
+		if !allowedHeadshotContentType(contentType) {
+			return fmt.Errorf("unsupported headshot content type %q", contentType)
+		}
+		return nil
+	})
 	port := getenv("PORT", "8080")
 	publicBase := getenv("PUBLIC_URL", "http://localhost:"+port)
 	// Release identity is deployment-owned rather than tied to the framework
@@ -81,28 +101,60 @@ func main() {
 	// build that is serving traffic.
 	rostrumVersion := getenv("ROSTRUM_VERSION", "dev")
 	appEnv := strings.ToLower(getenv("APP_ENV", "development"))
-	readOnlyDemo := demomode.Enabled()
-	if err := demomode.Validate(demomode.Config{
-		Mode:           getenv("APP_MODE", demomode.ModeLive),
-		Seed:           getenv("SEED", "demo"),
-		LegacyDemoMode: getenv("DEMO_MODE", "true"),
+	sessionSecret := getenv("SESSION_SECRET", developmentSessionSecret)
+	if err := validateRuntimePosture(publicBase, appEnv, dataPath, sessionSecret, os.Getenv("GOSX_STATIC_EXPORT")); err != nil {
+		log.Fatal(err)
+	}
+	if err := ratelimit.ValidateTrustedProxyCIDRs(os.Getenv("TRUSTED_PROXY_CIDRS")); err != nil {
+		log.Fatal(err)
+	}
+	initialWorkspace, err := loadInitialWorkspace(
+		root,
+		getenv("INITIAL_WORKSPACE", "fresh"),
+		os.Getenv("INITIAL_WORKSPACE_PATH"),
+		os.Getenv("INITIAL_WORKSPACE_SHA256"),
+		os.Getenv("INITIAL_WORKSPACE_SHA256_FILE"),
+		now,
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+	readOnlyPreview := previewmode.Enabled()
+	routingSource, err := loadRoutingPolicySource(
+		root,
+		os.Getenv("CFP_ROUTING_POLICY_PATH"),
+		os.Getenv("CFP_ROUTING_POLICY_SHA256"),
+		os.Getenv("CFP_ROUTING_POLICY_SHA256_FILE"),
+		readOnlyPreview,
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if len(routingSource) > 0 {
+		if err := decisionrules.ConfigureRoutingSource(routingSource); err != nil {
+			log.Fatal(err)
+		}
+	}
+	if _, err := decisionrules.Shared(); err != nil {
+		log.Fatal(err)
+	}
+	if err := previewmode.Validate(previewmode.Config{
+		Mode:           getenv("APP_MODE", previewmode.ModeLive),
+		TemplatePath:   initialWorkspace.TemplatePath,
+		ExpectedSHA256: initialWorkspace.ExpectedSHA256,
+		ChecksumFile:   initialWorkspace.ChecksumFile,
 		StoreDriver:    storeDriver,
 		DataPath:       dataPath,
 		RostrumVersion: rostrumVersion,
 	}); err != nil {
 		log.Fatal(err)
 	}
-	seedNow := now
-	if readOnlyDemo {
-		seedNow = demomode.SeedTime()
-	}
-	seed := selectSeed(getenv("SEED", "demo"), seedNow)
-	workspace, err := store.OpenConfigured(storeDriver, dataPath, getenv("DATABASE_URL", ""), seed)
+	workspace, err := store.OpenConfigured(storeDriver, dataPath, getenv("DATABASE_URL", ""), initialWorkspace.State)
 	if err != nil {
 		log.Fatal(err)
 	}
-	if readOnlyDemo {
-		if err := demomode.ValidateState(workspace.Snapshot(), seed); err != nil {
+	if readOnlyPreview {
+		if err := previewmode.ValidateState(workspace.Snapshot(), initialWorkspace.State); err != nil {
 			_ = workspace.Close()
 			log.Fatal(err)
 		}
@@ -115,7 +167,7 @@ func main() {
 		log.Fatal(err)
 	}
 	workspace = store.WithAudit(workspace, ledger)
-	if readOnlyDemo {
+	if readOnlyPreview {
 		workspace = store.ReadOnly(workspace)
 	}
 	defer func() {
@@ -125,27 +177,6 @@ func main() {
 	}()
 	appstate.Set(workspace)
 
-	sessionSecret := getenv("SESSION_SECRET", developmentSessionSecret)
-	// Organizer roles now live in the signed, encrypted session cookie, so the
-	// session secret is the sole trust anchor for organizer access. Refuse the
-	// default or a weak secret for any non-local PUBLIC_URL, independent of
-	// APP_ENV: a public instance started without APP_ENV=production must never
-	// boot with a forgeable cookie key that an attacker could use to mint an
-	// organizer session.
-	if !isLocalPublicURL(publicBase) && (sessionSecret == developmentSessionSecret || len(sessionSecret) < 32) {
-		log.Fatal("a non-local PUBLIC_URL requires a unique SESSION_SECRET of at least 32 characters")
-	}
-	if appEnv == "production" {
-		if sessionSecret == developmentSessionSecret || len(sessionSecret) < 32 {
-			log.Fatal("production requires a unique SESSION_SECRET of at least 32 characters")
-		}
-		if !strings.HasPrefix(publicBase, "https://") {
-			log.Fatal("production requires an https PUBLIC_URL")
-		}
-		if dataPath == ":memory:" {
-			log.Fatal("production cannot use DEMO_MODE=memory")
-		}
-	}
 	overHTTP := strings.HasPrefix(publicBase, "http://")
 	sessions, err := session.New(sessionSecret, session.Options{
 		Secure:        !overHTTP,
@@ -154,17 +185,20 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	if err := identity.ApplyPrincipalRoles(os.Getenv("PRINCIPAL_ROLES")); err != nil {
+		log.Fatal(err)
+	}
 
 	// Identity plane (see specs/identity-plane.md): one auth.Manager over the
 	// session manager above, with magic-link, OAuth, and WebAuthn sign-in
 	// wired on top. mailConfigured tracks whether a complete real transport
-	// (Resend/API or SMTP, not the demo outbox) is available, because the
+	// (Resend/API or SMTP, not the local outbox) is available, because the
 	// outbox has nowhere a
 	// self-hoster can read a link from — setup.go signs the browser in
 	// directly instead when it is false.
 	authManager := identity.New(sessions)
 	mailSender := mail.FromEnv()
-	if !readOnlyDemo {
+	if !readOnlyPreview {
 		startOutboxRunner(workspace, mailSender)
 	}
 	mailConfigured := mail.TransportConfigured()
@@ -188,9 +222,9 @@ func main() {
 		Origin: publicBase,
 		Store:  identity.DurableWebAuthnStore{},
 	})
-	if readOnlyDemo {
+	if readOnlyPreview {
 		// The break-glass setup path is an identity mutation and must not be
-		// reachable from a hosted demo, even when its workspace is empty.
+		// reachable from a hosted preview, even when its workspace is empty.
 		identity.SetSetup(nil)
 	} else {
 		identity.SetSetup(identity.NewSetup(authManager, magicLinks, mailConfigured, publicBase))
@@ -239,7 +273,7 @@ func main() {
 		)))
 		// File-router documents are mounted beneath server.App, so opt them into
 		// the GoSX navigation runtime explicitly at the document boundary.
-		ctx.AddHead(server.NavigationScript())
+		ctx.AddHead(server.NavigationScriptWithNonce(ctx.Nonce()))
 		configureRouteRuntime(ctx)
 		return rostrumRouteDocument(ctx, body)
 	})
@@ -257,15 +291,20 @@ func main() {
 	// Runtime assets self-negotiate br/gzip in server.serveRuntimeFile, and
 	// dynamic HTML is compressed at the CDN edge. Restore this call once the
 	// framework Write path honors the skip.
-	app.Use(securityHeaders(publicBase, navigationScriptCSPHash(), webAuthnScriptCSPHash()))
+	app.EnableSecurityPolicy(rostrumSecurityPolicy(publicBase, navigationScriptCSPHash(), webAuthnScriptCSPHash()))
+	app.Use(routeSecurityHeaders())
 	app.Use(clearStaleBrowserCache(publicBase))
 	app.Use(noCacheStaticCSS())
 	app.Use(sessions.Middleware)
+	// Cookie, passkey, and magic-link payloads can outlive a role change.
+	// Canonicalize organizer authority from the durable principal record on
+	// every request before auth.Current is populated.
+	app.Use(identity.ReconcileOrganizerSessions())
 	app.Use(authManager.Middleware)
-	app.Use(readOnlyDemoGate())
+	app.Use(readOnlyPreviewGate())
 	app.Use(organizerGate())
 	app.Use(bodyLimit())
-	app.Use(sessions.Protect)
+	app.Use(csrfProtection(sessions))
 	app.SetPublicDir(filepath.Join(root, "public"))
 	app.API("GET /api/health", func(ctx *server.Context) (any, error) {
 		ctx.CachePublic(30 * time.Second)
@@ -289,20 +328,21 @@ func main() {
 		return publicapi.Speakers(appstate.MustGet().Snapshot()), nil
 	})
 	// /live streams workspace activity events (new submissions, task uploads),
-	// so gate it to organizer-facing roles in live mode. The isolated demo
+	// so gate it to organizer-facing roles in live mode. An isolated preview
 	// explicitly uses the same read-only stream as an inspection surface.
 	app.Mount("/live", liveDashboardHandler())
 	app.Mount("/public-calendar/", http.HandlerFunc(publicCalendarDownload))
 	app.Mount("/calendar/", http.HandlerFunc(calendarDownload))
-	app.Mount("/portal-upload/", http.HandlerFunc(portalUpload(root)))
-	app.Mount("/portal-file/", http.HandlerFunc(portalFile(root)))
+	app.Mount("/portal-upload/", http.HandlerFunc(portalUpload(uploadDir)))
+	app.Mount("/portal-file/", http.HandlerFunc(portalFile(uploadDir)))
+	app.Mount("/public-headshot/", http.HandlerFunc(publicHeadshot(uploadDir)))
 	app.Mount("/organizer/export/submissions.csv", http.HandlerFunc(submissionsCSV))
 	app.Mount("/organizer/export/workspace.json", http.HandlerFunc(workspaceExport))
-	app.Mount("/organizer/export/archive.tar.gz", http.HandlerFunc(workspaceArchive(root, auditPath)))
-	app.Mount("/organizer/export/approved-uploads.zip", http.HandlerFunc(approvedUploadBundle(root)))
-	app.Mount("/organizer/import/workspace", http.HandlerFunc(workspaceImport(root, backupDirectory)))
+	app.Mount("/organizer/export/archive.tar.gz", http.HandlerFunc(workspaceArchive(uploadDir, auditPath)))
+	app.Mount("/organizer/export/approved-uploads.zip", http.HandlerFunc(approvedUploadBundle(uploadDir)))
+	app.Mount("/organizer/import/workspace", http.HandlerFunc(workspaceImport(uploadDir, backupDirectory)))
 	app.Mount("/favicon.ico", http.RedirectHandler("/favicon.svg", http.StatusTemporaryRedirect))
-	app.Mount("/demo/reset", resetDemo(root))
+	app.Mount("/workspace/reset", resetWorkspace(uploadDir))
 
 	// Identity plane routes. GET /auth/magic-link is the callback a clicked
 	// email link opens; POST /auth/magic-link is the sign-in form
@@ -472,40 +512,76 @@ func refreshBindings(events ...string) []hydrate.HubBinding {
 	return bindings
 }
 
-func securityHeaders(publicBase string, scriptHashes ...string) server.Middleware {
+func rostrumSecurityPolicy(publicBase string, scriptHashes ...string) server.SecurityPolicy {
 	// GoSX islands execute the framework's compiled WebAssembly VM. Authorize
 	// WebAssembly compilation without opening generic eval or inline scripts.
-	// scriptHashes carries the navigation runtime and the WebAuthn runtime
-	// (see webAuthnScriptCSPHash): both are framework-owned inline scripts,
-	// authorized by exact content hash, never by a blanket 'unsafe-inline'.
-	scriptPolicy := "script-src 'self' 'wasm-unsafe-eval'"
+	// A fresh request nonce lets the navigation runtime reload island scripts
+	// through normal script elements after soft navigation or a managed form
+	// response. The exact hashes remain as the nonce-free shared-cache fallback
+	// and for framework-owned scripts that do not receive the route nonce.
+	scriptPolicy := "script-src 'self' 'wasm-unsafe-eval' 'nonce-" + server.NoncePlaceholder + "'"
 	for _, hash := range scriptHashes {
 		if hash != "" {
 			scriptPolicy += " " + hash
 		}
 	}
-	base := "default-src 'self'; base-uri 'self'; object-src 'none'; " + scriptPolicy + "; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' ws: wss:; frame-src 'self' https://www.youtube-nocookie.com https://player.vimeo.com; form-action 'self'"
+	base := "default-src 'self'; base-uri 'self'; object-src 'none'; " + scriptPolicy + "; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' ws: wss:; frame-src 'self' https://www.youtube-nocookie.com https://player.vimeo.com; form-action 'self'; frame-ancestors 'none'"
 	secure := strings.HasPrefix(publicBase, "https://")
+	strictTransportSecurity := ""
+	if secure {
+		base += "; upgrade-insecure-requests"
+		strictTransportSecurity = "max-age=31536000; includeSubDomains"
+	}
+	return server.SecurityPolicy{
+		ContentSecurityPolicy:   base,
+		StrictTransportSecurity: strictTransportSecurity,
+		ReferrerPolicy:          "strict-origin-when-cross-origin",
+		PermissionsPolicy:       "camera=(), microphone=(), geolocation=(), payment=()",
+	}
+}
+
+func routeSecurityHeaders() server.Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			policy := base + "; " + frameAncestorsDirective(r.URL.Path)
-			if secure {
-				policy += "; upgrade-insecure-requests"
+			// The built-in GoSX policy is deliberately frame-deny by default.
+			// Only published public pages are embeddable; rewrite that one
+			// directive before the route writes its response.
+			if policy := w.Header().Get("Content-Security-Policy"); policy != "" {
+				policy = strings.Replace(policy, "frame-ancestors 'none'", frameAncestorsDirective(r.URL.Path), 1)
+				w.Header().Set("Content-Security-Policy", policy)
 			}
-			w.Header().Set("Content-Security-Policy", policy)
-			w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
-			w.Header().Set("X-Content-Type-Options", "nosniff")
-			w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()")
-			if readOnlyDemoMode() {
-				// The demo is a review surface, not a canonical public event
+			if readOnlyPreviewMode() {
+				// A preview is a review surface, not a canonical public event
 				// site. Keep search engines and archive crawlers from indexing
-				// its fictional back-of-house data.
+				// its back-of-house data.
 				w.Header().Set("X-Robots-Tag", "noindex, nofollow, noarchive")
 			}
-			if secure {
-				w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+			if readOnlyPreviewMode() && r.URL.Path == server.ClientEventsRoute {
+				// Browser diagnostics never mutate the workspace, but the outer
+				// preview gate rejects every POST by design. Treat this optional
+				// telemetry endpoint as a quiet no-op so observer sessions keep a
+				// clean console without widening the mutation allowlist.
+				w.WriteHeader(http.StatusNoContent)
+				return
 			}
 			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+func csrfProtection(manager *session.Manager) server.Middleware {
+	return func(next http.Handler) http.Handler {
+		protected := manager.Protect(next)
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == server.ClientEventsRoute {
+				// GoSX client events are bounded, rate-limited diagnostics, not a
+				// workspace mutation. The browser runtime sends them as JSON
+				// without a form token; allow the framework handler to validate
+				// and record them while every application action remains covered.
+				next.ServeHTTP(w, r)
+				return
+			}
+			protected.ServeHTTP(w, r)
 		})
 	}
 }
@@ -663,33 +739,33 @@ func bodyLimit() server.Middleware {
 	}
 }
 
-// readOnlyDemoMode is deliberately an explicit environment check. Startup
+// readOnlyPreviewMode is deliberately an explicit environment check. Startup
 // validation fails closed for an unknown APP_MODE, while request-level tests
 // and middleware keep the deployment boundary easy to audit.
-func readOnlyDemoMode() bool {
-	return demomode.Enabled()
+func readOnlyPreviewMode() bool {
+	return previewmode.Enabled()
 }
 
-// readOnlyDemoGate is the last defense before any route handler. In the
-// hosted demo every unsafe HTTP method is refused, and sensitive surfaces
+// readOnlyPreviewGate is the last defense before any route handler. In a
+// hosted preview every unsafe HTTP method is refused, and sensitive surfaces
 // that could otherwise issue a GET-side effect or reveal an identity/setup
 // flow are refused too. The store wrapper remains the authoritative backstop
 // for writes made by code paths that are added later.
-func readOnlyDemoGate() server.Middleware {
+func readOnlyPreviewGate() server.Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if !readOnlyDemoMode() {
+			if !readOnlyPreviewMode() {
 				next.ServeHTTP(w, r)
 				return
 			}
-			if ip := ratelimit.ClientIP(r); ip != "" && !readOnlyDemoIPLimiter.Allow(ip) {
+			if ip := ratelimit.ClientIP(r); ip != "" && !readOnlyPreviewIPLimiter.Allow(ip) {
 				w.Header().Set("Retry-After", "60")
-				http.Error(w, "demo rate limit exceeded", http.StatusTooManyRequests)
+				http.Error(w, "preview rate limit exceeded", http.StatusTooManyRequests)
 				return
 			}
-			if isMutationMethod(r.Method) || readOnlyDemoForbiddenPath(r.URL.Path) {
+			if isMutationMethod(r.Method) || readOnlyPreviewForbiddenPath(r.URL.Path) {
 				w.Header().Set("Cache-Control", "no-store")
-				http.Error(w, "read-only demo", http.StatusForbidden)
+				http.Error(w, "read-only preview", http.StatusForbidden)
 				return
 			}
 			next.ServeHTTP(w, r)
@@ -697,7 +773,7 @@ func readOnlyDemoGate() server.Middleware {
 	}
 }
 
-func readOnlyDemoForbiddenPath(path string) bool {
+func readOnlyPreviewForbiddenPath(path string) bool {
 	trimmed := strings.TrimSuffix(path, "/")
 	if trimmed == "" {
 		trimmed = "/"
@@ -708,7 +784,7 @@ func readOnlyDemoForbiddenPath(path string) bool {
 	if trimmed == "/setup" || strings.HasPrefix(trimmed, "/setup/") {
 		return true
 	}
-	if trimmed == "/demo/reset" {
+	if trimmed == "/workspace/reset" {
 		return true
 	}
 	if trimmed == "/organizer/import" || strings.HasPrefix(trimmed, "/organizer/import/") {
@@ -723,10 +799,10 @@ func readOnlyDemoForbiddenPath(path string) bool {
 // The hosted preview is intentionally small, but it is still an internet
 // facing process. Keep accidental crawlers or a single noisy client from
 // turning the anonymous read surface into an unbounded origin workload.
-var readOnlyDemoIPLimiter = ratelimit.NewTokenBucket(300, time.Minute)
+var readOnlyPreviewIPLimiter = ratelimit.NewTokenBucket(300, time.Minute)
 
 func liveDashboardHandler() http.Handler {
-	if readOnlyDemoMode() {
+	if readOnlyPreviewMode() {
 		return live.Dashboard
 	}
 	return identity.RequireAnyRole(identity.RoleOrganizer, identity.RoleChair, identity.RoleObserver)(live.Dashboard)
@@ -736,8 +812,8 @@ func liveDashboardHandler() http.Handler {
 // `/organizer` path in live mode (identity-plane spec AU-5). Anonymous or
 // under-privileged visitors get RequireAnyRole's usual response: a JSON
 // request gets 401, everything else redirects to /login with the original
-// path preserved. The isolated APP_MODE=demo deployment is the deliberate
-// exception: readOnlyDemoGate has already removed every unsafe path, so it
+// path preserved. The isolated APP_MODE=preview deployment is the deliberate
+// exception: readOnlyPreviewGate has already removed every unsafe path, so it
 // can expose the same workspace UI anonymously for inspection. This replaces
 // the deleted organizerContext, which trusted whoever a reverse proxy already
 // let reach `/organizer` -- the leak this gate closes.
@@ -768,12 +844,12 @@ func organizerGate() server.Middleware {
 		guarded := gate(next)
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if isOrganizerGatedPath(r.URL.Path) {
-				if readOnlyDemoMode() {
-					// The hosted demo is intentionally anonymous and inspect-only.
-					// readOnlyDemoGate catches the real app chain first; keep this
+				if readOnlyPreviewMode() {
+					// A hosted preview is intentionally anonymous and inspect-only.
+					// readOnlyPreviewGate catches the real app chain first; keep this
 					// guard here too so the organizer boundary is safe in isolation.
 					if isMutationMethod(r.Method) {
-						http.Error(w, "read-only demo", http.StatusForbidden)
+						http.Error(w, "read-only preview", http.StatusForbidden)
 						return
 					}
 					next.ServeHTTP(w, r)
@@ -862,6 +938,35 @@ func isLocalPublicURL(base string) bool {
 	default:
 		return false
 	}
+}
+
+// validateRuntimePosture applies production safeguards to every public
+// origin, even when an operator accidentally leaves APP_ENV at its
+// development default. Local build/prerender and developer loops retain their
+// explicit escape hatch; an internet-facing process never may use it.
+func validateRuntimePosture(publicBase, appEnv, dataPath, sessionSecret, staticExport string) error {
+	appEnv = strings.ToLower(strings.TrimSpace(appEnv))
+	if appEnv != "development" && appEnv != "production" {
+		return fmt.Errorf("APP_ENV must be development or production (got %q)", appEnv)
+	}
+	strict := appEnv == "production" || !isLocalPublicURL(publicBase)
+	if !strict {
+		return nil
+	}
+	if sessionSecret == developmentSessionSecret || len(sessionSecret) < 32 {
+		return fmt.Errorf("an internet-facing or production runtime requires a unique SESSION_SECRET of at least 32 characters")
+	}
+	parsed, err := url.Parse(strings.TrimSpace(publicBase))
+	if err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" {
+		return fmt.Errorf("an internet-facing or production runtime requires an https PUBLIC_URL")
+	}
+	if strings.TrimSpace(dataPath) == "" || dataPath == ":memory:" {
+		return fmt.Errorf("an internet-facing or production runtime requires durable DATA_PATH storage")
+	}
+	if strings.TrimSpace(staticExport) == "1" {
+		return fmt.Errorf("GOSX_STATIC_EXPORT is build-only and must be unset in an internet-facing or production runtime")
+	}
+	return nil
 }
 
 // magicLinkIPLimiter and magicLinkSessionLimiter throttle POST
@@ -988,20 +1093,197 @@ func webAuthnScriptCSPHash() string {
 	return "'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) + "'"
 }
 
-// selectSeed picks the initial workspace state from the SEED environment
-// variable: "demo" (the default) seeds the full polished demo dataset,
-// "fresh" seeds one placeholder event and one open call for proposals with
-// nothing else, and "empty" seeds only the event skeleton with no call for
-// proposals at all. An unrecognized value falls back to "demo".
-func selectSeed(mode string, now time.Time) domain.State {
-	switch strings.ToLower(strings.TrimSpace(mode)) {
-	case "fresh":
-		return domain.FreshState(now)
-	case "empty":
-		return domain.EmptyState(now)
-	default:
-		return domain.Seed(now)
+// loadInitialWorkspace resolves Rostrum's initial state. A self-host starts
+// with the small fresh workspace by default, may request an empty skeleton,
+// or may supply a raw domain.State JSON template. Template checksums cover the
+// exact bytes on disk so a deployment can pin what it intends to expose.
+type initialWorkspaceSource struct {
+	State          domain.State
+	TemplatePath   string
+	ExpectedSHA256 string
+	ChecksumFile   string
+}
+
+const maxRoutingPolicyBytes = 1 << 20
+
+// loadRoutingPolicySource resolves an optional operator-owned Arbiter routing
+// policy. The production default remains the generic embedded triage policy;
+// an external policy is explicit, size-bounded, regular-file-only, and can be
+// pinned over its exact bytes. Anonymous preview deployments require that pin
+// so a mutable policy cannot make their rendered traces drift from review.
+func loadRoutingPolicySource(root, configuredPath, checksum, configuredChecksumFile string, requireChecksum bool) ([]byte, error) {
+	configuredPath = strings.TrimSpace(configuredPath)
+	checksum = strings.TrimSpace(checksum)
+	configuredChecksumFile = strings.TrimSpace(configuredChecksumFile)
+	if checksum != "" && configuredChecksumFile != "" {
+		return nil, fmt.Errorf("CFP_ROUTING_POLICY_SHA256 and CFP_ROUTING_POLICY_SHA256_FILE are mutually exclusive")
 	}
+	if configuredPath == "" {
+		if checksum != "" || configuredChecksumFile != "" {
+			return nil, fmt.Errorf("routing policy checksum configuration requires CFP_ROUTING_POLICY_PATH")
+		}
+		return nil, nil
+	}
+	if requireChecksum && checksum == "" && configuredChecksumFile == "" {
+		return nil, fmt.Errorf("APP_MODE=preview requires a checksum for CFP_ROUTING_POLICY_PATH")
+	}
+
+	resolvedPath := configuredPath
+	if !filepath.IsAbs(resolvedPath) {
+		resolvedPath = filepath.Join(root, resolvedPath)
+	}
+	resolvedPath = filepath.Clean(resolvedPath)
+	info, err := os.Lstat(resolvedPath)
+	if err != nil {
+		return nil, fmt.Errorf("inspect CFP_ROUTING_POLICY_PATH %s: %w", resolvedPath, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("CFP_ROUTING_POLICY_PATH %s must be a regular non-symlink file", resolvedPath)
+	}
+	if info.Size() > maxRoutingPolicyBytes {
+		return nil, fmt.Errorf("CFP_ROUTING_POLICY_PATH %s exceeds the 1 MiB policy limit", resolvedPath)
+	}
+	raw, err := os.ReadFile(resolvedPath)
+	if err != nil {
+		return nil, fmt.Errorf("read CFP_ROUTING_POLICY_PATH %s: %w", resolvedPath, err)
+	}
+
+	if configuredChecksumFile != "" {
+		resolvedChecksumFile := configuredChecksumFile
+		if !filepath.IsAbs(resolvedChecksumFile) {
+			resolvedChecksumFile = filepath.Join(root, resolvedChecksumFile)
+		}
+		resolvedChecksumFile = filepath.Clean(resolvedChecksumFile)
+		expectedBytes, err := os.ReadFile(resolvedChecksumFile)
+		if err != nil {
+			return nil, fmt.Errorf("read CFP_ROUTING_POLICY_SHA256_FILE %s: %w", resolvedChecksumFile, err)
+		}
+		checksum = strings.TrimSpace(string(expectedBytes))
+	}
+	if checksum != "" {
+		expected, err := previewmode.ParseSHA256(checksum)
+		if err != nil {
+			return nil, fmt.Errorf("validate CFP routing policy checksum: %w", err)
+		}
+		actual := sha256.Sum256(raw)
+		if subtle.ConstantTimeCompare(actual[:], expected[:]) != 1 {
+			return nil, fmt.Errorf("CFP routing policy checksum does not match %s", resolvedPath)
+		}
+	}
+	return raw, nil
+}
+
+// resolveUploadDirectory centralizes the durable asset root used by uploads,
+// downloads, public approved media, archives, imports, and resets. Relative
+// values are resolved from the application root; dangerous broad roots are
+// rejected because reset intentionally removes files from this directory.
+func resolveUploadDirectory(root, configured string) (string, error) {
+	root, err := filepath.Abs(root)
+	if err != nil {
+		return "", fmt.Errorf("resolve application root: %w", err)
+	}
+	configured = strings.TrimSpace(configured)
+	if configured == "" {
+		configured = filepath.Join(root, "data", "uploads")
+	} else if !filepath.IsAbs(configured) {
+		configured = filepath.Join(root, configured)
+	}
+	uploadDir, err := filepath.Abs(configured)
+	if err != nil {
+		return "", fmt.Errorf("resolve UPLOAD_DIR: %w", err)
+	}
+	uploadDir = filepath.Clean(uploadDir)
+	volumeRoot := filepath.Clean(filepath.VolumeName(uploadDir) + string(filepath.Separator))
+	if uploadDir == volumeRoot || uploadDir == filepath.Clean(root) {
+		return "", fmt.Errorf("UPLOAD_DIR must name a dedicated directory, not %s", uploadDir)
+	}
+	return uploadDir, nil
+}
+
+func loadInitialWorkspace(root, selection, configuredPath, checksum, configuredChecksumFile string, now time.Time) (initialWorkspaceSource, error) {
+	selection = strings.ToLower(strings.TrimSpace(selection))
+	if selection == "" {
+		selection = "fresh"
+	}
+	var initial domain.State
+	switch selection {
+	case "fresh":
+		initial = domain.FreshState(now)
+	case "empty":
+		initial = domain.EmptyState(now)
+	default:
+		return initialWorkspaceSource{}, fmt.Errorf("INITIAL_WORKSPACE must be fresh or empty (got %q)", selection)
+	}
+
+	configuredPath = strings.TrimSpace(configuredPath)
+	checksum = strings.TrimSpace(checksum)
+	configuredChecksumFile = strings.TrimSpace(configuredChecksumFile)
+	if checksum != "" && configuredChecksumFile != "" {
+		return initialWorkspaceSource{}, fmt.Errorf("INITIAL_WORKSPACE_SHA256 and INITIAL_WORKSPACE_SHA256_FILE are mutually exclusive")
+	}
+	if configuredPath == "" {
+		if checksum != "" || configuredChecksumFile != "" {
+			return initialWorkspaceSource{}, fmt.Errorf("workspace checksum configuration requires INITIAL_WORKSPACE_PATH")
+		}
+		return initialWorkspaceSource{State: initial}, nil
+	}
+
+	resolvedPath := configuredPath
+	if !filepath.IsAbs(resolvedPath) {
+		resolvedPath = filepath.Join(root, resolvedPath)
+	}
+	resolvedPath = filepath.Clean(resolvedPath)
+	raw, err := os.ReadFile(resolvedPath)
+	if err != nil {
+		return initialWorkspaceSource{}, fmt.Errorf("read INITIAL_WORKSPACE_PATH %s: %w", resolvedPath, err)
+	}
+	resolvedChecksumFile := ""
+	if configuredChecksumFile != "" {
+		resolvedChecksumFile = configuredChecksumFile
+		if !filepath.IsAbs(resolvedChecksumFile) {
+			resolvedChecksumFile = filepath.Join(root, resolvedChecksumFile)
+		}
+		resolvedChecksumFile = filepath.Clean(resolvedChecksumFile)
+		expectedBytes, err := os.ReadFile(resolvedChecksumFile)
+		if err != nil {
+			return initialWorkspaceSource{}, fmt.Errorf("read INITIAL_WORKSPACE_SHA256_FILE %s: %w", resolvedChecksumFile, err)
+		}
+		checksum = strings.TrimSpace(string(expectedBytes))
+	}
+	if checksum != "" {
+		expected, err := previewmode.ParseSHA256(checksum)
+		if err != nil {
+			return initialWorkspaceSource{}, fmt.Errorf("validate initial workspace checksum: %w", err)
+		}
+		actual := sha256.Sum256(raw)
+		if subtle.ConstantTimeCompare(actual[:], expected[:]) != 1 {
+			return initialWorkspaceSource{}, fmt.Errorf("initial workspace checksum does not match %s", resolvedPath)
+		}
+	}
+
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&initial); err != nil {
+		return initialWorkspaceSource{}, fmt.Errorf("decode INITIAL_WORKSPACE_PATH %s: %w", resolvedPath, err)
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		if err == nil {
+			err = errors.New("multiple JSON values")
+		}
+		return initialWorkspaceSource{}, fmt.Errorf("decode INITIAL_WORKSPACE_PATH %s: trailing content: %w", resolvedPath, err)
+	}
+	if initial.SchemaVersion != domain.CurrentSchemaVersion {
+		return initialWorkspaceSource{}, fmt.Errorf("INITIAL_WORKSPACE_PATH schema %d is not supported; want %d", initial.SchemaVersion, domain.CurrentSchemaVersion)
+	}
+	if err := initial.Validate(); err != nil {
+		return initialWorkspaceSource{}, fmt.Errorf("validate INITIAL_WORKSPACE_PATH %s: %w", resolvedPath, err)
+	}
+	return initialWorkspaceSource{
+		State:          initial,
+		TemplatePath:   resolvedPath,
+		ExpectedSHA256: checksum,
+		ChecksumFile:   resolvedChecksumFile,
+	}, nil
 }
 
 // canExportSubmissions reports whether the request carries an organizer or
@@ -1096,7 +1378,7 @@ func workspaceExport(w http.ResponseWriter, r *http.Request) {
 // workspace envelope, every local upload, and the independent audit ledger.
 // Its archive is deliberately restoreable without a running Rostrum process;
 // see docs/deployment.md for the stopped-process recovery procedure.
-func workspaceArchive(root, auditPath string) http.HandlerFunc {
+func workspaceArchive(uploadDir, auditPath string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -1123,7 +1405,7 @@ func workspaceArchive(root, auditPath string) http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/gzip")
 		w.Header().Set("Content-Disposition", `attachment; filename="rostrum-archive.tar.gz"`)
 		w.Header().Set("Cache-Control", "private, no-store")
-		if err := workspacearchive.WriteTarGZ(w, state, filepath.Join(root, "data", "uploads"), auditPath); err != nil {
+		if err := workspacearchive.WriteTarGZ(w, state, uploadDir, auditPath); err != nil {
 			// The response may already have started, so preserve its valid stream
 			// prefix and log the operational detail instead of attempting a second
 			// incompatible HTTP response.
@@ -1137,7 +1419,7 @@ func workspaceArchive(root, auditPath string) http.HandlerFunc {
 // privacy-sensitive exports, authorization is checked here rather than
 // delegated to organizerGate so a cookie-less request receives 403 and never
 // an authentication redirect that might expose route behavior.
-func approvedUploadBundle(root string) http.HandlerFunc {
+func approvedUploadBundle(uploadDir string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -1148,7 +1430,7 @@ func approvedUploadBundle(root string) http.HandlerFunc {
 			return
 		}
 		state := appstate.MustGet().Snapshot()
-		bundle, err := workspacearchive.BuildApprovedUploadBundle(state, filepath.Join(root, "data", "uploads"))
+		bundle, err := workspacearchive.BuildApprovedUploadBundle(state, uploadDir)
 		if err != nil {
 			log.Printf("build approved upload bundle: %v", err)
 			http.Error(w, "could not build approved upload bundle", http.StatusConflict)
@@ -1176,7 +1458,7 @@ func approvedUploadBundle(root string) http.HandlerFunc {
 // halfway through an HTTP request. Before this JSON-only restore changes any
 // state, it validates the whole envelope and writes the current state to a
 // durable, retention-managed backup.
-func workspaceImport(root, backupDirectory string) http.HandlerFunc {
+func workspaceImport(uploadDir, backupDirectory string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -1221,7 +1503,7 @@ func workspaceImport(root, backupDirectory string) http.HandlerFunc {
 
 		current := appstate.MustGet().Snapshot()
 		next := workspacearchive.PreserveCurrentIdentity(current, imported)
-		next, err = workspacearchive.RebaseUploadPaths(next, filepath.Join(root, "data", "uploads"))
+		next, err = workspacearchive.RebaseUploadPaths(next, uploadDir)
 		if err != nil {
 			writeMutationError(w, r, http.StatusBadRequest, "Workspace import was rejected: "+err.Error())
 			return
@@ -1345,7 +1627,7 @@ func calendarDownload(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(data)
 }
 
-func portalUpload(root string) http.HandlerFunc {
+func portalUpload(uploadDir string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -1420,7 +1702,6 @@ func portalUpload(root string) http.HandlerFunc {
 			}
 			source = io.MultiReader(bytes.NewReader(prefix[:count]), file)
 		}
-		uploadDir := filepath.Join(root, "data", "uploads")
 		if err := os.MkdirAll(uploadDir, 0o750); err != nil {
 			writeMutationError(w, r, http.StatusInternalServerError, "Could not prepare upload storage.")
 			return
@@ -1513,13 +1794,7 @@ func portalUpload(root string) http.HandlerFunc {
 		// private upload only when it is a safe, unreferenced file inside this
 		// workspace's upload directory; a failed cleanup must not turn a
 		// successful submission into an error.
-		removeSupersededUpload(root, supersededPath, filepath.ToSlash(storedPath))
-		if present.IsHeadshotTask(*task) {
-			// A re-upload returns the completion to submitted. Remove any
-			// previously published image immediately so an old approved
-			// headshot cannot remain directly reachable while review is pending.
-			removePublicHeadshots(root, speakerID)
-		}
+		removeSupersededUpload(uploadDir, supersededPath, filepath.ToSlash(storedPath))
 		session.AddFlash(r, "notice", "File uploaded and submitted for review.")
 		live.Broadcast("task:uploaded", map[string]string{"speaker": speakerID, "task": taskID})
 		writeMutationSuccess(w, r, "File uploaded and submitted for review.", "/portal/"+speakerID+"#tasks")
@@ -1529,21 +1804,21 @@ func portalUpload(root string) http.HandlerFunc {
 // removeSupersededUpload removes a prior private upload after a successful
 // replacement. Imported or hand-edited state may contain arbitrary paths, so
 // both paths are normalized and constrained to the direct children of the
-// real data/uploads directory. The current state is checked first so a file
+// configured upload directory. The current state is checked first so a file
 // shared by another completion is retained. Filesystem cleanup is deliberately
 // best effort: the state transaction is already committed and must remain
 // successful even if a file is locked or disappears concurrently.
-func removeSupersededUpload(root, previousPath, replacementPath string) {
-	previous, ok := privateUploadPath(root, previousPath)
+func removeSupersededUpload(uploadDir, previousPath, replacementPath string) {
+	previous, ok := privateUploadPath(uploadDir, previousPath)
 	if !ok {
 		return
 	}
-	replacement, ok := privateUploadPath(root, replacementPath)
+	replacement, ok := privateUploadPath(uploadDir, replacementPath)
 	if !ok || filepath.Clean(previous) == filepath.Clean(replacement) {
 		return
 	}
 	for _, completion := range appstate.MustGet().Snapshot().TaskCompletions {
-		path, referenced := privateUploadPath(root, completion.StoredPath)
+		path, referenced := privateUploadPath(uploadDir, completion.StoredPath)
 		if referenced && filepath.Clean(path) == filepath.Clean(previous) {
 			return
 		}
@@ -1566,15 +1841,15 @@ func removeSupersededUpload(root, previousPath, replacementPath string) {
 }
 
 // privateUploadPath accepts only an absolute path to a direct file beneath
-// data/uploads. Resolving the directory and its parent prevents a symlinked
+// the configured upload directory. Resolving the directory and its parent prevents a symlinked
 // uploads directory or nested symlink path from turning cleanup into an
 // arbitrary filesystem delete. Current portal uploads are absolute paths, so
 // relative legacy/import paths are intentionally rejected rather than guessed.
-func privateUploadPath(root, storedPath string) (string, bool) {
+func privateUploadPath(uploadDir, storedPath string) (string, bool) {
 	if strings.TrimSpace(storedPath) == "" {
 		return "", false
 	}
-	uploadDir, err := filepath.Abs(filepath.Join(root, "data", "uploads"))
+	uploadDir, err := filepath.Abs(uploadDir)
 	if err != nil {
 		return "", false
 	}
@@ -1599,6 +1874,34 @@ func privateUploadPath(root, storedPath string) (string, bool) {
 		return "", false
 	}
 	return filepath.Join(parent, filepath.Base(candidate)), true
+}
+
+func openStoredUpload(uploadDir, storedPath string) (*os.File, os.FileInfo, error) {
+	path, ok := privateUploadPath(uploadDir, storedPath)
+	if !ok {
+		return nil, nil, errors.New("stored upload resolves outside UPLOAD_DIR")
+	}
+	before, err := os.Lstat(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	if before.Mode()&os.ModeSymlink != 0 || !before.Mode().IsRegular() {
+		return nil, nil, errors.New("stored upload is not a regular file")
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	after, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return nil, nil, err
+	}
+	if !after.Mode().IsRegular() || !os.SameFile(before, after) {
+		_ = file.Close()
+		return nil, nil, errors.New("stored upload changed while opening")
+	}
+	return file, after, nil
 }
 
 func uploadActor(r *http.Request, speakerID string) string {
@@ -1699,7 +2002,7 @@ func sanitizeDownloadFilename(name string) string {
 // each stored TaskCompletion; the byte that reaches the filesystem is always
 // completion.StoredPath, a value this process itself wrote in portalUpload,
 // and even that is re-validated with filepath.Rel to stay inside
-// data/uploads before opening.
+// UPLOAD_DIR before opening.
 //
 // Authorization: the requester must either be the speaker who owns the
 // completion (the portalSpeakerSessionKey session binding PT-2 sets in
@@ -1710,8 +2013,7 @@ func sanitizeDownloadFilename(name string) string {
 // stranger cannot use the response to enumerate valid completion IDs
 // (mirrors loadPortal's identical treatment of unknown-speaker vs.
 // missing-key in app/portal/page.server.go).
-func portalFile(root string) http.HandlerFunc {
-	uploadDir := filepath.Join(root, "data", "uploads")
+func portalFile(uploadDir string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -1744,49 +2046,97 @@ func portalFile(root string) http.HandlerFunc {
 			return
 		}
 
-		storedPath := filepath.FromSlash(completion.StoredPath)
-		rel, err := filepath.Rel(uploadDir, storedPath)
-		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
-			log.Printf("portal-file: completion %s stored path resolves outside data/uploads; refusing to serve", completionID)
-			http.NotFound(w, r)
-			return
-		}
-
-		file, err := os.Open(storedPath)
+		file, info, err := openStoredUpload(uploadDir, completion.StoredPath)
 		if err != nil {
 			http.NotFound(w, r)
 			return
 		}
 		defer file.Close()
-		info, err := file.Stat()
-		if err != nil {
-			http.Error(w, "could not read upload", http.StatusInternalServerError)
-			return
-		}
 
 		w.Header().Set("Content-Type", downloadContentType(completion.ContentType))
+		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Content-Disposition", `attachment; filename="`+sanitizeDownloadFilename(completion.FileName)+`"`)
 		w.Header().Set("Cache-Control", "private, no-store")
 		http.ServeContent(w, r, "", info.ModTime(), file)
 	}
 }
 
-func resetDemo(root string) http.HandlerFunc {
+// publicHeadshot serves only organizer-approved headshot completions. The
+// route reads the original durable upload through the same containment checks
+// as private downloads, avoiding a second static copy that could drift from
+// workspace approval state.
+func publicHeadshot(uploadDir string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		speakerID := strings.TrimPrefix(r.URL.Path, "/public-headshot/")
+		if speakerID == "" || strings.ContainsAny(speakerID, "/\\") {
+			http.NotFound(w, r)
+			return
+		}
+
+		state := appstate.MustGet().Snapshot()
+		completion, found := state.ApprovedHeadshot(speakerID)
+		if !found {
+			http.NotFound(w, r)
+			return
+		}
+
+		file, info, err := openStoredUpload(uploadDir, completion.StoredPath)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		defer file.Close()
+		prefix := make([]byte, 512)
+		count, err := file.Read(prefix)
+		if err != nil && !errors.Is(err, io.EOF) {
+			http.NotFound(w, r)
+			return
+		}
+		contentType := http.DetectContentType(prefix[:count])
+		if !allowedHeadshotContentType(contentType) {
+			http.NotFound(w, r)
+			return
+		}
+		if _, err := file.Seek(0, io.SeekStart); err != nil {
+			http.NotFound(w, r)
+			return
+		}
+
+		w.Header().Set("Content-Type", contentType)
+		w.Header().Set("Content-Disposition", `inline; filename="`+sanitizeDownloadFilename(completion.FileName)+`"`)
+		// The URL is stable while approval is revocable. Require every cache to
+		// revalidate so a re-upload or declined approval becomes unavailable at
+		// the public boundary immediately rather than after a stale max-age.
+		w.Header().Set("Cache-Control", "public, no-cache, must-revalidate")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		http.ServeContent(w, r, completion.FileName, info.ModTime(), file)
+	}
+}
+
+func resetWorkspace(uploadDir string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
+		// Reset is always an organizer/chair action. RESET_SECRET, when set, is
+		// an additional confirmation factor for a deliberately enabled reset;
+		// it is never a substitute for an authenticated mutating role.
+		if !canMutateWorkspace(r) {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
 		// Reset wipes the workspace, so it must not be reachable by any
 		// visitor who merely holds a session CSRF token (SE-8/M2). Require a
 		// shared secret when RESET_SECRET is configured; refuse entirely in
-		// production when none is set, so a deployed demo cannot be wiped out
-		// from under a judge.
+		// production when none is set, so a deployed workspace cannot be wiped
+		// unexpectedly.
 		if secret := strings.TrimSpace(getenv("RESET_SECRET", "")); secret != "" {
-			provided := r.URL.Query().Get("secret")
-			if provided == "" {
-				provided = r.FormValue("secret")
-			}
+			provided := r.PostFormValue("secret")
 			if subtle.ConstantTimeCompare([]byte(provided), []byte(secret)) != 1 {
 				http.NotFound(w, r)
 				return
@@ -1804,20 +2154,19 @@ func resetDemo(root string) http.HandlerFunc {
 		// uploaded file (main.go's portalUpload) would survive a reset with
 		// no TaskCompletion left pointing at it -- an orphaned file outliving
 		// the workspace that thinks it discarded it.
-		clearUploads(root)
-		session.AddFlash(r, "notice", "Workspace restored to the polished demo baseline.")
+		clearUploads(uploadDir)
+		session.AddFlash(r, "notice", "Workspace restored to its initial template.")
 		live.Broadcast("workspace:reset", map[string]any{"at": time.Now().UTC()})
-		writeMutationSuccess(w, r, "Workspace restored to the polished demo baseline.", "/organizer")
+		writeMutationSuccess(w, r, "Workspace restored to its initial template.", "/organizer")
 	}
 }
 
-// clearUploads removes every file under data/uploads so a workspace reset
+// clearUploads removes every file under the configured upload directory so a workspace reset
 // (SE-8/M6) discards speaker-uploaded artifacts along with the state that
 // referenced them. A missing uploads directory is not an error -- a
 // workspace nobody has uploaded to yet has none -- and a single file that
 // resists removal is logged and skipped rather than failing the reset.
-func clearUploads(root string) {
-	uploadDir := filepath.Join(root, "data", "uploads")
+func clearUploads(uploadDir string) {
 	entries, err := os.ReadDir(uploadDir)
 	if err != nil {
 		if !os.IsNotExist(err) {
@@ -1831,23 +2180,6 @@ func clearUploads(root string) {
 		}
 		if err := os.Remove(filepath.Join(uploadDir, entry.Name())); err != nil {
 			log.Printf("reset: could not remove upload %s: %v", entry.Name(), err)
-		}
-	}
-}
-
-// removePublicHeadshots removes every supported public variant for a speaker.
-// It is used when a speaker replaces an already-approved headshot: the new
-// completion must wait for approval, so the old image may not remain publicly
-// reachable merely because its deterministic static path is still on disk.
-func removePublicHeadshots(root, speakerID string) {
-	if speakerID == "" {
-		return
-	}
-	dir := filepath.Join(root, "public", "headshots")
-	for _, extension := range []string{".png", ".jpg", ".jpeg", ".webp"} {
-		path := filepath.Join(dir, speakerID+extension)
-		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-			log.Printf("portal upload: remove stale public headshot %s: %v", path, err)
 		}
 	}
 }

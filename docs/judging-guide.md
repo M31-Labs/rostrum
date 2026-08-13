@@ -1,6 +1,6 @@
 ---
 description: A verified local fast path, five-minute demo script, persona walkthroughs, and evidence matrix for Rostrum.
-nav_order: "02 / 07"
+nav_order: "02 / 08"
 eyebrow: Evaluate the complete product
 ---
 
@@ -17,7 +17,7 @@ the repository evidence lives.
 | Path | Use it for | Do not expect |
 | --- | --- | --- |
 | Local judge demo | Deterministic, smoke-verified visual and persona inspection | Mutations; it deliberately reproduces the hosted read-only posture |
-| Local interactive run | Complete workflow, mutations, signed-link journeys, reset, exports | Real provider delivery without credentials |
+| Fresh interactive run | Organizer bootstrap and mutation testing from a clean starter CFP | Fictional proposals, people, reviews, or schedule records |
 | Hosted preview | Visual inspection of a known fictional workspace after preflight | Sign-in, submission, upload, import/export, reset, or any mutation |
 
 ### Local judge demo (recommended first)
@@ -37,16 +37,15 @@ prints the canonical routes. Open `/tour` first. Its reviewer and speaker stops
 carry signed persona links generated for that disposable, independently
 read-only fixture.
 
-### Local interactive run (recommended)
+### Fresh interactive run
 
-Requirements: Go 1.26 or newer. No database, Node toolchain, or provider
-credential is required.
+Requirements: Go 1.26 or newer and Make. No database, Node toolchain, or
+provider credential is required.
 
 ```bash
 git clone https://github.com/M31-Labs/rostrum.git
 cd rostrum
-cp .env.example .env
-DEMO_MODE=memory go run .
+APP_MODE=live make dev
 ```
 
 The process prints:
@@ -58,22 +57,25 @@ Rostrum listening on http://localhost:8080 (data: :memory:)
 
 Open the complete setup URL from the terminal. Enter a name and email address.
 Rostrum creates the first `organizer` principal, consumes the token, and signs
-that browser in. The token is single-use. Once an organizer exists, restarting
-does not expose another break-glass setup link for that persisted workspace.
+that browser in. The token is single-use. This command deliberately uses
+in-memory storage, so stopping it discards the workspace and a later clean run
+can bootstrap again. A durable self-host does not re-arm setup after its first
+organizer is stored.
 
 Useful routes:
 
 - Product tour: <http://localhost:8080/tour>
 - Workspace: <http://localhost:8080/organizer>
-- CFP: <http://localhost:8080/submit/systems-forum-cfp>
+- Starter CFP: <http://localhost:8080/submit/call-for-proposals>
 - Agenda board: <http://localhost:8080/organizer/agenda>
-- Public agenda: <http://localhost:8080/public/m31-systems-forum-2026/agenda>
-- Speakers: <http://localhost:8080/public/m31-systems-forum-2026/speakers>
-- Public calendar: <http://localhost:8080/public-calendar/m31-systems-forum-2026.ics>
+- Public agenda: <http://localhost:8080/public/your-event/agenda>
+- Speakers: <http://localhost:8080/public/your-event/speakers>
+- Public calendar: <http://localhost:8080/public-calendar/your-event.ics>
 - API directory: <http://localhost:8080/api/v1/workspace>
 
-Use plain `go run .` instead when you want the seed and subsequent changes to
-persist in `data/rostrum.json`.
+The starter has no fictional activity. Create controlled records through the
+organizer and public flows, or follow the [self-hosting manual](self-hosting.md)
+when you want those changes to persist.
 
 ### Hosted preview preflight
 
@@ -103,7 +105,8 @@ build.
 
 ## Five-minute demo script
 
-This sequence works in a seeded local run and keeps the narrative focused.
+This sequence uses the fictional read-only example launched by
+`make judge-demo` and keeps the narrative focused.
 
 ### 0:00–0:40 — The promise
 
@@ -118,8 +121,8 @@ agenda, and it keeps governed decisions explainable.
 ### 0:40–1:25 — Intake that explains itself
 
 Open **Forms & routing**, then the public CFP. Choose `Workshop` and show the
-conditional logistics question. Return to a seeded submission and show its
-queue, owner, track, fired rule, and readable trace.
+conditional logistics question. Return to a fictional example submission and
+show its queue, owner, track, fired rule, and readable trace.
 
 **Claim to make:** form visibility and proposal routing are policy-backed and
 server-validated; the interface does not hide why a proposal went somewhere.
@@ -135,10 +138,11 @@ auditable. Do not claim automated or model-generated scoring.
 
 ### 2:10–3:10 — Scheduling with a publication gate
 
-Open **Agenda**. Show the unscheduled bank, alternate views, and the seeded
-speaker/room conflict explanation. Move a session by drag or keyboard. Attempt
-to publish while a hard conflict exists, then explain that warnings remain
-visible but hard collisions block publication.
+Open **Agenda**. Show the unscheduled bank, alternate views, and the fictional
+speaker/room conflict explanation. The preview deliberately omits drag,
+keyboard-move, and publish controls; point to the visible conflict inspector
+and explain that the fresh live path exposes those controls while hard
+collisions still block publication.
 
 **Claim to make:** the agenda protects the public schedule from known hard
 conflicts while preserving an organizer-readable reason.
@@ -166,16 +170,16 @@ draft sessions and private proposal/review data stay behind the boundary.
 
 | Persona | Start here | What to verify |
 | --- | --- | --- |
-| Organizer | `/setup?token=…`, then `/organizer` | Full workspace, forms, status decisions, agenda, tasks, communications, settings |
-| Chair | Existing chair principal in the seed/workspace | Governed final decisions and sensitive organizer exports |
-| Observer | Existing observer principal | Organizer-facing inspection without mutations or PII export |
+| Live organizer | `/setup?token=…`, then `/organizer` in the fresh live run | Full workspace, forms, status decisions, agenda, tasks, communications, settings |
+| Preview observer | `/organizer` in the evaluation preview | Anonymous organizer-facing inspection without mutations or PII export |
+| Chair workflow | **Review** in the example; a real chair role in live | Governed final-decision and override evidence; sensitive export remains role-gated |
 | Reviewer | Signed URL copied from `/organizer/review` | Only that reviewer's assignments and attributed rubric submission |
 | Speaker | Signed portal URL created by submission/invitation | Own profile, tasks, uploads, resources, and calendar |
 | Attendee | `/public/{slug}/agenda` | Published schedule, speaker gallery, device-local itinerary |
 | Operator | `docs/deployment.md` | Immutable version, storage, secrets, proxy, health, recovery evidence |
 
 The anonymous hosted preview bypasses organizer sign-in only inside
-`APP_MODE=demo`; a store-level read-only wrapper and route gate still reject
+`APP_MODE=preview`; a store-level read-only wrapper and route gate still reject
 mutations and sensitive operations.
 
 ## Capability and evidence matrix
@@ -183,7 +187,7 @@ mutations and sensitive operations.
 | Capability | Demonstration | Repository evidence | Boundary |
 | --- | --- | --- | --- |
 | CFP schema and conditional visibility | `/submit/systems-forum-cfp`, `/organizer/forms` | [`app/submit/page_server_test.go`](https://github.com/M31-Labs/rostrum/blob/main/app/submit/page_server_test.go), [`app/organizer/forms/page_server_test.go`](https://github.com/M31-Labs/rostrum/blob/main/app/organizer/forms/page_server_test.go), [`rules/form-visibility.arb`](https://github.com/M31-Labs/rostrum/blob/main/rules/form-visibility.arb) | Conditions are constrained `equals` → `show` rules, not arbitrary scripts |
-| Governed routing | Seeded submission detail | [`rules/cfp-routing.arb`](https://github.com/M31-Labs/rostrum/blob/main/rules/cfp-routing.arb), [`rules/engine_test.go`](https://github.com/M31-Labs/rostrum/blob/main/rules/engine_test.go) | New categories use the policy fallback until a rule is added |
+| Governed routing | Fictional example submission detail | [`examples/demo/rules/cfp-routing.arb`](https://github.com/M31-Labs/rostrum/blob/main/examples/demo/rules/cfp-routing.arb), [`rules/engine.go`](https://github.com/M31-Labs/rostrum/blob/main/rules/engine.go) | Core defaults to unassigned program triage; the example loads its fictional category policy by an exact SHA-256 pin |
 | Human review | `/organizer/review`, signed `/review/{token}` | [`app/organizer/review/management_test.go`](https://github.com/M31-Labs/rostrum/blob/main/app/organizer/review/management_test.go), [`app/review/review_server_test.go`](https://github.com/M31-Labs/rostrum/blob/main/app/review/review_server_test.go), [`rules/review-governance.arb`](https://github.com/M31-Labs/rostrum/blob/main/rules/review-governance.arb) | Human evaluations alone drive coverage/aggregates; no automated scoring claim |
 | Conflict-aware agenda | `/organizer/agenda` | [`app/organizer/agenda/page_server_test.go`](https://github.com/M31-Labs/rostrum/blob/main/app/organizer/agenda/page_server_test.go), [`internal/domain/conflicts_test.go`](https://github.com/M31-Labs/rostrum/blob/main/internal/domain/conflicts_test.go), [`rules/schedule-conflicts.arb`](https://github.com/M31-Labs/rostrum/blob/main/rules/schedule-conflicts.arb) | Hard speaker/room conflicts block publish; warnings inform |
 | Speaker tasks and uploads | `/organizer/portal`, signed `/portal/{speaker}` | [`app/organizer/portal/page_server_test.go`](https://github.com/M31-Labs/rostrum/blob/main/app/organizer/portal/page_server_test.go), [`app/portal/page_server_test.go`](https://github.com/M31-Labs/rostrum/blob/main/app/portal/page_server_test.go), [`internal/archive/approved_uploads_test.go`](https://github.com/M31-Labs/rostrum/blob/main/internal/archive/approved_uploads_test.go) | 10 MiB app limit, allow-listed file types, private storage and downloads |
@@ -194,8 +198,8 @@ mutations and sensitive operations.
 | Storage portability | Select `json`, `sqlite`, or `postgres` | [`internal/store/json_test.go`](https://github.com/M31-Labs/rostrum/blob/main/internal/store/json_test.go), [`internal/store/sql_test.go`](https://github.com/M31-Labs/rostrum/blob/main/internal/store/sql_test.go) | Exact external database endpoint still needs acceptance testing |
 | Export and recovery | Settings export/import/archive | [`internal/archive/workspace_test.go`](https://github.com/M31-Labs/rostrum/blob/main/internal/archive/workspace_test.go), [`main_test.go`](https://github.com/M31-Labs/rostrum/blob/main/main_test.go) | Full upload recovery is a stopped-process procedure |
 | Independent audit ledger | Mutate, then inspect configured ledger | [`internal/audit/log_test.go`](https://github.com/M31-Labs/rostrum/blob/main/internal/audit/log_test.go), [`internal/store/audit_test.go`](https://github.com/M31-Labs/rostrum/blob/main/internal/store/audit_test.go) | State commit precedes ledger append; not a cross-store transaction |
-| Read-only hosted posture | Correctly configured preview | [`internal/demomode/config_test.go`](https://github.com/M31-Labs/rostrum/blob/main/internal/demomode/config_test.go), [`internal/store/readonly_test.go`](https://github.com/M31-Labs/rostrum/blob/main/internal/store/readonly_test.go), [`main_test.go`](https://github.com/M31-Labs/rostrum/blob/main/main_test.go) | A deployment preflight is still required |
-| Release and demo gates | `make release-check` | [`cmd/sizecheck/main.go`](https://github.com/M31-Labs/rostrum/blob/main/cmd/sizecheck/main.go), [`scripts/smoke.sh`](https://github.com/M31-Labs/rostrum/blob/main/scripts/smoke.sh) | Performance budget measurement is a separate operator run |
+| Read-only hosted posture | Correctly configured preview | [`internal/previewmode/config_test.go`](https://github.com/M31-Labs/rostrum/blob/main/internal/previewmode/config_test.go), [`internal/store/readonly_test.go`](https://github.com/M31-Labs/rostrum/blob/main/internal/store/readonly_test.go), [`preview_observer_contract_test.go`](https://github.com/M31-Labs/rostrum/blob/main/preview_observer_contract_test.go) | A deployment preflight is still required |
+| Release and example gates | `make release-check` | [`cmd/sizecheck/main.go`](https://github.com/M31-Labs/rostrum/blob/main/cmd/sizecheck/main.go), [`examples/demo/smoke.sh`](https://github.com/M31-Labs/rostrum/blob/main/examples/demo/smoke.sh) | Performance budget measurement is a separate operator run |
 
 ## Verification commands
 
@@ -212,11 +216,12 @@ make judge-demo
 ```
 
 `make check` covers formatting, policy validation, `go vet`, unit tests, and
-race tests. `make smoke` boots a temporary deterministic `APP_MODE=demo`
-process and checks organizer/persona/public/embed/API/calendar routes, seeded
-counts, no-index headers, and mutation refusal. `make size-budget` builds the
-production bundle and checks committed route/runtime limits. `make judge-demo`
-launches that same read-only fixture only after the contract passes.
+race tests. `make smoke` prepares the fictional fixture outside core, boots a
+temporary deterministic `APP_MODE=preview` process, and checks
+organizer/persona/public/embed/API/calendar routes, expected counts, no-index
+headers, and mutation refusal. `make size-budget` builds the production bundle
+and checks committed route/runtime limits. `make judge-demo` launches that same
+read-only example only after the contract passes.
 
 ## Known evaluation boundaries
 

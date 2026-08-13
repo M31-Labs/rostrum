@@ -30,12 +30,15 @@ func testWorkspaceState() domain.State {
 			ID: "evt_test", Name: "Test Forum", Slug: "test-forum",
 			StartsAt: now, EndsAt: now.Add(96 * time.Hour),
 		},
+		Forms: []domain.SubmissionForm{{
+			ID: "form_test", EventID: "evt_test", Name: "Test CFP", Slug: "test-cfp", Status: "open",
+		}},
 		Speakers: []domain.Speaker{
 			{ID: "spk_ada", FirstName: "Ada", LastName: "Lovelace", Email: "ada@example.com"},
 		},
 		Submissions: []domain.Submission{
 			{
-				ID: "sub_ada", EventID: "evt_test", Title: "Engines and Analysis",
+				ID: "sub_ada", EventID: "evt_test", FormID: "form_test", Title: "Engines and Analysis",
 				SpeakerIDs: []string{"spk_ada"}, Status: domain.SubmissionPending,
 			},
 		},
@@ -72,7 +75,7 @@ func testWorkspaceState() domain.State {
 
 // TestAcceptingASubmissionSendsAnAcceptanceInviteWithCalendar proves
 // accepting a submission does more than queue a Communication row: it
-// actually sends the acceptance message -- through the demo OutboxSender
+// actually records the acceptance message through the local OutboxSender
 // here, since the test process sets no SMTP_HOST -- with the session's
 // calendar invite attached as the message's Calendar field, and records
 // the real outcome ("sent", a stamped SentAt) back onto that row.

@@ -11,25 +11,30 @@ func Page() Node {
 				</p>
 			</div>
 			<div class="workspace-header-actions">
-				<ActionForm actionName="dryRun">
-					<input type="hidden" name="csrf_token" value={csrf.token}></input>
-					<p class="form-status" role="status" aria-live="polite">{action.message}</p>
-					<button class="button" type="submit">Run Accelevents dry run</button>
-				</ActionForm>
-				<If cond={data.integration.configured}>
-					<ActionForm actionName="liveSync">
+				<If cond={!data.workspace.readOnlyPreview}>
+					<ActionForm actionName="dryRun">
 						<input type="hidden" name="csrf_token" value={csrf.token}></input>
-						<p class="form-status" role="alert" aria-live="assertive">{actions.liveSync.message}</p>
-						<button class="button button-primary" type="submit">Publish to Accelevents</button>
+						<p class="form-status" role="status" aria-live="polite">{action.message}</p>
+						<button class="button" type="submit">Run Accelevents dry run</button>
 					</ActionForm>
+					<If cond={data.integration.configured}>
+						<ActionForm actionName="liveSync">
+							<input type="hidden" name="csrf_token" value={csrf.token}></input>
+							<p class="form-status" role="alert" aria-live="assertive">{actions.liveSync.message}</p>
+							<button class="button button-primary" type="submit">Publish to Accelevents</button>
+						</ActionForm>
+					</If>
+					<If cond={!data.integration.configured}>
+						<button
+							class="button button-primary"
+							type="button"
+							disabled
+							title="Configure ACCELEVENTS_API_KEY to unlock live publishing"
+						>Live publish locked</button>
+					</If>
 				</If>
-				<If cond={!data.integration.configured}>
-					<button
-						class="button button-primary"
-						type="button"
-						disabled
-						title="Configure ACCELEVENTS_API_KEY to unlock live publishing"
-					>Live publish locked</button>
+				<If cond={data.workspace.readOnlyPreview}>
+					<span class="status-pill status-neutral">Observer snapshot</span>
 				</If>
 			</div>
 		</header>
@@ -84,28 +89,30 @@ func Page() Node {
 						queued
 					</span>
 				</div>
-				<div class="integration-actions">
-					<ActionForm actionName="airtableDryRun">
-						<input type="hidden" name="csrf_token" value={csrf.token}></input>
-						<p class="form-status" role="status" aria-live="polite">{actions.airtableDryRun.message}</p>
-						<button class="button" type="submit">Run Airtable dry run</button>
-					</ActionForm>
-					<If cond={data.airtable.configured}>
-						<ActionForm actionName="airtableSync">
+				<If cond={!data.workspace.readOnlyPreview}>
+					<div class="integration-actions">
+						<ActionForm actionName="airtableDryRun">
 							<input type="hidden" name="csrf_token" value={csrf.token}></input>
-							<p class="form-status" role="alert" aria-live="assertive">{actions.airtableSync.message}</p>
-							<button class="button button-primary" type="submit">Sync Airtable now</button>
+							<p class="form-status" role="status" aria-live="polite">{actions.airtableDryRun.message}</p>
+							<button class="button" type="submit">Run Airtable dry run</button>
 						</ActionForm>
-					</If>
-					<If cond={!data.airtable.configured}>
-						<button
-							class="button button-primary"
-							type="button"
-							disabled
-							title="Configure AIRTABLE_PAT and AIRTABLE_BASE_ID to unlock projection"
-						>Live sync locked</button>
-					</If>
-				</div>
+						<If cond={data.airtable.configured}>
+							<ActionForm actionName="airtableSync">
+								<input type="hidden" name="csrf_token" value={csrf.token}></input>
+								<p class="form-status" role="alert" aria-live="assertive">{actions.airtableSync.message}</p>
+								<button class="button button-primary" type="submit">Sync Airtable now</button>
+							</ActionForm>
+						</If>
+						<If cond={!data.airtable.configured}>
+							<button
+								class="button button-primary"
+								type="button"
+								disabled
+								title="Configure AIRTABLE_PAT and AIRTABLE_BASE_ID to unlock projection"
+							>Live sync locked</button>
+						</If>
+					</div>
+				</If>
 			</div>
 			<div class="connection-state">
 				<span class={"status-pill " + data.airtable.credentialTone}>{data.airtable.credentialLabel}</span>

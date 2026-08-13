@@ -1,13 +1,16 @@
 // Package ratelimit provides small in-memory guards for public intake
 // endpoints. Every limiter here is process-local: state resets when the
-// process restarts, which is enough for a single-process demo deployment to
+// process restarts, which is enough for a single-process deployment to
 // stop one session or one IP address from growing the store without bound
 // (SE-3b in the security-hardening spec).
 package ratelimit
 
 import (
+	"fmt"
 	"net"
 	"net/http"
+	"net/netip"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -144,16 +147,118 @@ func RequestIdentity(r *http.Request) string {
 	return ""
 }
 
-// ClientIP extracts the caller's address from r.RemoteAddr. It does not
-// trust forwarded headers, which a client can set to any value, so it only
-// reports what the network connection itself reveals.
+// ValidateTrustedProxyCIDRs validates TRUSTED_PROXY_CIDRS before the server
+// starts. An empty value keeps the safest default: ignore all forwarding
+// headers and rate-limit by the direct network peer.
+func ValidateTrustedProxyCIDRs(raw string) error {
+	_, err := trustedProxyPrefixes(raw)
+	return err
+}
+
+// ClientIP returns the closest untrusted address in the request path. It
+// ignores X-Forwarded-For unless the direct peer belongs to an explicitly
+// configured TRUSTED_PROXY_CIDRS network. Starting at the trusted peer and
+// walking the chain right-to-left prevents a public client from choosing its
+// own rate-limit identity by prepending a forged header value.
 func ClientIP(r *http.Request) string {
 	if r == nil || r.RemoteAddr == "" {
 		return ""
 	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
+	peer, ok := parseRemoteAddr(r.RemoteAddr)
+	if !ok {
+		return strings.TrimSpace(r.RemoteAddr)
 	}
-	return host
+	prefixes, err := trustedProxyPrefixes(os.Getenv("TRUSTED_PROXY_CIDRS"))
+	if err != nil || !addressTrusted(peer, prefixes) {
+		return peer.String()
+	}
+
+	forwarded := strings.Join(r.Header.Values("X-Forwarded-For"), ",")
+	if strings.TrimSpace(forwarded) == "" {
+		return peer.String()
+	}
+	// Work from the right because a conforming trusted proxy appends the
+	// address it observed. Keep the amount of header text and the number of
+	// proxy hops bounded; the far-left side is client-controlled and does not
+	// need to be parsed once the closest untrusted address is known.
+	const maxForwardedBytes = 8 << 10
+	if len(forwarded) > maxForwardedBytes {
+		forwarded = forwarded[len(forwarded)-maxForwardedBytes:]
+		comma := strings.IndexByte(forwarded, ',')
+		if comma < 0 {
+			return peer.String()
+		}
+		forwarded = forwarded[comma+1:]
+	}
+	current := peer
+	const maxForwardedHops = 32
+	for hop := 0; hop < maxForwardedHops; hop++ {
+		if !addressTrusted(current, prefixes) {
+			return current.String()
+		}
+		comma := strings.LastIndexByte(forwarded, ',')
+		raw := forwarded
+		if comma >= 0 {
+			raw = forwarded[comma+1:]
+			forwarded = forwarded[:comma]
+		} else {
+			forwarded = ""
+		}
+		address, err := netip.ParseAddr(strings.TrimSpace(raw))
+		if err != nil {
+			// Only a malformed value inside the still-trusted suffix is
+			// ambiguous. A malformed, attacker-controlled prefix is never read
+			// after the observed client address stops the walk.
+			return current.String()
+		}
+		current = address.Unmap()
+		if forwarded == "" {
+			return current.String()
+		}
+	}
+	return current.String()
+}
+
+func parseRemoteAddr(value string) (netip.Addr, bool) {
+	if addressPort, err := netip.ParseAddrPort(strings.TrimSpace(value)); err == nil {
+		return addressPort.Addr().Unmap(), true
+	}
+	address, err := netip.ParseAddr(strings.TrimSpace(value))
+	if err != nil {
+		// Preserve compatibility with unusual net/http transports that expose
+		// an unbracketed host:port value.
+		host, _, splitErr := net.SplitHostPort(value)
+		if splitErr != nil {
+			return netip.Addr{}, false
+		}
+		address, err = netip.ParseAddr(host)
+		if err != nil {
+			return netip.Addr{}, false
+		}
+	}
+	return address.Unmap(), true
+}
+
+func trustedProxyPrefixes(raw string) ([]netip.Prefix, error) {
+	fields := strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ',' || r == ' ' || r == '\t' || r == '\n' || r == '\r'
+	})
+	prefixes := make([]netip.Prefix, 0, len(fields))
+	for _, field := range fields {
+		prefix, err := netip.ParsePrefix(field)
+		if err != nil {
+			return nil, fmt.Errorf("TRUSTED_PROXY_CIDRS contains invalid network %q", field)
+		}
+		prefixes = append(prefixes, prefix.Masked())
+	}
+	return prefixes, nil
+}
+
+func addressTrusted(address netip.Addr, prefixes []netip.Prefix) bool {
+	for _, prefix := range prefixes {
+		if prefix.Contains(address) {
+			return true
+		}
+	}
+	return false
 }

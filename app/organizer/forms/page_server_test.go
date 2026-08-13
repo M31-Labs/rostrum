@@ -6,15 +6,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/m31-labs/rostrum/examples/demo/fixture"
 	"github.com/m31-labs/rostrum/internal/appstate"
-	"github.com/m31-labs/rostrum/internal/domain"
 	"github.com/m31-labs/rostrum/internal/store"
 	"m31labs.dev/gosx/action"
 )
 
 func formsTestWorkspace(t *testing.T) *store.JSONStore {
 	t.Helper()
-	workspace, err := store.Open(":memory:", domain.Seed(time.Date(2026, time.August, 10, 12, 0, 0, 0, time.UTC)))
+	workspace, err := store.Open(":memory:", fixture.Seed(time.Date(2026, time.August, 10, 12, 0, 0, 0, time.UTC)))
 	if err != nil {
 		t.Fatalf("open workspace: %v", err)
 	}

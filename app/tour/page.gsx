@@ -30,10 +30,11 @@ func Page() Node {
 			<aside class="tour-field-note" aria-label="Tour notes">
 				<p class="panel-kicker">Field note 00</p>
 				<strong>{data.eventName}</strong>
-				<p hidden={!data.readOnlyDemo}>
-					This hosted tour uses fictional data. Every role is inspectable; every mutation is blocked at both the HTTP and storage boundaries.
+				<p hidden={!data.readOnlyPreview}>
+					{data.workspace.previewMessage}
+					Every role is inspectable, with enforcement at both the HTTP and storage boundaries.
 				</p>
-				<p hidden={data.readOnlyDemo}>
+				<p hidden={data.readOnlyPreview}>
 					This workspace is interactive. Signed reviewer and speaker links are issued from their organizer pages, never exposed publicly.
 				</p>
 			</aside>
@@ -55,7 +56,7 @@ func Page() Node {
 			<div>
 				<p class="eyebrow">Trust the artifact, then inspect it</p>
 				<h2>
-					The demo and the source tell the same story.
+					The workspace and the source tell the same story.
 				</h2>
 			</div>
 			<p>

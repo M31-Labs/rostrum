@@ -1,6 +1,6 @@
 ---
 description: Rostrum's component model, trust boundaries, persistence contract, security posture, and honest limitations.
-nav_order: "03 / 07"
+nav_order: "03 / 08"
 eyebrow: Understand the trust boundary
 mermaid: true
 ---
@@ -106,7 +106,7 @@ incident to reconcile, not an atomic transaction across two stores.
 | --- | --- | --- |
 | Pages and server actions | [`app/`](https://github.com/M31-Labs/rostrum/tree/main/app/) | File routes, `.gsx` components, loaders, managed mutations |
 | HTTP assembly | [`main.go`](https://github.com/M31-Labs/rostrum/blob/main/main.go) | Middleware, API, mounted downloads/uploads, identity, process startup |
-| Domain | [`internal/domain/`](https://github.com/M31-Labs/rostrum/tree/main/internal/domain/) | Aggregate types, seed/fresh state, invariants, review and conflict helpers |
+| Domain | [`internal/domain/`](https://github.com/M31-Labs/rostrum/tree/main/internal/domain/) | Aggregate types, fresh/empty state, invariants, review and conflict helpers |
 | Presentation | [`internal/present/`](https://github.com/M31-Labs/rostrum/tree/main/internal/present/) | Safe view models for pages |
 | Storage | [`internal/store/`](https://github.com/M31-Labs/rostrum/tree/main/internal/store/) | JSON, SQLite, Postgres, read-only and audit decorators |
 | Policy | [`rules/`](https://github.com/M31-Labs/rostrum/tree/main/rules/) | CFP routing, form visibility, review governance, schedule conflicts |
@@ -142,7 +142,7 @@ multi-process topology.
 | Surface | Required authority |
 | --- | --- |
 | `/public/*`, public CFP, `/api/v1/*` | Anonymous, subject to publication and rate-limit rules |
-| `/organizer/*` | `organizer`, `chair`, or `observer`; demo mode is a special anonymous read-only posture |
+| `/organizer/*` | `organizer`, `chair`, or `observer`; `APP_MODE=preview` is a special anonymous read-only posture |
 | Sensitive organizer exports | `organizer` or `chair`; never `observer` |
 | Final governed decision override | `chair`, with rationale and audit context |
 | `/review/{token}` | Valid signed reviewer token on each request |
@@ -178,17 +178,21 @@ policy, and HSTS on HTTPS.
 - Upload extensions and MIME types are allow-listed, filenames are sanitized,
   and stored paths are rechecked beneath the private upload root.
 - Spreadsheet exports neutralize formula prefixes.
-- Public demo mode rejects unsafe methods and sensitive paths at middleware,
+- Preview mode rejects unsafe methods and sensitive paths at middleware,
   then wraps the store in a second read-only barrier.
-- Demo startup checks a deterministic fingerprint of the fictional seed and
-  refuses credentials or unsafe persistence configuration.
+- Preview startup verifies the configured workspace template against its
+  required SHA-256 pin and refuses credentials or unsafe persistence
+  configuration. It also rejects an email-like value anywhere in the complete
+  workspace unless its domain is `example.com`, `example.net`, `example.org`,
+  or one of their subdomains.
 
 ## Current limitations
 
 - One instance represents one organization's event workspace. There is no
   multi-tenant SaaS account plane.
-- The anonymous hosted preview is intentionally non-interactive. Local mode is
-  the evaluation path for mutations.
+- The anonymous hosted preview is intentionally non-mutating; safe navigation,
+  filtering, and persona inspection remain interactive. Fresh live mode is the
+  evaluation path for mutations.
 - Provider unit/contract tests do not prove real email, Accelevents, or
   Airtable delivery.
   Operators must test the exact credentials and endpoint they select.
@@ -207,7 +211,7 @@ policy, and HSTS on HTTPS.
 | Layer | Command | Proves |
 | --- | --- | --- |
 | Static and unit | `make check` | Formatting, GoSX formatting, Arbiter validation, vet, tests, race tests |
-| Demo contract | `make smoke` | Deterministic seed, anonymous organizer/persona/public/embed/API/calendar surfaces, no-index headers, and mutation refusal |
+| Evaluation-preview contract | `make smoke` | Generated fictional fixture, anonymous organizer/persona/public/embed/API/calendar surfaces, no-index headers, and mutation refusal |
 | Bundle contract | `make size-budget` | Production build and committed route/runtime size ceilings |
-| Remote preview | `make smoke SMOKE_URL=https://… SMOKE_EXPECTED_VERSION=<release>` | The same full read-only demo contract and exact immutable release; not external-provider acceptance |
+| Remote preview | `make smoke SMOKE_URL=https://… SMOKE_EXPECTED_VERSION=<release>` | The same full read-only example contract and exact immutable release; not external-provider acceptance |
 | Operator acceptance | [Launch runbook](launch-readiness.md#release-verification-runbook) | Exact image, deployment, credentials, storage, recovery, and approval evidence |

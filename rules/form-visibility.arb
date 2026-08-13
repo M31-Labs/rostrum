@@ -3,7 +3,7 @@
 # it cannot inject arbitrary source or decision code. The host records the
 # target field alongside this policy result in the audit trail.
 
-feature answer from "programma" {
+feature answer from "rostrum" {
     value: string
     expected: string
     effect: string

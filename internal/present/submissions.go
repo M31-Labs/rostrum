@@ -52,7 +52,6 @@ func Submissions(state domain.State, query, status, category string) map[string]
 
 	return map[string]any{
 		"section":     "submissions",
-		"demoMode":    DemoMode(),
 		"workspace":   WorkspaceIdentity(state),
 		"rows":        rows,
 		"resultCount": len(rows),

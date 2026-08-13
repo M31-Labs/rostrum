@@ -75,7 +75,6 @@ func Forms(state domain.State, selection ...string) (map[string]any, error) {
 	if !found {
 		return map[string]any{
 			"section":       "forms",
-			"demoMode":      DemoMode(),
 			"workspace":     WorkspaceIdentity(state),
 			"hasForm":       false,
 			"forms":         formRows,
@@ -125,7 +124,6 @@ func Forms(state domain.State, selection ...string) (map[string]any, error) {
 
 	return map[string]any{
 		"section":       "forms",
-		"demoMode":      DemoMode(),
 		"workspace":     WorkspaceIdentity(state),
 		"hasForm":       true,
 		"forms":         formRows,
@@ -163,6 +161,7 @@ func emptyFormRow() map[string]any {
 		"id": "", "name": "", "title": "", "status": "", "statusValue": "", "statusTone": "neutral",
 		"close": "Not scheduled", "closeISO": "", "redirect": false, "confirmation": false, "ruleFile": "rules/form-visibility.arb",
 		"publicURL": "", "welcomeHeading": "", "welcomeBody": "", "fieldCount": 0, "conditionalCount": 0,
+		"successHeading": "", "successBody": "",
 		"maxDraftsPerSubmitter": "3",
 	}
 }
@@ -183,6 +182,8 @@ func submissionFormRow(form domain.SubmissionForm) map[string]any {
 	row["publicURL"] = "/submit/" + form.Slug
 	row["welcomeHeading"] = form.WelcomeHeading
 	row["welcomeBody"] = form.WelcomeBody
+	row["successHeading"] = form.SuccessHeading
+	row["successBody"] = form.SuccessBody
 	row["fieldCount"] = len(form.Fields)
 	row["conditionalCount"] = len(form.QuestionRules)
 	row["maxDraftsPerSubmitter"] = strconv.Itoa(draftLimit(form))

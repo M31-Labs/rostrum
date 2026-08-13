@@ -6,14 +6,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/m31-labs/rostrum/examples/demo/fixture"
 	"github.com/m31-labs/rostrum/internal/appstate"
-	"github.com/m31-labs/rostrum/internal/domain"
 	"github.com/m31-labs/rostrum/internal/store"
 	"m31labs.dev/gosx/action"
 )
 
 func TestProgramShapeActionsCreateTrackRoomAndCategory(t *testing.T) {
-	state := domain.Seed(time.Date(2026, time.August, 10, 12, 0, 0, 0, time.UTC))
+	state := fixture.Seed(time.Date(2026, time.August, 10, 12, 0, 0, 0, time.UTC))
 	workspace, err := store.Open(":memory:", state)
 	if err != nil {
 		t.Fatalf("open workspace: %v", err)
@@ -70,7 +70,7 @@ func TestProgramShapeActionsCreateTrackRoomAndCategory(t *testing.T) {
 }
 
 func TestSaveEventRebasesScheduledSessionsByCalendarDaysAndTimezone(t *testing.T) {
-	state := domain.Seed(time.Date(2026, time.August, 10, 12, 0, 0, 0, time.UTC))
+	state := fixture.Seed(time.Date(2026, time.August, 10, 12, 0, 0, 0, time.UTC))
 	workspace, err := store.Open(":memory:", state)
 	if err != nil {
 		t.Fatalf("open workspace: %v", err)

@@ -1,6 +1,6 @@
 # Schedule policy separates hard collisions from program-shape warnings.
 
-feature conflict from "programma" {
+feature conflict from "rostrum" {
     kind: string
     overlap_minutes: number
     shared_speaker_count: number
@@ -39,4 +39,3 @@ rule TrackOverlapWarning priority 3 {
         reason: "same-track overlap can split the intended audience",
     }
 }
-

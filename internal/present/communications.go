@@ -130,7 +130,6 @@ func Communications(state domain.State, templateID string, recipientID ...string
 	rules := notificationRuleRows(state)
 	return map[string]any{
 		"section":     "communications",
-		"demoMode":    DemoMode(),
 		"workspace":   WorkspaceIdentity(state),
 		"templates":   templates,
 		"recipients":  recipients,
@@ -241,6 +240,15 @@ func RenderCommunication(state domain.State, template domain.EmailTemplate, spea
 // work. Its inputs are canonical records rather than request values, so a
 // persisted Communication can be safely retried after a process restart.
 func RenderCommunicationContext(state domain.State, template domain.EmailTemplate, speaker domain.Speaker, item domain.Session, submission domain.Submission, task domain.Task) (string, string) {
+	return RenderCommunicationContextWithPortalURL(state, template, speaker, item, submission, task, "")
+}
+
+// RenderCommunicationContextWithPortalURL renders the same canonical merge
+// context as RenderCommunicationContext and supplies the signed, absolute
+// speaker portal URL that only a delivery boundary can safely construct.
+// Keeping that capability explicit prevents previews and unrelated manual
+// messages from inventing an unkeyed portal link.
+func RenderCommunicationContextWithPortalURL(state domain.State, template domain.EmailTemplate, speaker domain.Speaker, item domain.Session, submission domain.Submission, task domain.Task, portalURL string) (string, string) {
 	subject := template.Subject
 	body := template.Body
 	sessionTitle, sessionStart, sessionRoom := "", "", ""
@@ -270,6 +278,7 @@ func RenderCommunicationContext(state domain.State, template domain.EmailTemplat
 		"{{event.name}}":         state.Event.Name,
 		"{{speaker.first_name}}": speaker.FirstName,
 		"{{speaker.name}}":       speaker.Name(),
+		"{{speaker.portal_url}}": strings.TrimSpace(portalURL),
 		"{{session.title}}":      sessionTitle,
 		"{{session.start_time}}": sessionStart,
 		"{{session.room}}":       sessionRoom,

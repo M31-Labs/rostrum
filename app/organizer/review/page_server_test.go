@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/m31-labs/rostrum/examples/demo/fixture"
 	"github.com/m31-labs/rostrum/internal/appstate"
 	"github.com/m31-labs/rostrum/internal/domain"
 	"github.com/m31-labs/rostrum/internal/store"
@@ -66,7 +67,7 @@ func TestSaveReviewReauthorizesTheCurrentReviewState(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			now := time.Now().UTC()
-			state := domain.Seed(now)
+			state := fixture.Seed(now)
 			state.ReviewPlans[1].AssignmentsManaged = true
 			state.ReviewAssignments = []domain.ReviewAssignment{{
 				ID: "assign_organizer_current_state", PlanID: "plan_round_two", SubmissionID: "sub_workspace", ReviewerID: "rev_ines",

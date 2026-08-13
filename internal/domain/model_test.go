@@ -197,23 +197,21 @@ func TestQueueAcceptanceCommunicationIsIdempotent(t *testing.T) {
 
 func TestQueuePublishedInviteCommunicationsIsIdempotent(t *testing.T) {
 	now := time.Date(2026, time.August, 10, 12, 0, 0, 0, time.UTC)
-	state := Seed(now)
-	state.Communications = nil
-	scheduled, found := state.Session("ses_maintainers")
-	if !found {
-		t.Fatal("seed session ses_maintainers not found")
-	}
-	scheduled.Status = "published"
+	state := State{Sessions: []Session{{
+		ID: "ses_roundtable", Status: "published", RoomID: "room_main",
+		SpeakerIDs: []string{"spk_one", "spk_two"}, StartsAt: now, EndsAt: now.Add(time.Hour),
+	}}}
+	scheduled := &state.Sessions[0]
 
 	queued := state.QueuePublishedInviteCommunications([]string{scheduled.ID}, now)
 	if queued != len(scheduled.SpeakerIDs) || queued != 2 {
 		t.Fatalf("first queue: queued = %d, want 2", queued)
 	}
-	if _, found := state.Communication(PublishedInviteTemplateID, "spk_lina", scheduled.ID); !found {
-		t.Fatal("Lina's published invite row was not persisted")
+	if _, found := state.Communication(PublishedInviteTemplateID, "spk_one", scheduled.ID); !found {
+		t.Fatal("first speaker's published invite row was not persisted")
 	}
-	if _, found := state.Communication(PublishedInviteTemplateID, "spk_priya", scheduled.ID); !found {
-		t.Fatal("Priya's published invite row was not persisted")
+	if _, found := state.Communication(PublishedInviteTemplateID, "spk_two", scheduled.ID); !found {
+		t.Fatal("second speaker's published invite row was not persisted")
 	}
 
 	if queued = state.QueuePublishedInviteCommunications([]string{scheduled.ID}, now); queued != 0 {
@@ -228,7 +226,7 @@ func TestMarkCommunicationSentRecordsSuccess(t *testing.T) {
 	state := &State{Event: Event{Name: "M31 Systems Forum 2026"}}
 	state.QueueAcceptanceCommunication("ses_1", []string{"speaker_1"})
 
-	found := state.MarkCommunicationSent(AcceptanceTemplateID, "speaker_1", "ses_1", "demo-outbox", nil)
+	found := state.MarkCommunicationSent(AcceptanceTemplateID, "speaker_1", "ses_1", "outbox", nil)
 	if !found {
 		t.Fatal("MarkCommunicationSent found = false, want true for a queued row")
 	}
@@ -236,8 +234,8 @@ func TestMarkCommunicationSentRecordsSuccess(t *testing.T) {
 	if comm.Status != "sent" {
 		t.Fatalf("comm.Status = %q, want sent", comm.Status)
 	}
-	if comm.Provider != "demo-outbox" {
-		t.Fatalf("comm.Provider = %q, want demo-outbox", comm.Provider)
+	if comm.Provider != "outbox" {
+		t.Fatalf("comm.Provider = %q, want outbox", comm.Provider)
 	}
 	if comm.SentAt.IsZero() {
 		t.Fatal("comm.SentAt is zero, want a stamped time")
@@ -270,14 +268,15 @@ func TestMarkCommunicationSentRecordsFailureWithoutRawError(t *testing.T) {
 
 func TestMarkCommunicationSentReportsNotFoundForNoMatchingRow(t *testing.T) {
 	state := &State{}
-	if found := state.MarkCommunicationSent(AcceptanceTemplateID, "speaker_1", "ses_1", "demo-outbox", nil); found {
+	if found := state.MarkCommunicationSent(AcceptanceTemplateID, "speaker_1", "ses_1", "outbox", nil); found {
 		t.Fatal("MarkCommunicationSent found = true with no queued row, want false")
 	}
 }
 
 func TestStateValidateRejectsChainedConditionalQuestions(t *testing.T) {
-	state := Seed(time.Date(2026, time.August, 10, 12, 0, 0, 0, time.UTC))
+	state := FreshState(time.Date(2026, time.August, 10, 12, 0, 0, 0, time.UTC))
 	form := &state.Forms[0]
+	form.Fields = append(form.Fields, FormField{ID: "topics", Section: "proposal", Label: "Topics", Type: "textarea"})
 	// workshop_needs is already a conditional target. It must never become a
 	// source too, or a browser could have to evaluate a chained rule whose
 	// visibility order is ambiguous.
@@ -291,9 +290,9 @@ func TestStateValidateRejectsChainedConditionalQuestions(t *testing.T) {
 }
 
 func TestStateValidateRequiresWithdrawalTimestamp(t *testing.T) {
-	state := Seed(time.Date(2026, time.August, 10, 12, 0, 0, 0, time.UTC))
-	state.Submissions[0].Status = SubmissionWithdrawn
-	state.Submissions[0].WithdrawnAt = time.Time{}
+	now := time.Date(2026, time.August, 10, 12, 0, 0, 0, time.UTC)
+	state := FreshState(now)
+	state.Submissions = []Submission{{ID: "sub_withdrawn", EventID: state.Event.ID, FormID: state.Forms[0].ID, Title: "Withdrawn proposal", Status: SubmissionWithdrawn, SubmittedAt: now, UpdatedAt: now}}
 	if err := state.Validate(); err == nil {
 		t.Fatal("State.Validate accepted a withdrawn submission without a timestamp")
 	}
@@ -322,11 +321,30 @@ func TestStateValidateRejectsInvalidEvaluations(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			state := Seed(now)
+			state := validEvaluationState(now)
 			test.mutate(&state.Evaluations[0])
 			if err := state.Validate(); err == nil {
 				t.Fatal("State.Validate accepted an invalid evaluation")
 			}
 		})
+	}
+}
+
+func validEvaluationState(now time.Time) State {
+	return State{
+		SchemaVersion: CurrentSchemaVersion,
+		Event:         Event{ID: "evt_review", Name: "Review event", Slug: "review-event", StartsAt: now.AddDate(0, 1, 0), EndsAt: now.AddDate(0, 1, 1)},
+		Submissions:   []Submission{{ID: "sub_review", EventID: "evt_review", Title: "A proposal", Status: SubmissionPending, SubmittedAt: now, UpdatedAt: now}},
+		Reviewers:     []Reviewer{{ID: "rev_human", Name: "Alex Reviewer", Email: "alex@example.com", Kind: "human"}},
+		ReviewPlans: []ReviewPlan{{
+			ID: "plan_review", Name: "Editorial review", Round: 1, Status: "closed", DueAt: now.Add(24 * time.Hour), EvaluationsPerItem: 1,
+			ReviewerIDs: []string{"rev_human"}, SubmissionIDs: []string{"sub_review"},
+			Criteria: []RubricCriterion{{ID: "relevance", Name: "Relevance", Weight: 100, MaxScore: 5}},
+		}},
+		Evaluations: []Evaluation{{
+			ID: "eval_review", PlanID: "plan_review", SubmissionID: "sub_review", ReviewerID: "rev_human",
+			Scores: map[string]float64{"relevance": 4}, Recommendation: "yes", Source: "human", CreatedAt: now, UpdatedAt: now,
+		}},
+		UpdatedAt: now,
 	}
 }

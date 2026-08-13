@@ -1,16 +1,20 @@
 ---
-description: Build, configure, secure, persist, back up, and operate one Rostrum event workspace.
-nav_order: "05 / 07"
-eyebrow: Operate one durable workspace
+description: Advanced deployment, identity, persistence, integration, and observer-reference details for Rostrum operators.
+nav_order: "06 / 08"
+eyebrow: Extend one durable workspace
 ---
 
-# Deployment guide
+# Deployment reference
 
-<!-- markdownlint-disable MD013 -->
+<!-- markdownlint-disable MD013 MD049 -->
+
+Start with the [self-hosting manual](self-hosting.md) for the complete install,
+first-organizer, proxy, mail, backup, upgrade, monitoring, security, and
+acceptance path. This reference adds advanced deployment details, provider
+projections, and the isolated observer example without repeating that runbook.
 
 Rostrum deploys as one Go process plus the `app/` templates and `public/`
-assets. One replica against one JSON data file serves a single-organization
-instance.
+assets. One replica serves a single-organization instance.
 
 For evaluation rather than operations, start with the
 [judge and organizer guide](judging-guide.md). This document assumes an
@@ -20,32 +24,37 @@ operator is preparing a persistent live or read-only deployment.
 
 Requirements:
 
-- Go 1.26 or newer.
-- The GoSX CLI: `go install m31labs.dev/gosx/cmd/gosx@v0.38.1`
-- The Arbiter CLI (used by `make check`): `go install m31labs.dev/arbiter/cmd/arbiter@v1.9.0`
+- The complete pinned toolchain in the
+  [self-hosting prerequisites](self-hosting.md#prerequisites).
 
 ```bash
 make check
 make build
-make smoke
 ```
 
 `make build` writes the `dist/` bundle: the static server binary at
 `dist/server/app`, the route templates, framework runtime assets, public
-files, and seeded data. The packaging step removes sourcemaps and Go source
-that production does not need. Mount a writable directory for `DATA_PATH`
-and for uploaded files under `data/uploads`.
+files, and build metadata. The packaging step removes sourcemaps and Go source
+that production does not need. The Dockerfile deliberately excludes
+build-time `dist/data`; never treat prerender state as a runtime seed. Mount
+one protected writable boundary for `DATA_PATH`, `UPLOAD_DIR`,
+`AUDIT_LOG_PATH`, and `BACKUP_DIR`.
 
 ## Container
 
 ```bash
 make build
-docker build --build-arg ROSTRUM_VERSION="$(git rev-parse --short HEAD)" -t rostrum:local .
+docker build --build-arg ROSTRUM_VERSION="$(git rev-parse HEAD)" -t rostrum:local .
 docker run --rm -p 8080:8080 \
+  -e APP_MODE=live \
   -e APP_ENV=production \
   -e PUBLIC_URL=https://program.example.com \
-  -e SESSION_SECRET='replace-with-a-random-secret-of-at-least-32-characters' \
+  -e SESSION_SECRET='REPLACE_ME' \
+  -e INITIAL_WORKSPACE=fresh \
   -e DATA_PATH=/app/data/rostrum.json \
+  -e UPLOAD_DIR=/app/data/uploads \
+  -e AUDIT_LOG_PATH=/app/data/audit.log \
+  -e BACKUP_DIR=/app/data/backups \
   -v rostrum-data:/app/data \
   rostrum:local
 ```
@@ -56,7 +65,7 @@ the process refuses to start with:
 
 - the development session secret, or any secret shorter than 32 characters;
 - a `PUBLIC_URL` that is not HTTPS;
-- the in-memory store (`DEMO_MODE=memory`).
+- an in-memory `DATA_PATH`.
 
 Set `ROSTRUM_VERSION` to the immutable release tag or commit SHA. The value is
 returned by `GET /api/health`, so a deployment record can prove which Rostrum
@@ -67,73 +76,114 @@ curl -fsS https://program.example.com/api/health
 ```
 
 Perform the authenticated live organizer workflow in the launch checklist
-separately. `make smoke SMOKE_URL=…` is the deterministic `APP_MODE=demo`
-contract and is expected to fail against an organizer-gated live deployment.
+separately. The observer smoke contract under `examples/demo/` is expected to
+fail against an organizer-gated live deployment.
 
-## Hosted read-only preview
+## Kubernetes baseline
 
-The public preview uses a separate process, subdomain, volume, and release
-configuration from every live organizer deployment. Set the explicit posture
-below; `APP_MODE=demo` is fail-closed and does not turn an ordinary live
-instance into a demo:
+The reusable live baseline is
+[`deploy/k8s/rostrum.yaml`](https://github.com/M31-Labs/rostrum/blob/main/deploy/k8s/rostrum.yaml),
+with a deliberately placeholder-only starting point in
+[`deploy/k8s/secret.example.yaml`](https://github.com/M31-Labs/rostrum/blob/main/deploy/k8s/secret.example.yaml).
+It creates a dedicated namespace, one `ReadWriteOnce` persistent-volume claim,
+a one-replica `Recreate` deployment, a service, and a TLS ingress. The pod runs
+as UID/GID `10001`, drops Linux capabilities, and mounts the complete
+`/app/data` recovery boundary.
+
+Replace its six placeholders: the Rostrum image digest, matching immutable
+`ROSTRUM_VERSION`, hostname, exact trusted-proxy CIDRs, Traefik ingress class,
+and certificate issuer.
+Resolve the published image to a registry digest and put that digest—not a
+mutable tag—into `__ROSTRUM_IMAGE_BY_DIGEST__`. Create the real Secret out of
+band and keep `RESET_SECRET` empty for a production workspace. Add only the
+mail and identity credentials you actually accept. The manifest selects
+`APP_MODE=live` and `INITIAL_WORKSPACE=fresh`; the normal path defaults keep
+the audit ledger, backups, and uploads under the mounted volume. Review
+storage class, resource sizing, network policy, TLS issuance, backup
+integration, and log collection for your cluster before ingress is opened.
+The included Traefik CRD middleware sets
+`maxRequestBodyBytes: 35651584` (34 MiB) and
+`memRequestBodyBytes: 2097152` (2 MiB), and the Ingress references it as
+`rostrum-request-body-limit@kubernetescrd`. This requires Traefik's Kubernetes
+CRD provider. If your cluster uses a different ingress controller, replace
+both the middleware and annotation with its equivalent 34 MiB ceiling so the
+application's tighter upload and import limits can run.
+
+## Hosted observer preview
+
+Preview mode is a generic product capability, not a fictional fixture baked
+into the Rostrum module. An operator supplies a raw, identity-free workspace
+JSON file and pins its exact bytes. The public M31 evaluation fixture,
+synthetic media, launcher, smoke contract, and observer deployment live
+separately under
+[`examples/demo/README.md`](https://github.com/M31-Labs/rostrum/blob/main/examples/demo/README.md).
+
+A preview uses a separate process, subdomain, volume, audit path, release
+configuration, and session secret from every live organizer deployment:
 
 ```text
-APP_MODE=demo
+APP_MODE=preview
 APP_ENV=production
-PUBLIC_URL=https://demo.example.com
-ROSTRUM_VERSION=2026.08.11-<immutable-commit>
-SESSION_SECRET=<unique-random-secret-at-least-32-characters>
-SEED=demo
+PUBLIC_URL=https://preview.example.com
+ROSTRUM_VERSION=<immutable-release-or-commit>
+SESSION_SECRET=REPLACE_ME
+INITIAL_WORKSPACE_PATH=/app/example/workspace.json
+INITIAL_WORKSPACE_SHA256=<64-character-sha256-of-exact-file-bytes>
+CFP_ROUTING_POLICY_PATH=/app/example/cfp-routing.arb
+CFP_ROUTING_POLICY_SHA256=<64-character-sha256-of-exact-policy-bytes>
 STORE_DRIVER=sqlite
-DATA_PATH=/app/demo-data/rostrum.sqlite
+DATA_PATH=/app/preview-data/rostrum.sqlite
+UPLOAD_DIR=/app/preview-data/uploads
+AUDIT_LOG_PATH=/app/preview-data/audit.log
+BACKUP_DIR=/app/preview-data/backups
 MAIL_DRIVER=outbox
 ORGANIZER_EMAILS=
 RESET_SECRET=
+TRUSTED_PROXY_CIDRS=<exact-private-proxy-cidrs>
+PREVIEW_LABEL=Evaluation workspace
+PREVIEW_MESSAGE=Explore this read-only workspace without saving changes.
 ```
 
-Use only fictional seeded data. The demo refuses `DATABASE_URL`, the legacy
-`DEMO_MODE=memory` setting, relative or in-memory paths, a mutable `dev`
-release identity, Resend/SMTP/Accelevents/Airtable credentials, OAuth
-credentials, and a network mail driver. The demo seed is built with a
-deterministic fixture timestamp, and startup compares a full state fingerprint
-before serving: any changed speaker, proposal, review record, schedule,
-resource, integration, communication, audit, or sync record fails closed.
-Keep the demo volume and audit path separate from the live volume; never reuse
-a production `DATA_PATH`, upload directory, or session secret. If a demo
-volume is ever changed or copied from live, redeploy it as a fresh canonical
-fixture instead of repairing it in place.
+`APP_MODE=preview` fails closed unless the template path resolves absolutely,
+exactly one of `INITIAL_WORKSPACE_SHA256` or
+`INITIAL_WORKSPACE_SHA256_FILE` supplies a matching pin, storage is durable
+JSON or SQLite, the release identity is immutable, organizer identity is
+absent, and all database, network-mail, OAuth, Accelevents, and Airtable
+credentials are absent. A checksum file contains the bare 64-character
+hexadecimal digest, with surrounding whitespace allowed. Startup also compares
+the complete persisted state with the decoded template; changed workspace or
+identity state refuses to serve. Every email-like value anywhere in that state
+must use `example.com`, `example.net`, `example.org`, or one of their
+subdomains; any other email domain refuses startup. This address restriction
+applies only to preview mode. The label and message change presentation only;
+they do not enable preview mode or weaken its enforcement. The build-only
+`GOSX_STATIC_EXPORT` variable must also be absent; preview startup rejects it.
 
-The demo exposes public pages, signed-link read surfaces, `/organizer/*`, and
-`/live` for inspection without an organizer session. Every unsafe HTTP method,
-authentication/setup route, reset, import, export, and upload is refused with
-403. A store-level read-only wrapper remains in place even if a future route
-forgets the middleware. The UI labels the workspace as read-only, the login
-page explains that sign-in is disabled, and every response sends
-`X-Robots-Tag: noindex, nofollow, noarchive`. The local quickstart remains the
-place to exercise interactive mutations. A process-local client-IP limiter
-also caps anonymous preview traffic; keep the reverse proxy's normal rate
-limits enabled for a public deployment.
+The template is a raw `domain.State` JSON document, not the checksummed
+operator export envelope accepted by Settings restore. Follow the example's
+generation and checksum instructions rather than editing an exported live
+workspace into place. Never use a template containing real event data. The
+reserved-domain check is a last fail-closed barrier, not a data-anonymization
+tool.
 
-For Kubernetes, start from [`deploy/k8s/rostrum-demo.yaml`](https://github.com/M31-Labs/rostrum/blob/main/deploy/k8s/rostrum-demo.yaml).
-It creates a separate namespace, volume, service, ingress, and session secret.
-Replace only its documented image, host, ingress, and secret placeholders.
+A preview keeps safe browser interaction—navigation, filters, disclosures,
+persona inspection, and public itinerary behavior—while presenting
+`/organizer/*` anonymously as an observer. Mutation forms and controls are not
+rendered. Every unsafe method, authentication/setup route, reset, import,
+export, and upload is refused, and a store-level wrapper remains read-only if a
+future route misses the HTTP gate. Responses carry
+`X-Robots-Tag: noindex, nofollow, noarchive`.
 
-Before sharing the preview, run the acceptance checks in
-[launch readiness](launch-readiness.md#hosted-preview-acceptance). A hosted
-URL is a convenience surface, not a substitute for repository or local-run
-evidence.
-
-Verify the exact read-only release from a checkout of the same candidate:
-
-```bash
-make smoke \
-  SMOKE_URL=https://demo.example.com \
-  SMOKE_EXPECTED_VERSION=<immutable-release-or-commit>
-```
-
-Remote smoke covers the complete demo contract: organizer and signed
-persona inspection, public/embed/API/calendar surfaces, deterministic counts,
-no-index headers, mutation refusal, and the exact expected version.
+Follow the example README and deployment assets for the M31 evaluation host.
+Its namespace, volume, generated workspace and upload checksums, public media,
+and secret must remain separate from live. Its example-only init container
+accepts only a fresh volume, then verifies the pinned workspace plus the exact
+regular, non-symlink portrait set and bytes on every restart. `make judge-demo`
+prepares, verifies, and launches the disposable local example; `make smoke`
+verifies its local contract. Before sharing any remote preview, run the checks in
+[launch readiness](launch-readiness.md#hosted-preview-acceptance) and the
+example's smoke contract against the exact immutable version documented in
+that README.
 
 ## Reverse proxy
 
@@ -143,6 +193,14 @@ frame its `/public/*` pages, because that is how the embeddable agenda
 works; every other route sends `frame-ancestors 'none'`. Do not add a
 blanket `X-Frame-Options` header. If your proxy replaces the application
 CSP (Content Security Policy), keep the policy route-aware.
+
+Set `TRUSTED_PROXY_CIDRS` to the exact loopback, container, or pod networks
+from which that proxy connects. Rostrum accepts `X-Forwarded-For` only from a
+listed peer and walks the chain right-to-left to find the closest untrusted
+client. Never use `0.0.0.0/0` or `::/0`: an overly broad value lets callers
+forge the IP identity used by submission and sign-in rate limits. The K8s
+manifest deliberately leaves a `__TRUSTED_PROXY_CIDRS__` placeholder because
+pod/service CIDRs are cluster-specific.
 
 ## Identity and access
 
@@ -168,6 +226,24 @@ Set `ORGANIZER_EMAILS` to a comma-separated list of addresses. A magic-link
 or OAuth (Open Authorization) sign-in from one of these addresses is
 granted the organizer role and recorded as a workspace Principal, so the
 grant survives a restart even if you later change the allowlist.
+
+### Chairs and observers
+
+Use `PRINCIPAL_ROLES` when access needs to be narrower or explicitly
+governed:
+
+```dotenv
+PRINCIPAL_ROLES=owner@example.com=organizer,chair@example.com=chair,observer@example.com=observer
+```
+
+The mapping is strict and applied atomically at startup. Listed principals get
+exactly their configured roles; omitted stored principals remain. At least one
+organizer must remain. Use `former@example.com=none` for an explicit durable
+revocation that also overrides the legacy allowlist. Every authenticated
+request reconciles organizer authority against current durable roles, so old
+cookies, pending magic links, and passkeys cannot retain a revoked grant.
+OAuth provider claims cannot elevate them. Use `chair` for governed chair
+overrides and `observer` for a read-only organizer surface without exports.
 
 ### Break-glass bootstrap
 
@@ -213,22 +289,34 @@ Keep these routes reachable by the public: `/`, `/login`, `/submit/*`,
 last two must stay reachable because speakers and reviewers open their
 signed links from an inbox.
 
-`POST /demo/reset` restores the seeded workspace. Set `RESET_SECRET` to
-require a matching secret. In production with no secret set, reset is
-disabled entirely.
+`POST /workspace/reset` restores the configured initial workspace and always
+requires an authenticated organizer or chair. If `RESET_SECRET` is set, send
+it in the POST form field named `secret` as a second factor; never put it in a
+URL. In production with no secret set, reset is disabled entirely. A reset also attempts to clear the stored upload
+files under `UPLOAD_DIR`; individual removal failures are logged. Inspect the
+result rather than treating reset as a routine production recovery mechanism.
 
 ## Storage and replicas
 
 The JSON store validates a cloned next state, then replaces the data file
 with an atomic rename. SQLite uses the same aggregate contract with WAL;
 Postgres uses the configured `DATABASE_URL`. Run exactly one application
-replica against one workspace volume until a deployment is deliberately
-configured around a shared Postgres backend.
+replica. Postgres replaces the canonical workspace file, but it does not make
+the upload directory or independent audit ledger multi-replica safe by itself.
 
-Keep `DATA_PATH`, `data/uploads`, and `AUDIT_LOG_PATH` on durable
+Keep `DATA_PATH`, `UPLOAD_DIR`, `AUDIT_LOG_PATH`, and `BACKUP_DIR` on durable
 operator-owned storage. The independent audit ledger is intentionally outside
 the mutable workspace state: a workspace restore never rewrites the active
 operational history.
+
+`UPLOAD_DIR` is the single protected source for private portal files and
+approved gallery portraits. Do not publish it as a static directory. Rostrum
+serves a portrait at `/public-headshot/{speakerID}` only while an active
+headshot task has an approved completion, and revalidates the contained file
+and image type on each request. The full archive therefore recovers both
+private uploads and approved public portrait originals from the same path.
+Keep it as a dedicated child directory; never make it the directory that also
+contains the canonical store, audit log, or backup files.
 
 ## Export, backup, and restore
 
@@ -244,16 +332,21 @@ private, no-store`.
   newest ten. The receiving host keeps its own organizer principals,
   passkeys, and pending magic links, so an import cannot lock out its local
   operator. Imported upload references are rebased to that host’s
-  `data/uploads` directory.
+  `UPLOAD_DIR`.
 - **Full archive** is a streaming `.tar.gz` containing `workspace.json`, all
-  regular files from `data/uploads`, and every active or rotated audit-log
-  segment. It is the cold-storage and file-recovery artifact.
+  regular files from `UPLOAD_DIR` (including approved portrait originals), and
+  every active or rotated audit-log segment. It is the cold-storage and
+  file-recovery artifact.
+- **Approved-upload bundle** at
+  `/organizer/export/approved-uploads.zip` is a deterministic ZIP with a
+  checksummed manifest and only approved task files. It is an operational
+  handoff, not a complete recovery artifact.
 
 Full-archive file recovery is deliberately a stopped-process operation in
 this release. Extract an archive only into a new, private staging directory;
 first restore its `workspace.json` through the validated Settings flow, then
 stop Rostrum and copy the staged `uploads/` files into the receiving
-`data/uploads` directory. Restart and verify portal downloads byte-for-byte.
+`UPLOAD_DIR`. Restart and verify portal downloads byte-for-byte.
 Keep the staged `audit/` directory with the recovery record; do not splice it
 into a live audit log, whose hash chain belongs to the receiving instance.
 This preserves both the source evidence and the destination’s audit history.
@@ -322,8 +415,8 @@ as Airtable attachments and does not pull any Airtable changes back.
 - Poll `GET /api/health`; it returns the application name, version, and
   timestamp.
 - Keep sync history and review provenance as audit data.
-- Set the proxy body-size limit to 12 MiB or more. Rostrum accepts uploads
-  to 10 MiB inside a 12 MiB request envelope and caps all other request
-  bodies at 1 MiB.
+- Admit a 34 MiB envelope on `/organizer/import/workspace`; imported JSON is
+  capped at 32 MiB. Rostrum accepts portal uploads to 10 MiB inside a 12 MiB
+  request envelope and caps ordinary request bodies at 1 MiB.
 - Public form submissions are rate limited per session and per IP address.
   The limiters are in-memory and reset on restart.

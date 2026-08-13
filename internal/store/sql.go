@@ -42,7 +42,7 @@ type SQLStore struct {
 }
 
 // OpenSQLite opens (or creates) a SQLite-backed workspace. path may be a
-// normal filesystem path or :memory: for an isolated test/demo workspace.
+// normal filesystem path or :memory: for an isolated in-memory workspace.
 func OpenSQLite(path string, seed domain.State) (*SQLStore, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
@@ -50,8 +50,8 @@ func OpenSQLite(path string, seed domain.State) (*SQLStore, error) {
 	}
 	if path != ":memory:" {
 		path = filepath.Clean(path)
-		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-			return nil, fmt.Errorf("create sqlite data directory: %w", err)
+		if err := prepareSQLitePath(path); err != nil {
+			return nil, err
 		}
 	}
 	db, err := sql.Open("sqlite", path)
@@ -85,7 +85,61 @@ func OpenSQLite(path string, seed domain.State) (*SQLStore, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("configure sqlite busy timeout: %w", err)
 	}
-	return openSQLStore(db, "sqlite", "sqlite:"+path, seed)
+	store, err := openSQLStore(db, "sqlite", "sqlite:"+path, seed)
+	if err != nil {
+		return nil, err
+	}
+	if path != ":memory:" {
+		if err := secureSQLiteArtifacts(path); err != nil {
+			_ = store.Close()
+			return nil, err
+		}
+	}
+	return store, nil
+}
+
+func prepareSQLitePath(path string) error {
+	directory := filepath.Dir(path)
+	_, statErr := os.Stat(directory)
+	createdDirectory := errors.Is(statErr, os.ErrNotExist)
+	if statErr != nil && !createdDirectory {
+		return fmt.Errorf("inspect sqlite data directory: %w", statErr)
+	}
+	if err := os.MkdirAll(directory, 0o700); err != nil {
+		return fmt.Errorf("create sqlite data directory: %w", err)
+	}
+	if createdDirectory {
+		if err := os.Chmod(directory, 0o700); err != nil {
+			return fmt.Errorf("secure new sqlite data directory: %w", err)
+		}
+	}
+	if info, err := os.Lstat(path); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+			return fmt.Errorf("sqlite data path must be a regular non-symlink file")
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("inspect sqlite data path: %w", err)
+	}
+	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
+	if err != nil {
+		return fmt.Errorf("prepare sqlite data file: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("close sqlite data file: %w", err)
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		return fmt.Errorf("secure sqlite data file: %w", err)
+	}
+	return nil
+}
+
+func secureSQLiteArtifacts(path string) error {
+	for _, candidate := range []string{path, path + "-wal", path + "-shm"} {
+		if err := os.Chmod(candidate, 0o600); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("secure sqlite artifact %s: %w", filepath.Base(candidate), err)
+		}
+	}
+	return nil
 }
 
 // OpenPostgres opens a Postgres-backed workspace. Credentials stay solely in
@@ -263,7 +317,7 @@ func (store *SQLStore) Reset() error {
 		Actor:      "system",
 		Action:     "workspace.reset",
 		EntityType: "workspace",
-		Summary:    "Workspace reset to its configured seed.",
+		Summary:    "Workspace reset to its configured initial state.",
 		Origin:     "rostrum",
 	})
 }

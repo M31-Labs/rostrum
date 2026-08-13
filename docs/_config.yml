@@ -1,8 +1,9 @@
 title: Rostrum
 tagline: One record. The whole program.
 description: >-
-  Judge, organizer, architecture, API, deployment, and launch-readiness
-  field guides for Rostrum, the governed event speaker-program workspace.
+  Judge, organizer, architecture, API, self-hosting, deployment, and
+  launch-readiness field guides for Rostrum, the governed event
+  speaker-program workspace.
 url: https://m31-labs.github.io
 baseurl: /rostrum
 repository: M31-Labs/rostrum

@@ -71,6 +71,42 @@ func ScoreForm(props any) Node {
 	</ActionForm>
 }
 
+func ScoreSnapshot(props any) Node {
+	return <div class="review-entry-form score-form">
+		<fieldset>
+			<legend>Weighted criteria</legend>
+			<dl class="detail-answers">
+				<Each of={props.scores} as="score">
+					<div>
+						<dt>{score.name + " · " + score.weight}</dt>
+						<dd>
+							<If cond={score.value != ""}>{score.value + " / " + score.max}</If>
+							<If cond={score.value == ""}>Not scored</If>
+						</dd>
+					</div>
+				</Each>
+			</dl>
+		</fieldset>
+		<If cond={props.reviewed}>
+			<dl class="detail-answers">
+				<div>
+					<dt>Recommendation</dt>
+					<dd>{props.recommendation}</dd>
+				</div>
+				<div>
+					<dt>Decision context</dt>
+					<dd>{props.comments}</dd>
+				</div>
+			</dl>
+		</If>
+		<If cond={!props.reviewed}>
+			<p class="form-note">
+				No review has been saved for this assignment.
+			</p>
+		</If>
+	</div>
+}
+
 func SubmissionCard(props any) Node {
 	return <article class="panel score-card">
 		<header class="panel-header">
@@ -93,7 +129,12 @@ func SubmissionCard(props any) Node {
 			</If>
 		</header>
 		<p class="detail-abstract">{props.abstract}</p>
-		<ScoreForm {...props}></ScoreForm>
+		<If cond={!data.readOnlyPreview}>
+			<ScoreForm {...props}></ScoreForm>
+		</If>
+		<If cond={data.readOnlyPreview}>
+			<ScoreSnapshot {...props}></ScoreSnapshot>
+		</If>
 	</article>
 }
 
@@ -103,6 +144,14 @@ func Page() Node {
 			<ReviewUnavailable></ReviewUnavailable>
 		</If>
 		<If cond={data.available}>
+			<If cond={data.readOnlyPreview}>
+				<div class="closed-notice" role="status">
+					<strong>Reviewer journey preview.</strong>
+					<p>
+						Assignments, rubric, and saved evidence are visible; scoring controls are not shown.
+					</p>
+				</div>
+			</If>
 			<p class="portal-flash">{flash.notice}</p>
 			<section class="portal-hero">
 				<div class="portal-profile-summary">

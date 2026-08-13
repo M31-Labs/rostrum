@@ -5,12 +5,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/m31-labs/rostrum/examples/demo/fixture"
 	"github.com/m31-labs/rostrum/internal/audit"
 	"github.com/m31-labs/rostrum/internal/domain"
 )
 
 func TestWithAuditWritesAnIndependentLedger(t *testing.T) {
-	base, err := Open(":memory:", domain.Seed(time.Date(2026, time.August, 10, 12, 0, 0, 0, time.UTC)))
+	base, err := Open(":memory:", fixture.Seed(time.Date(2026, time.August, 10, 12, 0, 0, 0, time.UTC)))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

@@ -2,20 +2,19 @@
 
 GOSX ?= gosx
 GOSX_VERSION ?= 0.38.1
-PERF_URLS ?= http://localhost:8080/ http://localhost:8080/organizer http://localhost:8080/organizer/agenda http://localhost:8080/organizer/portal http://localhost:8080/public/m31-systems-forum-2026/agenda
+PERF_URLS ?= http://localhost:8080/ http://localhost:8080/organizer http://localhost:8080/organizer/agenda http://localhost:8080/organizer/portal http://localhost:8080/public/your-event/agenda
 SMOKE_URL ?=
 SMOKE_EXPECTED_VERSION ?=
 JUDGE_DEMO_PORT ?= 8080
 
 dev:
-	DEMO_MODE=memory go run .
+	DATA_PATH=:memory: INITIAL_WORKSPACE=fresh go run .
 
-# Launch the exact deterministic, read-only fixture used by the hosted preview.
-# The helper builds into a disposable directory, proves the complete demo
-# contract with scripts/smoke.sh, prints the canonical evaluation URLs, and
-# removes the process and fixture on exit.
+# Launch the separate, deterministic example used by the hosted preview.
+# Core Rostrum remains fixture-free; the example prepares its own workspace,
+# uploads, checksum, smoke contract, and disposable runtime.
 judge-demo:
-	JUDGE_DEMO_PORT="$(JUDGE_DEMO_PORT)" scripts/judge-demo.sh
+	JUDGE_DEMO_PORT="$(JUDGE_DEMO_PORT)" examples/demo/run.sh
 
 test:
 	go list ./... | grep -v '/dist' | xargs go test
@@ -48,7 +47,7 @@ build: check-gosx
 	find dist/app -type f -name '*.go' -delete
 
 smoke:
-	SMOKE_EXPECTED_VERSION="$(SMOKE_EXPECTED_VERSION)" scripts/smoke.sh "$(SMOKE_URL)"
+	SMOKE_EXPECTED_VERSION="$(SMOKE_EXPECTED_VERSION)" examples/demo/smoke.sh "$(SMOKE_URL)"
 
 size-budget: build
 	GOSX=$(GOSX) go run ./cmd/sizecheck -root .

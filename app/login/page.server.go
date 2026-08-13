@@ -42,7 +42,6 @@ func loadLogin(ctx *route.RouteContext, page route.FilePage) (any, error) {
 	providers := oauthProviderLinks(next)
 	return map[string]any{
 		"workspace":       present.WorkspaceIdentity(appstate.MustGet().Snapshot()),
-		"readOnlyDemo":    present.ReadOnlyDemoMode(),
 		"next":            next,
 		"providers":       providers,
 		"hasProviders":    len(providers) > 0,

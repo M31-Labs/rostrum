@@ -216,10 +216,18 @@ func Page() Node {
 								<h2>Status</h2>
 							</div>
 						</header>
-						<If cond={data.canAccept}>
-							<AcceptForm id={data.id}></AcceptForm>
+						<If cond={!data.workspace.readOnlyPreview}>
+							<If cond={data.canAccept}>
+								<AcceptForm id={data.id}></AcceptForm>
+							</If>
+							<StatusForm id={data.id} status={data.statusValue}></StatusForm>
 						</If>
-						<StatusForm id={data.id} status={data.statusValue}></StatusForm>
+						<If cond={data.workspace.readOnlyPreview}>
+							<p>
+								<span class={"status-pill status-" + data.tone}>{data.status}</span>
+								Decision controls are hidden in this read-only preview.
+							</p>
+						</If>
 					</section>
 					<section class="panel">
 						<header class="panel-header">

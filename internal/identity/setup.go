@@ -39,7 +39,7 @@ type Setup struct {
 // re-arms it. publicBase is the absolute origin (PUBLIC_URL) the logged URL
 // is built from. mailConfigured tells Complete whether to email the first
 // organizer a magic link (true) or sign the browser in directly (false) —
-// pass whether a real mail transport (not the demo outbox) is configured.
+// pass whether a real mail transport (not the local outbox) is configured.
 func NewSetup(manager *auth.Manager, magicLinks *auth.MagicLinks, mailConfigured bool, publicBase string) *Setup {
 	setup := &Setup{manager: manager, magicLinks: magicLinks, mailConfigured: mailConfigured}
 	if len(AllowedEmails()) > 0 || hasStoredOrganizer() {
@@ -104,7 +104,7 @@ func (s *Setup) consume(token string) bool {
 // Complete finishes the break-glass bootstrap: it consumes token, records
 // the first Principal with RoleOrganizer, and either emails that address a
 // magic link (when mail is configured) or signs the browser in directly
-// (when it is not — the demo outbox has nowhere a self-hoster can read it).
+// (when it is not — the in-memory outbox has no operator delivery channel).
 // It returns the path the caller should redirect to on success.
 func (s *Setup) Complete(r *http.Request, token, email, name string) (redirectPath string, err error) {
 	if s == nil || s.manager == nil {

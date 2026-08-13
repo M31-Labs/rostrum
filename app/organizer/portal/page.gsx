@@ -11,8 +11,15 @@ func Page() Node {
 				</p>
 			</div>
 			<div class="workspace-header-actions">
-				<a class="button" href="/portal/spk_maya" data-gosx-link>Preview speaker portal</a>
-				<a class="button" href="/organizer/export/approved-uploads.zip">Approved uploads ZIP</a>
+				<If cond={!data.workspace.readOnlyPreview && data.hasPreviewPortal}>
+					<a class="button" href={data.previewPortalURL} data-gosx-link>Preview speaker portal</a>
+				</If>
+				<If cond={!data.workspace.readOnlyPreview}>
+					<a class="button" href="/organizer/export/approved-uploads.zip">Approved uploads ZIP</a>
+				</If>
+				<If cond={data.workspace.readOnlyPreview}>
+					<a class="button" href="/tour" data-gosx-link>Explore speaker persona</a>
+				</If>
 				<a class="button button-primary" href="/organizer/communications" data-gosx-link>Send reminder</a>
 			</div>
 		</header>
@@ -92,58 +99,60 @@ func Page() Node {
 			<p>
 				Changes appear in assigned speaker portals immediately. Retiring a task preserves every submitted response and file for audit and export.
 			</p>
-			<ActionForm class="task-create-form" actionName="createTask">
-				<input type="hidden" name="csrf_token" value={csrf.token}></input>
-				<p class="form-status" role="status" aria-live="polite">{actions.createTask.message}</p>
-				<div class="form-grid-two">
-					<label>
-						<span>Task title</span>
-						<input name="title" maxlength="160" required placeholder="e.g. Submit final slides"></input>
-						<p class="form-error" data-gosx-field-error="title" aria-live="polite"></p>
-					</label>
-					<label>
-						<span>Delivery type</span>
-						<select name="type" required>
-							<option value="form">Confirmation or form</option>
-							<option value="file">File upload</option>
-							<option value="headshot">Headshot upload</option>
-							<option value="profile">Profile update</option>
-						</select>
-						<p class="form-error" data-gosx-field-error="type" aria-live="polite"></p>
-					</label>
-				</div>
-				<label>
-					<span>Speaker instructions</span>
-					<textarea
-						name="description"
-						maxlength="2000"
-						placeholder="What is needed, and how will the team use it?"
-					></textarea>
-					<p class="form-error" data-gosx-field-error="description" aria-live="polite"></p>
-				</label>
-				<div class="form-grid-two">
-					<label>
-						<span>Due date</span>
-						<input type="datetime-local" name="due_at" required></input>
-						<p class="form-error" data-gosx-field-error="due_at" aria-live="polite"></p>
-					</label>
-					<div class="checkbox-stack">
-						<label class="checkbox-control">
-							<input type="checkbox" name="required" checked></input>
-							<span>Required for readiness</span>
+			<If cond={!data.workspace.readOnlyPreview}>
+				<ActionForm class="task-create-form" actionName="createTask">
+					<input type="hidden" name="csrf_token" value={csrf.token}></input>
+					<p class="form-status" role="status" aria-live="polite">{actions.createTask.message}</p>
+					<div class="form-grid-two">
+						<label>
+							<span>Task title</span>
+							<input name="title" maxlength="160" required placeholder="e.g. Submit final slides"></input>
+							<p class="form-error" data-gosx-field-error="title" aria-live="polite"></p>
 						</label>
-						<label class="checkbox-control">
-							<input type="checkbox" name="accepted_only" checked></input>
-							<span>Only accepted speakers can receive it</span>
-						</label>
-						<label class="checkbox-control">
-							<input type="checkbox" name="assign_all_accepted"></input>
-							<span>Assign all currently accepted speakers</span>
+						<label>
+							<span>Delivery type</span>
+							<select name="type" required>
+								<option value="form">Confirmation or form</option>
+								<option value="file">File upload</option>
+								<option value="headshot">Headshot upload</option>
+								<option value="profile">Profile update</option>
+							</select>
+							<p class="form-error" data-gosx-field-error="type" aria-live="polite"></p>
 						</label>
 					</div>
-				</div>
-				<button class="button button-primary" type="submit">Create task</button>
-			</ActionForm>
+					<label>
+						<span>Speaker instructions</span>
+						<textarea
+							name="description"
+							maxlength="2000"
+							placeholder="What is needed, and how will the team use it?"
+						></textarea>
+						<p class="form-error" data-gosx-field-error="description" aria-live="polite"></p>
+					</label>
+					<div class="form-grid-two">
+						<label>
+							<span>Due date</span>
+							<input type="datetime-local" name="due_at" required></input>
+							<p class="form-error" data-gosx-field-error="due_at" aria-live="polite"></p>
+						</label>
+						<div class="checkbox-stack">
+							<label class="checkbox-control">
+								<input type="checkbox" name="required" checked></input>
+								<span>Required for readiness</span>
+							</label>
+							<label class="checkbox-control">
+								<input type="checkbox" name="accepted_only" checked></input>
+								<span>Only accepted speakers can receive it</span>
+							</label>
+							<label class="checkbox-control">
+								<input type="checkbox" name="assign_all_accepted"></input>
+								<span>Assign all currently accepted speakers</span>
+							</label>
+						</div>
+					</div>
+					<button class="button button-primary" type="submit">Create task</button>
+				</ActionForm>
+			</If>
 			<If cond={data.hasTasks}>
 				<div class="task-manager-list">
 					<Each of={data.tasks} as="task">
@@ -159,77 +168,79 @@ func Page() Node {
 								</div>
 								<span class="status-pill status-neutral">{task.type}</span>
 							</header>
-							<ActionForm class="task-update-form" actionName="updateTask">
-								<input type="hidden" name="csrf_token" value={csrf.token}></input>
-								<input type="hidden" name="task_id" value={task.id}></input>
-								<p class="form-status" role="status" aria-live="polite">{actions.updateTask.message}</p>
-								<div class="form-grid-two">
-									<label>
-										<span>Title</span>
-										<input name="title" maxlength="160" value={task.title} required></input>
-										<p class="form-error" data-gosx-field-error="title" aria-live="polite"></p>
-									</label>
-									<label>
-										<span>Type</span>
-										<select name="type">
-											<option value="form" selected={task.typeValue == "form"}>Confirmation or form</option>
-											<option value="file" selected={task.typeValue == "file"}>File upload</option>
-											<option value="headshot" selected={task.typeValue == "headshot"}>Headshot upload</option>
-											<option value="profile" selected={task.typeValue == "profile"}>Profile update</option>
-										</select>
-										<p class="form-error" data-gosx-field-error="type" aria-live="polite"></p>
-									</label>
-								</div>
-								<label>
-									<span>Instructions</span>
-									<textarea name="description" maxlength="2000">{task.description}</textarea>
-									<p class="form-error" data-gosx-field-error="description" aria-live="polite"></p>
-								</label>
-								<div class="form-grid-two">
-									<label>
-										<span>Due</span>
-										<input type="datetime-local" name="due_at" value={task.dueInput} required></input>
-										<p class="form-error" data-gosx-field-error="due_at" aria-live="polite"></p>
-									</label>
-									<div class="checkbox-stack">
-										<label class="checkbox-control">
-											<input type="checkbox" name="required" checked={task.required}></input>
-											<span>Required</span>
+							<If cond={!data.workspace.readOnlyPreview}>
+								<ActionForm class="task-update-form" actionName="updateTask">
+									<input type="hidden" name="csrf_token" value={csrf.token}></input>
+									<input type="hidden" name="task_id" value={task.id}></input>
+									<p class="form-status" role="status" aria-live="polite">{actions.updateTask.message}</p>
+									<div class="form-grid-two">
+										<label>
+											<span>Title</span>
+											<input name="title" maxlength="160" value={task.title} required></input>
+											<p class="form-error" data-gosx-field-error="title" aria-live="polite"></p>
 										</label>
-										<label class="checkbox-control">
-											<input type="checkbox" name="accepted_only" checked={task.acceptedOnly}></input>
-											<span>Accepted speakers only</span>
+										<label>
+											<span>Type</span>
+											<select name="type">
+												<option value="form" selected={task.typeValue == "form"}>Confirmation or form</option>
+												<option value="file" selected={task.typeValue == "file"}>File upload</option>
+												<option value="headshot" selected={task.typeValue == "headshot"}>Headshot upload</option>
+												<option value="profile" selected={task.typeValue == "profile"}>Profile update</option>
+											</select>
+											<p class="form-error" data-gosx-field-error="type" aria-live="polite"></p>
 										</label>
 									</div>
-								</div>
-								<button class="button button-compact" type="submit">Save task</button>
-							</ActionForm>
-							<div class="task-manager-actions">
-								<ActionForm class="task-assign-form" actionName="assignTask">
-									<input type="hidden" name="csrf_token" value={csrf.token}></input>
-									<input type="hidden" name="task_id" value={task.id}></input>
 									<label>
-										<span>Assign speaker</span>
-										<select name="speaker_id" required>
-											<Each of={data.speakers} as="speaker">
-												<option value={speaker.id} disabled={task.acceptedOnly && !speaker.accepted}>
-													{speaker.name}
-													<If cond={!speaker.accepted}>{" (not accepted)"}</If>
-												</option>
-											</Each>
-										</select>
-										<p class="form-error" data-gosx-field-error="speaker_id" aria-live="polite"></p>
+										<span>Instructions</span>
+										<textarea name="description" maxlength="2000">{task.description}</textarea>
+										<p class="form-error" data-gosx-field-error="description" aria-live="polite"></p>
 									</label>
-									<p class="form-status" role="status" aria-live="polite">{actions.assignTask.message}</p>
-									<button class="button button-compact" type="submit">Assign</button>
+									<div class="form-grid-two">
+										<label>
+											<span>Due</span>
+											<input type="datetime-local" name="due_at" value={task.dueInput} required></input>
+											<p class="form-error" data-gosx-field-error="due_at" aria-live="polite"></p>
+										</label>
+										<div class="checkbox-stack">
+											<label class="checkbox-control">
+												<input type="checkbox" name="required" checked={task.required}></input>
+												<span>Required</span>
+											</label>
+											<label class="checkbox-control">
+												<input type="checkbox" name="accepted_only" checked={task.acceptedOnly}></input>
+												<span>Accepted speakers only</span>
+											</label>
+										</div>
+									</div>
+									<button class="button button-compact" type="submit">Save task</button>
 								</ActionForm>
-								<ActionForm class="task-retire-form" actionName="retireTask">
-									<input type="hidden" name="csrf_token" value={csrf.token}></input>
-									<input type="hidden" name="task_id" value={task.id}></input>
-									<p class="form-status" role="status" aria-live="polite">{actions.retireTask.message}</p>
-									<button class="button button-compact" type="submit">Retire task</button>
-								</ActionForm>
-							</div>
+								<div class="task-manager-actions">
+									<ActionForm class="task-assign-form" actionName="assignTask">
+										<input type="hidden" name="csrf_token" value={csrf.token}></input>
+										<input type="hidden" name="task_id" value={task.id}></input>
+										<label>
+											<span>Assign speaker</span>
+											<select name="speaker_id" required>
+												<Each of={data.speakers} as="speaker">
+													<option value={speaker.id} disabled={task.acceptedOnly && !speaker.accepted}>
+														{speaker.name}
+														<If cond={!speaker.accepted}>{" (not accepted)"}</If>
+													</option>
+												</Each>
+											</select>
+											<p class="form-error" data-gosx-field-error="speaker_id" aria-live="polite"></p>
+										</label>
+										<p class="form-status" role="status" aria-live="polite">{actions.assignTask.message}</p>
+										<button class="button button-compact" type="submit">Assign</button>
+									</ActionForm>
+									<ActionForm class="task-retire-form" actionName="retireTask">
+										<input type="hidden" name="csrf_token" value={csrf.token}></input>
+										<input type="hidden" name="task_id" value={task.id}></input>
+										<p class="form-status" role="status" aria-live="polite">{actions.retireTask.message}</p>
+										<button class="button button-compact" type="submit">Retire task</button>
+									</ActionForm>
+								</div>
+							</If>
 						</article>
 					</Each>
 				</div>
@@ -274,19 +285,24 @@ func Page() Node {
 									· submitted
 									{item.updated}
 								</small>
-								<If cond={item.hasFile}>
+								<If cond={item.hasFile && !data.workspace.readOnlyPreview}>
 									<small class="mono">
 										<a href={item.fileURL} class="file-download">{item.fileName}</a>
 									</small>
 								</If>
+								<If cond={item.hasFile && data.workspace.readOnlyPreview}>
+									<small class="mono">{item.fileName}</small>
+								</If>
 							</div>
-							<ActionForm class="approval-action" actionName="approveTask">
-								<input type="hidden" name="csrf_token" value={csrf.token}></input>
-								<input type="hidden" name="task_id" value={item.taskID}></input>
-								<input type="hidden" name="speaker_id" value={item.speakerID}></input>
-								<p class="form-status" role="status" aria-live="polite">{action.message}</p>
-								<button class="button button-primary button-compact" type="submit">Approve</button>
-							</ActionForm>
+							<If cond={!data.workspace.readOnlyPreview}>
+								<ActionForm class="approval-action" actionName="approveTask">
+									<input type="hidden" name="csrf_token" value={csrf.token}></input>
+									<input type="hidden" name="task_id" value={item.taskID}></input>
+									<input type="hidden" name="speaker_id" value={item.speakerID}></input>
+									<p class="form-status" role="status" aria-live="polite">{action.message}</p>
+									<button class="button button-primary button-compact" type="submit">Approve</button>
+								</ActionForm>
+							</If>
 						</article>
 					</Each>
 				</div>

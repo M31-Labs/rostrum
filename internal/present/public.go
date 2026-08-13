@@ -53,7 +53,8 @@ func submissionForm(state domain.State, slug string, values map[string]string) (
 		return nil, err
 	}
 	return map[string]any{
-		"workspace": WorkspaceIdentity(state),
+		"workspace":       WorkspaceIdentity(state),
+		"readOnlyPreview": ReadOnlyPreviewMode(),
 		"event": map[string]any{
 			"name":     state.Event.Name,
 			"year":     state.Event.StartsAt.Format("2006"),
@@ -238,6 +239,12 @@ func SpeakerPortal(state domain.State, speakerID string, submitted bool) (map[st
 		if status == domain.TaskApproved || status == domain.TaskSubmitted {
 			complete++
 		}
+		accept := ".pdf,.ppt,.pptx,.key,.png,.jpg,.jpeg,.webp,application/pdf,image/png,image/jpeg,image/webp"
+		uploadHint := "Drop slides, a PDF, or an image here — or choose a file"
+		if task.Type == "headshot" {
+			accept = ".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp"
+			uploadHint = "Drop a PNG, JPEG, or WebP portrait here — or choose a file"
+		}
 		taskRows = append(taskRows, map[string]any{
 			"id":          task.ID,
 			"title":       task.Title,
@@ -254,6 +261,8 @@ func SpeakerPortal(state domain.State, speakerID string, submitted bool) (map[st
 			"complete":    status == domain.TaskApproved || status == domain.TaskSubmitted,
 			"fields":      taskFieldRows(task.FormFields, completion.Values),
 			"hasFields":   len(task.FormFields) > 0,
+			"accept":      accept,
+			"uploadHint":  uploadHint,
 		})
 	}
 

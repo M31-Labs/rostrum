@@ -145,10 +145,13 @@ func PortalOperations(state domain.State) map[string]any {
 		})
 	}
 	sort.Slice(speakers, func(i, j int) bool { return speakers[i]["name"].(string) < speakers[j]["name"].(string) })
+	previewPortalURL := ""
+	if speakerID := FirstPortalSpeaker(state); speakerID != "" {
+		previewPortalURL = "/portal/" + speakerID
+	}
 
 	return map[string]any{
 		"section":   "portal",
-		"demoMode":  DemoMode(),
 		"workspace": WorkspaceIdentity(state),
 		"metrics": []map[string]any{
 			{"label": "Complete or submitted", "value": totalComplete, "detail": Percent(totalComplete, totalAssigned)},
@@ -156,17 +159,19 @@ func PortalOperations(state domain.State) map[string]any {
 			{"label": "Needs resubmission", "value": totalDeclined, "detail": Percent(totalDeclined, totalAssigned)},
 			{"label": "Outstanding", "value": totalAssigned - totalComplete, "detail": Percent(totalAssigned-totalComplete, totalAssigned)},
 		},
-		"tasks":         taskRows,
-		"hasTasks":      len(taskRows) > 0,
-		"retiredTasks":  retiredTasks,
-		"retiredCount":  len(retiredTasks),
-		"hasRetired":    len(retiredTasks) > 0,
-		"speakers":      speakers,
-		"approvals":     approvals,
-		"approvalCount": len(approvals),
-		"hasApprovals":  len(approvals) > 0,
-		"people":        people,
-		"resources":     resources,
+		"tasks":            taskRows,
+		"hasTasks":         len(taskRows) > 0,
+		"retiredTasks":     retiredTasks,
+		"retiredCount":     len(retiredTasks),
+		"hasRetired":       len(retiredTasks) > 0,
+		"speakers":         speakers,
+		"approvals":        approvals,
+		"approvalCount":    len(approvals),
+		"hasApprovals":     len(approvals) > 0,
+		"people":           people,
+		"resources":        resources,
+		"previewPortalURL": previewPortalURL,
+		"hasPreviewPortal": previewPortalURL != "",
 	}
 }
 

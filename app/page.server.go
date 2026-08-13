@@ -45,7 +45,6 @@ func landingData(state domain.State) map[string]any {
 		}
 	}
 	return map[string]any{
-		"demoMode":  present.DemoMode(),
 		"workspace": present.WorkspaceIdentity(state),
 		"event": map[string]any{
 			"name":     state.Event.Name,

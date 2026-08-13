@@ -4,16 +4,29 @@ import (
 	"testing"
 	"time"
 
+	"github.com/m31-labs/rostrum/examples/demo/fixture"
 	"github.com/m31-labs/rostrum/internal/domain"
 )
 
 // TestPublicSpeakersHeadshotRequiresApproval covers PT-3's headshot
 // acceptance criterion for the public gallery: only an approved headshot
-// task completion produces a /headshots/ URL, using the seed's mixed
+// task completion with a stored file produces a /public-headshot/ URL, using
+// the seed's mixed
 // approved/declined/submitted task_headshot completions across speakers who
 // all have a published session and so already appear in the gallery.
 func TestPublicSpeakersHeadshotRequiresApproval(t *testing.T) {
-	state := domain.Seed(time.Now().UTC())
+	state := fixture.Seed(time.Now().UTC())
+	for index := range state.Tasks {
+		if state.Tasks[index].ID == "task_headshot" {
+			state.Tasks[index].Type = "headshot"
+		}
+	}
+	for index := range state.TaskCompletions {
+		completion := &state.TaskCompletions[index]
+		if completion.TaskID == "task_headshot" && completion.Status == domain.TaskApproved {
+			completion.StoredPath = "/durable/uploads/" + completion.SpeakerID + ".webp"
+		}
+	}
 	view, err := PublicSpeakers(state, state.Event.Slug, false)
 	if err != nil {
 		t.Fatalf("PublicSpeakers: %v", err)
@@ -27,9 +40,9 @@ func TestPublicSpeakersHeadshotRequiresApproval(t *testing.T) {
 	tests := []struct {
 		id, want string
 	}{
-		{"spk_maya", "/demo-headshots/spk_maya.webp"},   // Approved fictional seed portrait.
-		{"spk_theo", "/demo-headshots/spk_theo.webp"},   // Approved fictional seed portrait.
-		{"spk_priya", "/demo-headshots/spk_priya.webp"}, // Approved fictional seed portrait.
+		{"spk_maya", "/public-headshot/spk_maya"},
+		{"spk_theo", "/public-headshot/spk_theo"},
+		{"spk_priya", "/public-headshot/spk_priya"},
 		{"spk_lina", ""},   // TaskDeclined
 		{"spk_elliot", ""}, // TaskSubmitted, not yet approved
 	}
@@ -47,8 +60,13 @@ func TestPublicSpeakersHeadshotRequiresApproval(t *testing.T) {
 	}
 }
 
-func TestPublicSpeakersApprovedReplacementOverridesSeedPortrait(t *testing.T) {
-	state := domain.Seed(time.Now().UTC())
+func TestPublicSpeakersApprovedCompletionUsesStateAuthenticatedRoute(t *testing.T) {
+	state := fixture.Seed(time.Now().UTC())
+	for index := range state.Tasks {
+		if state.Tasks[index].ID == "task_headshot" {
+			state.Tasks[index].Type = "headshot"
+		}
+	}
 	for index := range state.TaskCompletions {
 		completion := &state.TaskCompletions[index]
 		if completion.TaskID == "task_headshot" && completion.SpeakerID == "spk_maya" {
@@ -61,7 +79,7 @@ func TestPublicSpeakersApprovedReplacementOverridesSeedPortrait(t *testing.T) {
 		t.Fatalf("PublicSpeakers: %v", err)
 	}
 	for _, speaker := range view["speakers"].([]map[string]any) {
-		if speaker["id"] == "spk_maya" && speaker["headshotURL"] != "/headshots/spk_maya.png" {
+		if speaker["id"] == "spk_maya" && speaker["headshotURL"] != "/public-headshot/spk_maya" {
 			t.Fatalf("replacement headshotURL = %q, want approved upload", speaker["headshotURL"])
 		}
 	}
@@ -74,7 +92,7 @@ func TestIsHeadshotTask(t *testing.T) {
 		want bool
 	}{
 		{"canonical PT-4 type", domain.Task{ID: "task_new_headshot", Type: "headshot"}, true},
-		{"seeded bridge id", domain.Task{ID: "task_headshot", Type: "file"}, true},
+		{"name alone is not semantic", domain.Task{ID: "task_headshot", Type: "file"}, false},
 		{"unrelated task", domain.Task{ID: "task_slides", Type: "file"}, false},
 	}
 	for _, test := range tests {
@@ -86,19 +104,14 @@ func TestIsHeadshotTask(t *testing.T) {
 	}
 }
 
-func TestFileExtension(t *testing.T) {
-	tests := []struct {
-		name string
-		want string
-	}{
-		{"maya-chen-headshot.jpg", ".jpg"},
-		{"theo-okafor.PNG", ".png"},
-		{"no-extension", ".jpg"},
-		{"", ".jpg"},
-	}
-	for _, test := range tests {
-		if got := fileExtension(test.name); got != test.want {
-			t.Fatalf("fileExtension(%q) = %q, want %q", test.name, got, test.want)
+func TestPublicHeadshotURLRequiresStoredFile(t *testing.T) {
+	state := fixture.Seed(time.Now().UTC())
+	for index := range state.Tasks {
+		if state.Tasks[index].ID == "task_headshot" {
+			state.Tasks[index].Type = "headshot"
 		}
+	}
+	if got := publicHeadshotURL(state, "spk_maya"); got != "" {
+		t.Fatalf("approved completion without stored path produced %q", got)
 	}
 }

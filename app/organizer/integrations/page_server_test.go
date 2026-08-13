@@ -6,15 +6,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/m31-labs/rostrum/examples/demo/fixture"
 	"github.com/m31-labs/rostrum/internal/airtable"
 	"github.com/m31-labs/rostrum/internal/appstate"
-	"github.com/m31-labs/rostrum/internal/domain"
 	"github.com/m31-labs/rostrum/internal/store"
 	"m31labs.dev/gosx/action"
 )
 
 func TestAirtableDryRunRecordsAuditedCredentialFreeProjection(t *testing.T) {
-	state := domain.Seed(time.Now().UTC())
+	state := fixture.Seed(time.Now().UTC())
 	workspace, err := store.Open(":memory:", state)
 	if err != nil {
 		t.Fatalf("open workspace: %v", err)
@@ -61,7 +61,7 @@ func TestAirtableSyncQueuesBeforeDeliveryAndRecordsOutcome(t *testing.T) {
 	}))
 	defer remote.Close()
 
-	state := domain.Seed(time.Now().UTC())
+	state := fixture.Seed(time.Now().UTC())
 	workspace, err := store.Open(":memory:", state)
 	if err != nil {
 		t.Fatalf("open workspace: %v", err)

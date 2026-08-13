@@ -5,26 +5,6 @@ import (
 	"time"
 )
 
-func TestSeedIsValidAndContainsDemoConflicts(t *testing.T) {
-	state := Seed(time.Date(2026, time.August, 9, 12, 0, 0, 0, time.UTC))
-	if err := state.Validate(); err != nil {
-		t.Fatalf("seed validation failed: %v", err)
-	}
-	conflicts := DetectConflicts(state.Sessions)
-	if len(conflicts) < 3 {
-		t.Fatalf("seed conflicts = %d, want at least 3", len(conflicts))
-	}
-	kinds := map[string]bool{}
-	for _, conflict := range conflicts {
-		kinds[conflict.Kind] = true
-	}
-	for _, kind := range []string{ConflictSpeaker, ConflictRoom, ConflictTrack} {
-		if !kinds[kind] {
-			t.Fatalf("seed has no %s conflict", kind)
-		}
-	}
-}
-
 func TestTouchingSessionsDoNotConflict(t *testing.T) {
 	start := time.Date(2026, time.October, 15, 9, 0, 0, 0, time.UTC)
 	sessions := []Session{

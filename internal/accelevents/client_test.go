@@ -8,11 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/m31-labs/rostrum/internal/domain"
+	"github.com/m31-labs/rostrum/examples/demo/fixture"
 )
 
 func TestBuildPayloadsUsesOnlyPublishedProgram(t *testing.T) {
-	payloads := BuildPayloads(domain.Seed(time.Now().UTC()))
+	payloads := BuildPayloads(fixture.Seed(time.Now().UTC()))
 	if len(payloads.Sessions) != 6 || len(payloads.Speakers) != 6 {
 		t.Fatalf("unexpected payload counts: %d sessions, %d speakers", len(payloads.Sessions), len(payloads.Speakers))
 	}

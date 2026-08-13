@@ -35,7 +35,7 @@ func Page() Node {
 				</p>
 				<div class="hero-actions">
 					<a class="button button-primary" href="/organizer" data-gosx-link>
-						{data.demoMode ? "Enter the demo workspace" : "Enter the workspace"}
+						{data.workspace.readOnlyPreview ? "Explore the observer workspace" : "Enter the workspace"}
 					</a>
 					<a class="text-link" href={data.workspace.cfpHref} data-gosx-link hidden={!data.workspace.hasCFP}>
 						Walk the speaker path
@@ -43,9 +43,11 @@ func Page() Node {
 					</a>
 				</div>
 			</div>
-			<aside class="event-ticket" aria-label={data.demoMode ? "Demo event" : "Event"}>
+			<aside class="event-ticket" aria-label={data.workspace.readOnlyPreview ? "Preview event" : "Event"}>
 				<div class="ticket-topline">
-					<span>Live workspace</span>
+					<span>
+						{data.workspace.readOnlyPreview ? data.workspace.previewLabel : "Live workspace"}
+					</span>
 					<span>{data.event.year}</span>
 				</div>
 				<div class="ticket-orbit" aria-hidden="true">
@@ -64,7 +66,7 @@ func Page() Node {
 			</Each>
 			<p class="live-note">
 				<span class="live-dot" aria-hidden="true"></span>
-				Seeded workspace updated
+				Workspace updated
 				{data.updated}
 			</p>
 		</section>

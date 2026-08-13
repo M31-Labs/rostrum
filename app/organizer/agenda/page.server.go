@@ -75,6 +75,9 @@ func moveSession(ctx *action.Context) error {
 		if !found {
 			return fmt.Errorf("session %s not found", sessionID)
 		}
+		if item.Status == "cancelled" {
+			return action.Validation("Cancelled sessions stay off the agenda.", map[string]string{"session_id": "This session is cancelled and cannot be moved."}, ctx.FormData)
+		}
 		if _, found := state.Room(roomID); !found {
 			return fmt.Errorf("room %s not found", roomID)
 		}
@@ -90,10 +93,14 @@ func moveSession(ctx *action.Context) error {
 			return action.Validation("Choose a valid agenda time.", map[string]string{"starts_at": "Invalid date or time."}, ctx.FormData)
 		}
 		duration := item.Duration()
+		endsAt := startsAt.Add(duration)
+		if startsAt.Before(state.Event.StartsAt) || endsAt.After(state.Event.EndsAt) {
+			return action.Validation("Choose a time within the event schedule.", map[string]string{"starts_at": "The full session must fit between the event start and end."}, ctx.FormData)
+		}
 		item.RoomID = roomID
 		item.TrackID = trackID
 		item.StartsAt = startsAt
-		item.EndsAt = startsAt.Add(duration)
+		item.EndsAt = endsAt
 		item.DurationMinutes = int(duration / time.Minute)
 		item.Status = "draft"
 		title = item.Title
@@ -151,6 +158,9 @@ func unscheduleSession(ctx *action.Context) error {
 		if !found {
 			return fmt.Errorf("session %s not found", sessionID)
 		}
+		if item.Status == "cancelled" {
+			return action.Validation("Cancelled sessions stay off the agenda.", map[string]string{"session_id": "This session is cancelled and cannot be returned to the bank."}, ctx.FormData)
+		}
 		item.DurationMinutes = int(item.Duration() / time.Minute)
 		item.StartsAt = time.Time{}
 		item.EndsAt = time.Time{}
@@ -174,6 +184,10 @@ func unscheduleSession(ctx *action.Context) error {
 func publishAgenda(ctx *action.Context) error {
 	eventID := appstate.MustGet().Snapshot().Event.ID
 	now := time.Now().UTC()
+	engine, err := decisionrules.Shared()
+	if err != nil {
+		return err
+	}
 	var publishedSessionIDs []string
 	queuedInvites := 0
 	if err := appstate.MustGet().UpdateAudit(domain.AuditMeta{
@@ -181,19 +195,23 @@ func publishAgenda(ctx *action.Context) error {
 		Action:     "agenda.published",
 		EntityType: "event",
 		EntityID:   eventID,
-		Summary:    "Published every scheduled session after conflict checks.",
+		Summary:    "Published every eligible scheduled session after conflict checks.",
 		Origin:     "organizer-agenda",
 	}, func(state *domain.State) error {
 		for _, conflict := range domain.DetectConflicts(state.Sessions) {
-			if conflict.Severity == domain.SeverityHard {
-				return action.Validation("Resolve hard conflicts before publishing.", map[string]string{"agenda": "Speaker and room collisions remain."}, ctx.FormData)
+			decision, decisionErr := engine.EvaluateConflict(conflict)
+			if decisionErr != nil {
+				return decisionErr
+			}
+			if !decision.Allowed {
+				return action.Validation("Resolve blocked schedule conflicts before publishing.", map[string]string{"agenda": decision.Reason}, ctx.FormData)
 			}
 		}
 		for index := range state.Sessions {
-			// M5: only a scheduled session (non-zero start and end) goes
-			// public. An unscheduled bank session keeps its status, so it
-			// never leaks into the public schedule with a zero-value date.
-			if !state.Sessions[index].Scheduled() {
+			// M5: only an eligible scheduled session (non-zero start and end)
+			// goes public. Banked and cancelled sessions keep their status, so
+			// neither leaks back into the public schedule.
+			if !state.Sessions[index].Scheduled() || state.Sessions[index].Status == "cancelled" {
 				continue
 			}
 			state.Sessions[index].Status = "published"

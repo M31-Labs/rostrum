@@ -39,6 +39,7 @@ func init() {
 		},
 		Actions: route.FileActions{
 			"createForm":         createForm,
+			"updateFormDetails":  updateFormDetails,
 			"toggleForm":         toggleForm,
 			"addField":           addField,
 			"updateField":        updateField,
@@ -51,6 +52,79 @@ func init() {
 	}); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func updateFormDetails(ctx *action.Context) error {
+	formID := strings.TrimSpace(ctx.FormData["form_id"])
+	name := strings.TrimSpace(ctx.FormData["name"])
+	title := strings.TrimSpace(ctx.FormData["title"])
+	welcomeHeading := strings.TrimSpace(ctx.FormData["welcome_heading"])
+	welcomeBody := strings.TrimSpace(ctx.FormData["welcome_body"])
+	successHeading := strings.TrimSpace(ctx.FormData["success_heading"])
+	successBody := strings.TrimSpace(ctx.FormData["success_body"])
+	fieldErrors := map[string]string{}
+	for field, value := range map[string]string{
+		"name": name, "title": title, "welcome_heading": welcomeHeading, "welcome_body": welcomeBody,
+	} {
+		if value == "" {
+			fieldErrors[field] = "Required."
+		}
+	}
+	for field, value := range map[string]string{
+		"name": name, "title": title, "welcome_heading": welcomeHeading, "success_heading": successHeading,
+	} {
+		if len([]rune(value)) > 200 {
+			fieldErrors[field] = "Keep this to 200 characters or fewer."
+		}
+	}
+	for field, value := range map[string]string{"welcome_body": welcomeBody, "success_body": successBody} {
+		if len([]rune(value)) > 4_000 {
+			fieldErrors[field] = "Keep this to 4,000 characters or fewer."
+		}
+	}
+	if len(fieldErrors) > 0 {
+		return action.Validation("Correct the public form details.", fieldErrors, ctx.FormData)
+	}
+	if err := appstate.MustGet().UpdateAudit(domain.AuditMeta{
+		Actor:      formsActor(ctx),
+		Action:     "form.details_updated",
+		EntityType: "submission_form",
+		EntityID:   formID,
+		Summary:    "Updated public CFP copy and submitter handoff settings.",
+		Origin:     "organizer-forms",
+	}, func(state *domain.State) error {
+		form, found := state.Form(formID)
+		if !found {
+			return action.Error(404, "Form not found.")
+		}
+		if ctx.FormData["send_confirmation"] == "yes" {
+			templateFound := false
+			for _, template := range state.EmailTemplates {
+				if template.ID == form.ConfirmationTemplate {
+					templateFound = true
+					break
+				}
+			}
+			if !templateFound {
+				return action.Validation("Choose a valid confirmation template before enabling email.", map[string]string{"send_confirmation": "The configured template is missing."}, ctx.FormData)
+			}
+		}
+		form.Name = name
+		form.ExternalTitle = title
+		form.WelcomeHeading = welcomeHeading
+		form.WelcomeBody = welcomeBody
+		form.SuccessHeading = successHeading
+		form.SuccessBody = successBody
+		form.SendConfirmation = ctx.FormData["send_confirmation"] == "yes"
+		form.RedirectToPortal = ctx.FormData["redirect_to_portal"] == "yes"
+		return nil
+	}); err != nil {
+		return err
+	}
+	session.AddFlash(ctx.Request, "notice", "Public CFP copy and handoff settings saved.")
+	live.Broadcast("form:updated", map[string]string{"id": formID, "area": "details"})
+	actionflow.Redirect(ctx, formURL(formID))
+	return nil
 }
 
 // createForm makes a separately addressable public CFP. New forms begin
@@ -121,7 +195,7 @@ func createForm(ctx *action.Context) error {
 			SendConfirmation:      true,
 			ConfirmationTemplate:  "tpl_submission_confirmation",
 			RuleFile:              "rules/form-visibility.arb",
-			Fields:                coreFields(state.Event),
+			Fields:                domain.CoreSubmissionFields(state.Event),
 		})
 		return nil
 	}); err != nil {
@@ -634,33 +708,6 @@ func formIDTaken(forms []domain.SubmissionForm, id string) bool {
 		}
 	}
 	return false
-}
-
-// coreFields is the minimal, locked schema every new CFP receives. The
-// underlying typed Submission and Speaker records only need these fields to
-// preserve routing, review, speaker identity, and a usable public workflow.
-func coreFields(event domain.Event) []domain.FormField {
-	return []domain.FormField{
-		{ID: "title", Section: "proposal", Label: "Session title", Type: "text", Required: true, Locked: true, Placeholder: "A concrete title that tells us what changes", MaxLength: 120},
-		{ID: "abstract", Section: "proposal", Label: "Abstract", Type: "textarea", Required: true, Locked: true, Help: "Describe the problem, the approach, and what attendees will be able to do afterward.", MaxLength: 1600},
-		{ID: "format", Section: "proposal", Label: "Format", Type: "select", Required: true, Locked: true, Options: append([]string(nil), event.Formats...)},
-		{ID: "category", Section: "proposal", Label: "Category", Type: "select", Required: true, Locked: true, Options: categoryNames(event.Categories)},
-		{ID: "level", Section: "proposal", Label: "Audience level", Type: "select", Required: true, Locked: true, Options: append([]string(nil), event.Levels...)},
-		{ID: "first_name", Section: "participant", Label: "First name", Type: "text", Required: true, Locked: true, MaxLength: 80},
-		{ID: "last_name", Section: "participant", Label: "Last name", Type: "text", Required: true, Locked: true, MaxLength: 80},
-		{ID: "email", Section: "participant", Label: "Email", Type: "email", Required: true, Locked: true, MaxLength: 254},
-		{ID: "role", Section: "participant", Label: "Role", Type: "text", Required: false, Locked: true, MaxLength: 160},
-		{ID: "company", Section: "participant", Label: "Company or project", Type: "text", Required: false, Locked: true, MaxLength: 160},
-		{ID: "biography", Section: "participant", Label: "Short biography", Type: "textarea", Required: false, Locked: true, MaxLength: 800},
-	}
-}
-
-func categoryNames(categories []domain.Category) []string {
-	values := make([]string, 0, len(categories))
-	for _, category := range categories {
-		values = append(values, category.Name)
-	}
-	return values
 }
 
 func formField(fields []domain.FormField, id string) (domain.FormField, bool) {

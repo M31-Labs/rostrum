@@ -22,7 +22,6 @@ func Settings(state domain.State) map[string]any {
 	}
 	return map[string]any{
 		"section":   "settings",
-		"demoMode":  DemoMode(),
 		"workspace": WorkspaceIdentity(state),
 		"event": map[string]any{
 			"id":          state.Event.ID,

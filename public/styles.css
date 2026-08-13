@@ -1446,7 +1446,7 @@ h3 {
   min-width: 0;
 }
 
-.demo-banner {
+.preview-banner {
   min-height: var(--control-height);
   padding: var(--space-xs) var(--page-gutter);
   border-bottom: var(--border-thin) solid var(--color-line);
@@ -1459,20 +1459,20 @@ h3 {
   font-size: var(--type-xs);
 }
 
-.demo-banner span {
+.preview-banner span {
   font-family: var(--font-mono);
   font-weight: var(--weight-medium);
   text-transform: uppercase;
   letter-spacing: var(--letter-label);
 }
 
-.demo-banner form {
+.preview-banner form {
   display: inline-flex;
   align-items: center;
   gap: var(--space-xs);
 }
 
-.demo-banner button {
+.preview-banner button {
   padding: 0;
   border: 0;
   color: inherit;
@@ -1483,7 +1483,7 @@ h3 {
   cursor: pointer;
 }
 
-.demo-banner .form-status {
+.preview-banner .form-status {
   margin: 0;
   color: var(--color-danger);
   font-weight: var(--weight-semibold);
@@ -3393,6 +3393,9 @@ code {
 }
 
 .agenda-list-row summary {
+  min-height: var(--control-height);
+  display: inline-flex;
+  align-items: center;
   color: var(--color-accent);
   font-size: var(--type-xs);
   font-weight: var(--weight-semibold);
@@ -3536,6 +3539,15 @@ code {
   cursor: grabbing;
 }
 
+.agenda-card[draggable="false"] {
+  cursor: default;
+}
+
+.agenda-card[draggable="false"]:hover {
+  transform: none;
+  box-shadow: var(--shadow-lift);
+}
+
 .agenda-card.track-teal {
   border-left-color: var(--color-track-teal);
 }
@@ -3670,9 +3682,13 @@ code {
 }
 
 .move-form select {
-  min-height: auto;
-  padding: var(--space-2xs);
+  min-height: var(--control-height);
+  padding: var(--space-2xs) var(--space-xs);
   font-size: var(--type-xs);
+}
+
+.move-form .button-compact {
+  min-height: var(--control-height);
 }
 
 .conflict-list {
@@ -4736,10 +4752,58 @@ code {
   flex: 1;
 }
 
-.file-action input[type="file"] {
-  min-height: auto;
-  padding: var(--space-2xs);
+.file-action {
+  flex-wrap: wrap;
+}
+
+.file-drop-surface {
+  position: relative;
+  overflow: hidden;
+  display: grid;
+  gap: var(--space-3xs);
+  padding: var(--space-sm);
+  border: var(--border-thin) dashed var(--color-accent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--color-accent-soft) 44%, transparent);
+  cursor: pointer;
+  transition:
+    border-color var(--duration-fast) var(--ease-out),
+    background-color var(--duration-fast) var(--ease-out);
+}
+
+.file-drop-surface:hover,
+.file-drop-surface:focus-within {
+  border-color: var(--color-accent-strong);
+  background: var(--color-accent-soft);
+}
+
+.file-drop-surface:focus-within {
+  outline: 0.125rem solid var(--color-accent-bright);
+  outline-offset: var(--space-3xs);
+  box-shadow: 0 0 0 var(--space-xs) var(--color-focus);
+}
+
+.file-drop-title {
+  color: var(--color-text);
+  font-weight: var(--weight-semibold);
+}
+
+.file-drop-note {
   font-size: var(--type-xs);
+  color: var(--color-text-muted);
+}
+
+.file-drop-surface input[type="file"] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  min-height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  opacity: 0;
 }
 
 .file-action .form-status {
@@ -4767,6 +4831,20 @@ code {
 
 .profile-editor .button {
   justify-self: start;
+}
+
+.preview-form-snapshot .field-row {
+  padding-block: var(--space-sm);
+  border-bottom: var(--border-thin) solid var(--color-line);
+  display: grid;
+  gap: var(--space-2xs);
+}
+
+.preview-form-snapshot .field-row p,
+.preview-form-snapshot .field-row small {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--type-xs);
 }
 
 .portal-sessions,
@@ -5942,7 +6020,7 @@ code {
     justify-content: flex-start;
   }
 
-  .demo-banner {
+  .preview-banner {
     flex-wrap: wrap;
   }
 

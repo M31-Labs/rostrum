@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/m31-labs/rostrum/examples/demo/fixture"
 	"github.com/m31-labs/rostrum/internal/appstate"
 	"github.com/m31-labs/rostrum/internal/domain"
 	"github.com/m31-labs/rostrum/internal/store"
@@ -15,7 +16,7 @@ import (
 )
 
 func TestPortalKeyCannotAuthorizeAnotherSpeaker(t *testing.T) {
-	state := domain.Seed(time.Date(2026, time.August, 10, 12, 0, 0, 0, time.UTC))
+	state := fixture.Seed(time.Date(2026, time.August, 10, 12, 0, 0, 0, time.UTC))
 	state.Speakers = append(state.Speakers, domain.Speaker{
 		ID: "spk_isolated", FirstName: "Isolated", LastName: "Submitter", Email: "maya@example.com",
 	})

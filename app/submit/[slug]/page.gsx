@@ -195,14 +195,18 @@ func Page() Node {
 				</div>
 			</dl>
 			<div class="submission-assurances">
-				<span>
-					<i aria-hidden="true">✓</i>
-					Confirmation email
-				</span>
-				<span>
-					<i aria-hidden="true">✓</i>
-					Immediate speaker portal
-				</span>
+				<If cond={data.form.confirmation}>
+					<span>
+						<i aria-hidden="true">✓</i>
+						Confirmation message
+					</span>
+				</If>
+				<If cond={data.form.redirect}>
+					<span>
+						<i aria-hidden="true">✓</i>
+						Secure speaker portal
+					</span>
+				</If>
 				<span>
 					<i aria-hidden="true">✓</i>
 					{data.form.reviewProcess}
@@ -218,6 +222,14 @@ func Page() Node {
 				<h2>Tell us what you have learned.</h2>
 				<p>{data.form.body}</p>
 			</header>
+			<If cond={data.readOnlyPreview}>
+				<div class="closed-notice" role="status">
+					<strong>Submission journey preview.</strong>
+					<p>
+						The live call’s questions and conditional structure are visible below; draft and submit controls are not shown.
+					</p>
+				</div>
+			</If>
 			<If cond={!data.form.open}>
 				<div class="closed-notice">
 					<strong>This call is closed.</strong>
@@ -226,7 +238,7 @@ func Page() Node {
 					</p>
 				</div>
 			</If>
-			<If cond={data.form.open}>
+			<If cond={data.form.open && !data.readOnlyPreview}>
 				<ActionForm class="public-form" actionName="submitProposal" aria-describedby="submission-form-status">
 					<input type="hidden" name="csrf_token" value={csrf.token}></input>
 					<input type="hidden" name="form_id" value={data.form.id}></input>
@@ -293,6 +305,44 @@ func Page() Node {
 						</button>
 					</footer>
 				</ActionForm>
+			</If>
+			<If cond={data.form.open && data.readOnlyPreview}>
+				<div class="public-form preview-form-snapshot">
+					<fieldset>
+						<legend>
+							<span>01</span>
+							Proposal
+						</legend>
+						<Each of={data.proposalFields} as="field">
+							<div class="field-row">
+								<strong>{field.label}</strong>
+								<If cond={field.required}>
+									<small>Required</small>
+								</If>
+								<If cond={field.help != ""}>
+									<p>{field.help}</p>
+								</If>
+							</div>
+						</Each>
+					</fieldset>
+					<fieldset>
+						<legend>
+							<span>02</span>
+							Participant
+						</legend>
+						<Each of={data.participantFields} as="field">
+							<div class="field-row">
+								<strong>{field.label}</strong>
+								<If cond={field.required}>
+									<small>Required</small>
+								</If>
+								<If cond={field.help != ""}>
+									<p>{field.help}</p>
+								</If>
+							</div>
+						</Each>
+					</fieldset>
+				</div>
 			</If>
 		</section>
 	</main>

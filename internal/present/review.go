@@ -143,7 +143,6 @@ func Review(state domain.State) map[string]any {
 
 	return map[string]any{
 		"section":             "review",
-		"demoMode":            DemoMode(),
 		"workspace":           WorkspaceIdentity(state),
 		"plans":               plans,
 		"activePlan":          map[string]any{"id": active.ID, "name": active.Name, "criteria": activeCriteria, "assignmentsManaged": active.AssignmentsManaged},

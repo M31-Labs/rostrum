@@ -26,35 +26,35 @@ func init() {
 }
 
 func loadTour(ctx *route.RouteContext, page route.FilePage) (any, error) {
-	// Demo persona links are bearer credentials. Do not let browsers or
+	// Preview persona links are bearer credentials. Do not let browsers or
 	// intermediaries retain a rendered copy of the tour page.
 	ctx.NoStore()
-	return tourData(appstate.MustGet().Snapshot(), present.ReadOnlyDemoMode()), nil
+	return tourData(appstate.MustGet().Snapshot(), present.ReadOnlyPreviewMode()), nil
 }
 
-func tourData(state domain.State, readOnlyDemo bool) map[string]any {
+func tourData(state domain.State, readOnlyPreview bool) map[string]any {
 	workspace := present.WorkspaceIdentity(state)
 	reviewerHref := "/organizer/review"
 	reviewerAction := "Inspect review operations"
 	speakerHref := "/organizer/portal"
 	speakerAction := "Inspect speaker operations"
-	if readOnlyDemo {
+	if readOnlyPreview {
 		if reviewerID := firstHumanReviewer(state); reviewerID != "" {
-			reviewerHref = "/review/" + token.NewReviewer().SignReviewerDemo(reviewerID)
+			reviewerHref = "/review/" + token.NewReviewer().SignReviewerPreview(reviewerID)
 			reviewerAction = "Open the reviewer desk"
 		}
 		if speakerID := present.FirstPortalSpeaker(state); speakerID != "" {
-			speakerHref = "/portal/" + speakerID + "?key=" + token.New().SignDemo(speakerID)
+			speakerHref = "/portal/" + speakerID + "?key=" + token.New().SignPreview(speakerID)
 			speakerAction = "Open the speaker portal"
 		}
 	}
 
 	return map[string]any{
-		"workspace":    workspace,
-		"readOnlyDemo": readOnlyDemo,
-		"eventName":    state.Event.Name,
-		"sourceURL":    "https://github.com/M31-Labs/rostrum",
-		"docsURL":      "https://m31-labs.github.io/rostrum/",
+		"workspace":       workspace,
+		"readOnlyPreview": readOnlyPreview,
+		"eventName":       state.Event.Name,
+		"sourceURL":       "https://github.com/M31-Labs/rostrum",
+		"docsURL":         "https://m31-labs.github.io/rostrum/",
 		"personas": []map[string]any{
 			{
 				"number": "01", "role": "Organizer", "label": "Command the program",

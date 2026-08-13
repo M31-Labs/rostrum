@@ -119,7 +119,6 @@ func Agenda(state domain.State, view string, dayParam string) (map[string]any, e
 
 	return map[string]any{
 		"section":   "agenda",
-		"demoMode":  DemoMode(),
 		"workspace": WorkspaceIdentity(state),
 		"view":      view,
 		"views": []map[string]string{
@@ -219,8 +218,10 @@ func agendaDayTabs(eventDays []time.Time, selected time.Time) []map[string]strin
 }
 
 // agendaSlotClocks returns the half-hour board grid from 08:00 through 18:00,
-// plus one extra clock for every scheduled session that day whose start does
-// not land on a grid line, so no session ever disappears off the board.
+// trimmed to the event start on its first day and to clocks strictly before
+// the event end on its last day. It also retains one clock for every scheduled
+// session on the selected day, including historical off-grid or out-of-window
+// placements, so an existing record never disappears from the board.
 func agendaSlotClocks(state domain.State, day time.Time, location *time.Location) [][2]int {
 	clocks := make([][2]int, 0, 24)
 	seen := make(map[[2]int]bool, 24)
@@ -230,13 +231,25 @@ func agendaSlotClocks(state domain.State, day time.Time, location *time.Location
 			clocks = append(clocks, clock)
 		}
 	}
+	eventStart := state.Event.StartsAt.In(location)
+	eventEnd := state.Event.EndsAt.In(location)
+	firstDay := eventStart.Year() == day.Year() && eventStart.YearDay() == day.YearDay()
+	lastDay := eventEnd.Year() == day.Year() && eventEnd.YearDay() == day.YearDay()
 	for hour := 8; hour <= 18; hour++ {
-		addClock([2]int{hour, 0})
-		if hour != 18 {
-			addClock([2]int{hour, 30})
+		for _, minute := range []int{0, 30} {
+			if hour == 18 && minute == 30 {
+				continue
+			}
+			candidate := time.Date(day.Year(), day.Month(), day.Day(), hour, minute, 0, 0, location)
+			if firstDay && candidate.Before(eventStart) {
+				continue
+			}
+			if lastDay && !candidate.Before(eventEnd) {
+				continue
+			}
+			addClock([2]int{hour, minute})
 		}
 	}
-	gridLength := len(clocks)
 	for _, item := range state.Sessions {
 		if !item.Scheduled() {
 			continue
@@ -247,8 +260,8 @@ func agendaSlotClocks(state domain.State, day time.Time, location *time.Location
 		}
 		addClock([2]int{when.Hour(), when.Minute()})
 	}
-	sort.Slice(clocks[gridLength:], func(i, j int) bool {
-		left, right := clocks[gridLength+i], clocks[gridLength+j]
+	sort.Slice(clocks, func(i, j int) bool {
+		left, right := clocks[i], clocks[j]
 		if left[0] != right[0] {
 			return left[0] < right[0]
 		}
@@ -262,7 +275,7 @@ func agendaSlotClocks(state domain.State, day time.Time, location *time.Location
 func agendaBank(state domain.State) []map[string]any {
 	unscheduled := make([]domain.Session, 0)
 	for _, item := range state.Sessions {
-		if !item.Scheduled() {
+		if !item.Scheduled() && item.Status != "cancelled" {
 			unscheduled = append(unscheduled, item)
 		}
 	}

@@ -66,7 +66,6 @@ func loadSubmissionDetail(ctx *route.RouteContext) (any, error) {
 	if err != nil {
 		return map[string]any{
 			"section":   "submissions",
-			"demoMode":  present.DemoMode(),
 			"workspace": present.WorkspaceIdentity(snapshot),
 			"found":     false,
 		}, nil

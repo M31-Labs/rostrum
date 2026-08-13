@@ -71,7 +71,18 @@ type ReviewGovernanceDecision struct {
 }
 
 func New() (*Engine, error) {
-	routing, err := compile("cfp-routing.arb")
+	source, err := Sources.ReadFile("cfp-routing.arb")
+	if err != nil {
+		return nil, fmt.Errorf("read policy cfp-routing.arb: %w", err)
+	}
+	return NewWithRoutingSource(source)
+}
+
+// NewWithRoutingSource builds an engine with an operator-supplied CFP routing
+// policy while retaining Rostrum's reviewed form, scheduling, and review
+// policies. The source is compiled before it can become process-wide.
+func NewWithRoutingSource(source []byte) (*Engine, error) {
+	routing, err := compileSource("configured CFP routing policy", source)
 	if err != nil {
 		return nil, err
 	}
@@ -90,13 +101,51 @@ func New() (*Engine, error) {
 	return &Engine{routing: routing, visibility: visibility, conflicts: conflicts, review: review}, nil
 }
 
-var shared = sync.OnceValues(New)
+var sharedEngine = struct {
+	sync.RWMutex
+	engine      *Engine
+	err         error
+	initialized bool
+}{}
+
+// ConfigureRoutingSource installs one validated routing policy before the
+// shared engine is first used. main calls this during startup after resolving
+// and checksum-verifying CFP_ROUTING_POLICY_PATH. Late replacement is refused
+// so every request and audit trace in a process observes one immutable policy.
+func ConfigureRoutingSource(source []byte) error {
+	engine, err := NewWithRoutingSource(source)
+	if err != nil {
+		return err
+	}
+	sharedEngine.Lock()
+	defer sharedEngine.Unlock()
+	if sharedEngine.initialized {
+		return fmt.Errorf("CFP routing policy was configured after the shared engine initialized")
+	}
+	sharedEngine.engine = engine
+	sharedEngine.initialized = true
+	return nil
+}
 
 // Shared returns the process-wide, immutable policy engine. Compiling policy
 // once ensures every HTTP action evaluates the same reviewed source without
 // repeatedly parsing it on a request path.
 func Shared() (*Engine, error) {
-	return shared()
+	sharedEngine.RLock()
+	if sharedEngine.initialized {
+		engine, err := sharedEngine.engine, sharedEngine.err
+		sharedEngine.RUnlock()
+		return engine, err
+	}
+	sharedEngine.RUnlock()
+
+	sharedEngine.Lock()
+	defer sharedEngine.Unlock()
+	if !sharedEngine.initialized {
+		sharedEngine.engine, sharedEngine.err = New()
+		sharedEngine.initialized = true
+	}
+	return sharedEngine.engine, sharedEngine.err
 }
 
 func (e *Engine) Route(category, format, level string) (RoutingDecision, error) {
@@ -211,6 +260,13 @@ func compile(name string) (*arbiter.Program, error) {
 	source, err := Sources.ReadFile(name)
 	if err != nil {
 		return nil, fmt.Errorf("read policy %s: %w", name, err)
+	}
+	return compileSource(name, source)
+}
+
+func compileSource(name string, source []byte) (*arbiter.Program, error) {
+	if len(source) == 0 {
+		return nil, fmt.Errorf("compile policy %s: source is empty", name)
 	}
 	program, err := arbiter.Compile(source)
 	if err != nil {

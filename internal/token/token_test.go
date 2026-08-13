@@ -74,29 +74,29 @@ func TestNewDerivesFromEnvironment(t *testing.T) {
 	}
 }
 
-func TestDemoSpeakerTokenRequiresDemoMode(t *testing.T) {
-	// Model a demo and live deployment with the same secret and seeded IDs.
+func TestPreviewSpeakerTokenRequiresPreviewMode(t *testing.T) {
+	// Model preview and live deployments with the same secret and IDs.
 	// The process mode, not deployment hygiene, must enforce the boundary.
-	demoSigner := newToken("shared-demo-and-live-secret")
-	liveVerifier := newToken("shared-demo-and-live-secret")
-	t.Setenv("APP_MODE", "demo")
-	signed := demoSigner.SignDemo("spk_maya")
+	previewSigner := newToken("shared-preview-and-live-secret")
+	liveVerifier := newToken("shared-preview-and-live-secret")
+	t.Setenv("APP_MODE", "preview")
+	signed := previewSigner.SignPreview("spk_maya")
 	if signed == "" {
-		t.Fatal("SignDemo returned an empty token")
+		t.Fatal("SignPreview returned an empty token")
 	}
 
-	if id, ok := demoSigner.Verify(signed); !ok || id != "spk_maya" {
-		t.Fatalf("demo process rejected demo token: id=%q ok=%v", id, ok)
+	if id, ok := previewSigner.Verify(signed); !ok || id != "spk_maya" {
+		t.Fatalf("preview process rejected preview token: id=%q ok=%v", id, ok)
 	}
 
 	t.Setenv("APP_MODE", "live")
 	if id, ok := liveVerifier.Verify(signed); ok || id != "" {
-		t.Fatalf("live process accepted demo token: id=%q ok=%v", id, ok)
+		t.Fatalf("live process accepted preview token: id=%q ok=%v", id, ok)
 	}
 }
 
 func TestNormalSpeakerTokenRemainsValidAcrossModes(t *testing.T) {
-	tok := newToken("shared-demo-and-live-secret")
+	tok := newToken("shared-preview-and-live-secret")
 	signed := tok.Sign("spk_maya")
 
 	// omitempty preserves the original sid+exp wire shape for ordinary links.
@@ -116,7 +116,7 @@ func TestNormalSpeakerTokenRemainsValidAcrossModes(t *testing.T) {
 		t.Fatalf("normal token unexpectedly changed wire shape: %s", body)
 	}
 
-	for _, mode := range []string{"live", "demo"} {
+	for _, mode := range []string{"live", "preview"} {
 		t.Setenv("APP_MODE", mode)
 		if id, valid := tok.Verify(signed); !valid || id != "spk_maya" {
 			t.Fatalf("normal token rejected in %s mode: id=%q ok=%v", mode, id, valid)

@@ -9,11 +9,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/m31-labs/rostrum/examples/demo/fixture"
 	"github.com/m31-labs/rostrum/internal/domain"
 )
 
 func TestBuildProjectionsUsesScheduledProgramAndStableIDs(t *testing.T) {
-	state := domain.Seed(time.Now().UTC())
+	state := fixture.Seed(time.Now().UTC())
 	projections := BuildProjections(state)
 	if len(projections) != 16 {
 		t.Fatalf("projections = %d, want 8 scheduled speakers + 8 sessions", len(projections))
@@ -29,7 +30,7 @@ func TestBuildProjectionsUsesScheduledProgramAndStableIDs(t *testing.T) {
 }
 
 func TestEnqueueSkipsDeliveredPayloadAndRequeuesChanges(t *testing.T) {
-	state := domain.Seed(time.Now().UTC())
+	state := fixture.Seed(time.Now().UTC())
 	projections := BuildProjections(state)
 	now := time.Date(2026, time.August, 10, 12, 0, 0, 0, time.UTC)
 	added, err := Enqueue(&state, projections, now)

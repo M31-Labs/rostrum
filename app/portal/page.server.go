@@ -123,7 +123,7 @@ func isOrganizerVisitor(r *http.Request) bool {
 // portalUnavailable is the identical friendly response for an unbound
 // session, an invalid or expired key, and an unknown speaker (L8). It still
 // carries "workspace" so app/layout.gsx's global nav renders a live Submit
-// and public-agenda link on this page too, not the fixed demo slug.
+// and public-agenda link on this page too, without a hardcoded event slug.
 func portalUnavailable(state domain.State) map[string]any {
 	return map[string]any{"available": false, "workspace": present.WorkspaceIdentity(state)}
 }
@@ -185,8 +185,14 @@ func updateProfile(ctx *action.Context) error {
 			speaker.EmailOptOutAt = time.Time{}
 		}
 		speaker.UpdatedAt = now
-		upsertCompletion(state, "task_profile", speakerID, domain.TaskSubmitted, nil)
-		delivery.EnqueueNotificationRules(state, delivery.Trigger{Name: "task.submitted", TaskID: "task_profile", SpeakerID: speakerID}, now)
+		// Profile editing is a core speaker capability even for an imported or
+		// intentionally empty workspace with no profile task. When an active
+		// profile task is assigned, record its completion and notifications;
+		// otherwise save the profile without inventing an invalid completion.
+		if task, found := state.Task("task_profile"); found && state.TaskAssignedToSpeaker(*task, speakerID) {
+			upsertCompletion(state, task.ID, speakerID, domain.TaskSubmitted, nil)
+			delivery.EnqueueNotificationRules(state, delivery.Trigger{Name: "task.submitted", TaskID: task.ID, SpeakerID: speakerID}, now)
+		}
 		return nil
 	}); err != nil {
 		return err
