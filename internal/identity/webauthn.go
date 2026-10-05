@@ -2,6 +2,7 @@ package identity
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/m31-labs/rostrum/internal/appstate"
@@ -14,7 +15,8 @@ import (
 // auth.WebAuthnStore.
 type DurableWebAuthnStore struct{}
 
-// SaveCredential implements auth.WebAuthnStore.
+// SaveCredential atomically rejects existing IDs without changing their owner
+// or key. Counter updates use UpdateCounter instead.
 func (DurableWebAuthnStore) SaveCredential(credential auth.WebAuthnCredential) error {
 	store, err := appstate.Get()
 	if err != nil {
@@ -34,17 +36,10 @@ func (DurableWebAuthnStore) SaveCredential(credential auth.WebAuthnCredential) e
 		lastUsedAt = now
 	}
 	return store.Update(func(state *domain.State) error {
-		for index := range state.AuthPasskeys {
-			if state.AuthPasskeys[index].ID != credential.ID {
-				continue
+		for _, existing := range state.AuthPasskeys {
+			if existing.ID == credential.ID {
+				return auth.ErrWebAuthnCredentialExists
 			}
-			state.AuthPasskeys[index].UserJSON = string(userJSON)
-			state.AuthPasskeys[index].PublicKey = credential.PublicKey
-			state.AuthPasskeys[index].Algorithm = credential.Algorithm
-			state.AuthPasskeys[index].SignCount = credential.SignCount
-			state.AuthPasskeys[index].Transports = credential.Transports
-			state.AuthPasskeys[index].LastUsedAt = lastUsedAt
-			return nil
 		}
 		state.AuthPasskeys = append(state.AuthPasskeys, domain.AuthPasskey{
 			ID:         credential.ID,
@@ -91,6 +86,28 @@ func (DurableWebAuthnStore) Credentials(userID string) ([]auth.WebAuthnCredentia
 			continue
 		}
 		if credential.User.ID == userID {
+			out = append(out, credential)
+		}
+	}
+	return out, nil
+}
+
+// CredentialsForEmail looks up existing credentials without provisioning or
+// touching a principal. The email is only a browser credential-selection hint;
+// GoSX still authenticates the credential's stored owner using its signature.
+func (DurableWebAuthnStore) CredentialsForEmail(email string) ([]auth.WebAuthnCredential, error) {
+	store, err := appstate.Get()
+	if err != nil {
+		return nil, err
+	}
+	email = strings.TrimSpace(email)
+	var out []auth.WebAuthnCredential
+	if email == "" {
+		return out, nil
+	}
+	for _, passkey := range store.Snapshot().AuthPasskeys {
+		credential, err := toWebAuthnCredential(passkey)
+		if err == nil && strings.EqualFold(strings.TrimSpace(credential.User.Email), email) {
 			out = append(out, credential)
 		}
 	}

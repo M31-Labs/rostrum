@@ -5,12 +5,13 @@ go 1.26
 require (
 	github.com/jackc/pgx/v5 v5.10.0
 	m31labs.dev/arbiter v1.9.0
-	m31labs.dev/gosx v0.38.1
+	m31labs.dev/gosx v0.57.5
 	modernc.org/sqlite v1.56.0
 )
 
 require (
 	github.com/BurntSushi/toml v1.6.0 // indirect
+	github.com/andybalholm/brotli v1.2.1 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
@@ -21,7 +22,7 @@ require (
 	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/odvcencio/corkscrewdb v0.2.0 // indirect
-	github.com/odvcencio/gotreesitter v0.47.0 // indirect
+	github.com/odvcencio/gotreesitter v0.50.1 // indirect
 	github.com/odvcencio/turboquant v0.1.3 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
@@ -37,8 +38,8 @@ require (
 	m31labs.dev/eos v0.1.4 // indirect
 	m31labs.dev/mll v0.1.0 // indirect
 	m31labs.dev/prism v0.1.3 // indirect
-	m31labs.dev/selena v0.4.0 // indirect
-	m31labs.dev/turboquant v0.2.0 // indirect
+	m31labs.dev/selena v0.5.2 // indirect
+	m31labs.dev/turboquant v0.2.1 // indirect
 	modernc.org/libc v1.74.4 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect

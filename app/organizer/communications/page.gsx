@@ -218,7 +218,7 @@ func Page() Node {
 							<button class="button" type="submit">Delete unused template</button>
 						</ActionForm>
 					</If>
-					<If cond={data.revisions.length > 0}>
+					<If cond={data.hasRevisions}>
 						<div class="template-revision-list">
 							<strong>Recorded revisions</strong>
 							<Each of={data.revisions} as="revision">

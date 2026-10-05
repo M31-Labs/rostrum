@@ -33,7 +33,13 @@ func submissionTestState(t *testing.T) *store.JSONStore {
 	draftCreationIPLimiter = ratelimit.NewTokenBucket(draftCreationIPLimit, time.Hour)
 	testOutbox := mail.NewOutboxSender()
 	confirmationSender = func() mail.Sender { return testOutbox }
-	workspace, err := store.Open(":memory:", fixture.Seed(time.Date(2026, time.August, 10, 12, 0, 0, 0, time.UTC)))
+	now := time.Now().UTC()
+	state := fixture.Seed(now)
+	// Intake scenarios need an open window regardless of the demo's dates.
+	for index := range state.Forms {
+		state.Forms[index].CloseAt = now.Add(24 * time.Hour)
+	}
+	workspace, err := store.Open(":memory:", state)
 	if err != nil {
 		t.Fatalf("open workspace: %v", err)
 	}

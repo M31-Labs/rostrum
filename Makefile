@@ -1,7 +1,7 @@
 .PHONY: dev judge-demo check test build smoke size-budget perf-budget release-check check-gosx
 
 GOSX ?= gosx
-GOSX_VERSION ?= 0.38.1
+GOSX_VERSION ?= 0.57.5
 PERF_URLS ?= http://localhost:8080/ http://localhost:8080/organizer http://localhost:8080/organizer/agenda http://localhost:8080/organizer/portal http://localhost:8080/public/your-event/agenda
 SMOKE_URL ?=
 SMOKE_EXPECTED_VERSION ?=

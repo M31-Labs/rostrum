@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
@@ -101,8 +102,15 @@ func main() {
 	// build that is serving traffic.
 	rostrumVersion := getenv("ROSTRUM_VERSION", "dev")
 	appEnv := strings.ToLower(getenv("APP_ENV", "development"))
-	sessionSecret := getenv("SESSION_SECRET", developmentSessionSecret)
+	sessionSecret, err := runtimeSessionSecret(publicBase, appEnv, os.Getenv("SESSION_SECRET"))
+	if err != nil {
+		log.Fatal(err)
+	}
 	if err := validateRuntimePosture(publicBase, appEnv, dataPath, sessionSecret, os.Getenv("GOSX_STATIC_EXPORT")); err != nil {
+		log.Fatal(err)
+	}
+	// Portal and reviewer signers derive their keys from this same secret.
+	if err := os.Setenv("SESSION_SECRET", sessionSecret); err != nil {
 		log.Fatal(err)
 	}
 	if err := ratelimit.ValidateTrustedProxyCIDRs(os.Getenv("TRUSTED_PROXY_CIDRS")); err != nil {
@@ -214,11 +222,6 @@ func main() {
 		SuccessPath: "/organizer",
 		FailurePath: "/login",
 	})
-	webAuthnManager := authManager.WebAuthn(auth.WebAuthnOptions{
-		RPName: "Rostrum",
-		Origin: publicBase,
-		Store:  identity.DurableWebAuthnStore{},
-	})
 	if readOnlyPreview {
 		// The break-glass setup path is an identity mutation and must not be
 		// reachable from a hosted preview, even when its workspace is empty.
@@ -268,9 +271,6 @@ func main() {
 			gosx.Attr("name", "csrf-token"),
 			gosx.Attr("content", sessions.Token(ctx.Request)),
 		)))
-		// File-router documents are mounted beneath server.App, so opt them into
-		// the GoSX navigation runtime explicitly at the document boundary.
-		ctx.AddHead(server.NavigationScriptWithNonce(ctx.Nonce()))
 		configureRouteRuntime(ctx)
 		return rostrumRouteDocument(ctx, body)
 	})
@@ -279,16 +279,8 @@ func main() {
 	}
 
 	app := server.New()
-	// app.EnableGzip() is intentionally omitted. The GoSX gzip middleware
-	// (server/gzip.go, v0.38.0) double-encodes precompressed assets: its
-	// gzipWriter.WriteHeader skips when Content-Encoding is already set, but
-	// gzipWriter.Write still routes bytes through the gzip.Writer. A brotli
-	// runtime sidecar is re-gzipped while the header still reads "br", so the
-	// browser cannot decode any island script or WASM and nothing hydrates.
-	// Runtime assets self-negotiate br/gzip in server.serveRuntimeFile, and
-	// dynamic HTML is compressed at the CDN edge. Restore this call once the
-	// framework Write path honors the skip.
-	app.EnableSecurityPolicy(rostrumSecurityPolicy(publicBase, navigationScriptCSPHash(), webAuthnScriptCSPHash()))
+	app.EnableNavigation()
+	app.EnableSecurityPolicy(rostrumSecurityPolicy(publicBase, webAuthnScriptCSPHash()))
 	app.Use(routeSecurityHeaders())
 	app.Use(clearStaleBrowserCache(publicBase))
 	app.Use(noCacheStaticCSS())
@@ -354,15 +346,7 @@ func main() {
 		app.Mount("GET /auth/oauth/"+name, oauthManager.BeginHandler(name))
 		app.Mount("GET /auth/oauth/"+name+"/callback", oauthManager.CallbackHandler(name))
 	}
-	// Registration is a second factor of convenience: only an already
-	// signed-in user may register a passkey (authManager.Require blocks an
-	// anonymous POST with the framework's usual 401-JSON-or-redirect
-	// response). Login stays open to anyone -- it is how a not-yet-signed-in
-	// visitor authenticates in the first place.
-	app.Mount("POST /auth/webauthn/register-options", authManager.Require(webAuthnManager.RegisterOptionsHandler()))
-	app.Mount("POST /auth/webauthn/register", authManager.Require(webAuthnManager.RegisterHandler()))
-	app.Mount("POST /auth/webauthn/login-options", webAuthnManager.LoginOptionsHandler())
-	app.Mount("POST /auth/webauthn/login", webAuthnManager.LoginHandler())
+	mountWebAuthnRoutes(app, authManager, publicBase)
 
 	rootHandler, err := router.BuildChecked()
 	if err != nil {
@@ -383,14 +367,23 @@ func sessionOptions(overHTTP bool) session.Options {
 }
 
 func rostrumRouteDocument(ctx *route.RouteContext, body gosx.Node) gosx.Node {
-	// File routes render their own complete document beneath server.App, so the
-	// language belongs here rather than on the outer app's unused page shell.
-	// Start with GoSX's document to preserve its stream-tail marker, nonce, and
-	// navigation attributes, then add the English-language declaration at the
-	// actual HTML boundary.
-	document := server.HTMLDocumentWithNonce(ctx.Title("Rostrum"), ctx.Nonce(), ctx.Head(), body)
-	html := gosx.RenderHTML(document)
-	return gosx.RawHTML(strings.Replace(html, "<html", `<html lang="en"`, 1))
+	ctx.SetLanguage("en")
+	return server.HTMLDocument(ctx.Document("Rostrum", body))
+}
+
+func mountWebAuthnRoutes(app *server.App, manager *auth.Manager, publicBase string) {
+	webAuthn := manager.WebAuthn(auth.WebAuthnOptions{
+		RPName: "Rostrum",
+		Origin: publicBase,
+		Store:  identity.DurableWebAuthnStore{},
+		// Setup, magic links, or OAuth authenticate users before enrollment.
+		// No anonymous sign-up is offered, so RegistrationUser stays unset.
+	})
+	// Enrollment preserves the signed-in session; a new browser uses login.
+	app.Mount("POST /auth/webauthn/register-options", manager.Require(webAuthn.RegisterOptionsHandler()))
+	app.Mount("POST /auth/webauthn/register", manager.Require(webAuthn.RegisterHandler()))
+	app.Mount("POST /auth/webauthn/login-options", legacyWebAuthnLoginOptions(webAuthn))
+	app.Mount("POST /auth/webauthn/login", webAuthn.LoginHandler())
 }
 
 // startOutboxRunner invokes the persisted outbox at startup and at a modest
@@ -958,7 +951,7 @@ func validateRuntimePosture(publicBase, appEnv, dataPath, sessionSecret, staticE
 	if !strict {
 		return nil
 	}
-	if sessionSecret == developmentSessionSecret || len(sessionSecret) < 32 {
+	if placeholderSessionSecret(sessionSecret) || len(strings.TrimSpace(sessionSecret)) < 32 {
 		return fmt.Errorf("an internet-facing or production runtime requires a unique SESSION_SECRET of at least 32 characters")
 	}
 	parsed, err := url.Parse(strings.TrimSpace(publicBase))
@@ -972,6 +965,30 @@ func validateRuntimePosture(publicBase, appEnv, dataPath, sessionSecret, staticE
 		return fmt.Errorf("GOSX_STATIC_EXPORT is build-only and must be unset in an internet-facing or production runtime")
 	}
 	return nil
+}
+
+func placeholderSessionSecret(secret string) bool {
+	switch strings.TrimSpace(secret) {
+	case "", developmentSessionSecret, "change-me-in-production", "gosx-app-session-secret", "gosx-docs-session-secret", "REPLACE_ME":
+		return true
+	}
+	return false
+}
+
+func runtimeSessionSecret(publicBase, appEnv, secret string) (string, error) {
+	// Placeholder checks normalize whitespace; configured signer keys must
+	// retain the exact bytes used by previously issued speaker/reviewer links.
+	if !placeholderSessionSecret(secret) {
+		return secret, nil
+	}
+	if appEnv != "development" || !isLocalPublicURL(publicBase) {
+		return "", errors.New("a production or public runtime requires SESSION_SECRET")
+	}
+	var random [32]byte
+	if _, err := rand.Read(random[:]); err != nil {
+		return "", fmt.Errorf("generate development session secret: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(random[:]), nil
 }
 
 // magicLinkIPLimiter and magicLinkSessionLimiter throttle POST
@@ -1072,21 +1089,8 @@ func writeManagedMagicLinkError(w http.ResponseWriter, r *http.Request, status i
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }
 
-func navigationScriptCSPHash() string {
-	rendered := gosx.RenderHTML(server.NavigationScript())
-	start := strings.Index(rendered, ">")
-	end := strings.LastIndex(rendered, "</script>")
-	if start < 0 || end <= start {
-		return ""
-	}
-	sum := sha256.Sum256([]byte(rendered[start+1 : end]))
-	return "'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) + "'"
-}
-
-// webAuthnScriptCSPHash hashes auth.WebAuthnScript() the same way
-// navigationScriptCSPHash hashes the navigation runtime: both are inline
-// <script> tags GoSX itself owns, so the CSP authorizes them by exact
-// content hash instead of a blanket 'unsafe-inline'.
+// webAuthnScriptCSPHash authorizes the framework's nonce-free passkey script
+// by exact content. EnableNavigation threads the nonce into navigation.
 func webAuthnScriptCSPHash() string {
 	rendered := gosx.RenderHTML(auth.WebAuthnScript())
 	start := strings.Index(rendered, ">")

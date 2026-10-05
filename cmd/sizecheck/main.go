@@ -18,14 +18,16 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"m31labs.dev/gosx/route"
 )
 
 type budget struct {
 	MaxBespokeAppJSFiles      int                 `json:"maxBespokeAppJsFiles"`
 	MaxBespokeAppJSBytes      int64               `json:"maxBespokeAppJsBytes"`
 	StylesGzipBytes           int64               `json:"stylesGzipBytes"`
-	MaxStaticHTMLBytes        int64               `json:"maxStaticHtmlBytes"`
-	MaxStaticHTMLGzipBytes    int64               `json:"maxStaticHtmlGzipBytes"`
+	MaxRenderedHTMLBytes      int64               `json:"maxRenderedHtmlBytes"`
+	MaxRenderedHTMLGzipBytes  int64               `json:"maxRenderedHtmlGzipBytes"`
 	MaxIslandRawBytes         int64               `json:"maxIslandRawBytes"`
 	MaxIslandGzipBytes        int64               `json:"maxIslandGzipBytes"`
 	MaxIslandBrotliBytes      int64               `json:"maxIslandBrotliBytes"`
@@ -37,7 +39,7 @@ type budget struct {
 	TotalRuntimeBrotliBytes   int64               `json:"totalRuntimeBrotliBytes"`
 	ServerBinaryBytes         int64               `json:"serverBinaryBytes"`
 	DistributionBytes         int64               `json:"distributionBytes"`
-	MinimumExportedRoutes     int                 `json:"minimumExportedRoutes"`
+	MinimumRenderedRoutes     int                 `json:"minimumRenderedRoutes"`
 	ExpectedRouteCapabilities map[string][]string `json:"expectedRouteCapabilities"`
 }
 
@@ -100,9 +102,9 @@ func main() {
 	runtime := readRuntimeSize(absRoot)
 	bespokeJSFiles, bespokeJSBytes := bespokeBrowserJavaScript(absRoot)
 	stylesGzip := gzipFileSize(filepath.Join(absRoot, "public", "styles.css"))
-	staticHTML := largestStaticHTML(filepath.Join(absRoot, "dist", "static"))
 	largestIsland := largestIslandProgram(filepath.Join(absRoot, "dist", "assets", "islands"))
 	routes := representativeRouteSources(absRoot, limits.ExpectedRouteCapabilities)
+	renderedHTML := largestRenderedHTML(routes)
 	transfers := routeClientTransfers(absRoot, routes)
 	serverBinary := fileSize(filepath.Join(absRoot, "dist", "server", "app"))
 	distribution := directorySize(filepath.Join(absRoot, "dist"))
@@ -111,8 +113,8 @@ func main() {
 	failed = checkMaximum("bespoke app JS files", int64(bespokeJSFiles), int64(limits.MaxBespokeAppJSFiles)) || failed
 	failed = checkMaximum("bespoke app JS bytes", bespokeJSBytes, limits.MaxBespokeAppJSBytes) || failed
 	failed = checkLimit("styles.css gzip", stylesGzip, limits.StylesGzipBytes) || failed
-	failed = checkLimit("largest static HTML", staticHTML.Raw, limits.MaxStaticHTMLBytes) || failed
-	failed = checkLimit("largest static HTML gzip", staticHTML.Gzip, limits.MaxStaticHTMLGzipBytes) || failed
+	failed = checkLimit("largest rendered HTML", renderedHTML.Raw, limits.MaxRenderedHTMLBytes) || failed
+	failed = checkLimit("largest rendered HTML gzip", renderedHTML.Gzip, limits.MaxRenderedHTMLGzipBytes) || failed
 	failed = checkLimit("largest island raw", largestIsland.Raw, limits.MaxIslandRawBytes) || failed
 	failed = checkLimit("largest island gzip", largestIsland.Gzip, limits.MaxIslandGzipBytes) || failed
 	failed = checkLimit("largest island brotli", largestIsland.Brotli, limits.MaxIslandBrotliBytes) || failed
@@ -125,9 +127,9 @@ func main() {
 	failed = checkLimit("server binary", serverBinary, limits.ServerBinaryBytes) || failed
 	failed = checkLimit("distribution", distribution, limits.DistributionBytes) || failed
 
-	fmt.Printf("largest static route         %s\n", relativePath(absRoot, staticHTML.RawPath))
-	if staticHTML.GzipPath != staticHTML.RawPath {
-		fmt.Printf("largest compressed route     %s\n", relativePath(absRoot, staticHTML.GzipPath))
+	fmt.Printf("largest rendered route       %s\n", renderedHTML.RawPath)
+	if renderedHTML.GzipPath != renderedHTML.RawPath {
+		fmt.Printf("largest compressed route     %s\n", renderedHTML.GzipPath)
 	}
 	fmt.Printf("largest island program       %s\n", relativePath(absRoot, largestIsland.Path))
 	for _, transfer := range transfers {
@@ -311,7 +313,21 @@ func representativeRouteSources(root string, expected map[string][]string) []rou
 	}
 
 	missing := make([]string, 0)
+	pages, err := route.ScanDir(filepath.Join(root, "app"))
+	if err != nil {
+		fatalf("scan representative routes: %v", err)
+	}
+	wanted := make(map[string]bool, len(expected)+len(pages.Pages))
+	for _, page := range pages.Pages {
+		// Dynamic pages need explicit sample params; setup requires a secret.
+		if len(page.Params) == 0 && page.RoutePath != "/setup" {
+			wanted[page.RoutePath] = true
+		}
+	}
 	for path := range expected {
+		wanted[path] = true
+	}
+	for path := range wanted {
 		if _, found := sources[path]; !found {
 			missing = append(missing, path)
 		}
@@ -398,14 +414,35 @@ func fetchReleaseRoutes(root string, paths []string) map[string][]byte {
 }
 
 func releaseServerEnvironment(distDir, baseURL string, port int) []string {
+	// Startup runs the communications worker and applies deployment role
+	// grants. A memory data path only isolates the JSON backend; never let a
+	// probe inherit another store or operator-owned mutation destinations.
 	blocked := map[string]bool{
-		"APP_MODE":               true,
-		"DATA_PATH":              true,
-		"GOSX_APP_ROOT":          true,
-		"INITIAL_WORKSPACE":      true,
-		"INITIAL_WORKSPACE_PATH": true,
-		"PORT":                   true,
-		"PUBLIC_URL":             true,
+		"APP_ENV":                        true,
+		"APP_MODE":                       true,
+		"DATA_PATH":                      true,
+		"STORE_DRIVER":                   true,
+		"DATABASE_URL":                   true,
+		"AUDIT_LOG_PATH":                 true,
+		"BACKUP_DIR":                     true,
+		"UPLOAD_DIR":                     true,
+		"PRINCIPAL_ROLES":                true,
+		"ORGANIZER_EMAILS":               true,
+		"RESET_SECRET":                   true,
+		"SESSION_SECRET":                 true,
+		"TRUSTED_PROXY_CIDRS":            true,
+		"GOSX_APP_ROOT":                  true,
+		"INITIAL_WORKSPACE":              true,
+		"INITIAL_WORKSPACE_PATH":         true,
+		"INITIAL_WORKSPACE_SHA256":       true,
+		"INITIAL_WORKSPACE_SHA256_FILE":  true,
+		"CFP_ROUTING_POLICY_PATH":        true,
+		"CFP_ROUTING_POLICY_SHA256":      true,
+		"CFP_ROUTING_POLICY_SHA256_FILE": true,
+		"GOSX_STATIC_EXPORT":             true,
+		"MAIL_DRIVER":                    true,
+		"PORT":                           true,
+		"PUBLIC_URL":                     true,
 	}
 	environment := make([]string, 0, len(os.Environ())+5)
 	for _, entry := range os.Environ() {
@@ -415,6 +452,10 @@ func releaseServerEnvironment(distDir, baseURL string, port int) []string {
 		}
 	}
 	return append(environment,
+		"APP_ENV=development",
+		"GOSX_STATIC_EXPORT=1",
+		"MAIL_DRIVER=outbox",
+		"STORE_DRIVER=json",
 		"DATA_PATH=:memory:",
 		"INITIAL_WORKSPACE=fresh",
 		"GOSX_APP_ROOT="+distDir,
@@ -443,32 +484,32 @@ func largestRouteBrotli(transfers []routeTransfer) int64 {
 	return largest
 }
 
-func largestStaticHTML(root string) staticHTMLSize {
+func largestRenderedHTML(routes []routeSource) staticHTMLSize {
 	var largest staticHTMLSize
-	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+	for _, route := range routes {
+		raw := int64(len(route.HTML))
+		var compressed bytes.Buffer
+		writer, err := gzip.NewWriterLevel(&compressed, gzip.BestCompression)
 		if err != nil {
-			return err
+			fatalf("create rendered route compressor: %v", err)
 		}
-		if entry.IsDir() || !strings.EqualFold(filepath.Ext(path), ".html") {
-			return nil
+		if _, err := writer.Write(route.HTML); err != nil {
+			fatalf("compress rendered route %s: %v", route.Path, err)
 		}
-		raw := fileSize(path)
-		compressed := gzipFileSize(path)
+		if err := writer.Close(); err != nil {
+			fatalf("finish rendered route compression: %v", err)
+		}
 		if raw > largest.Raw {
-			largest.RawPath = path
+			largest.RawPath = route.Path
 			largest.Raw = raw
 		}
-		if compressed > largest.Gzip {
-			largest.GzipPath = path
-			largest.Gzip = compressed
+		if int64(compressed.Len()) > largest.Gzip {
+			largest.GzipPath = route.Path
+			largest.Gzip = int64(compressed.Len())
 		}
-		return nil
-	})
-	if err != nil {
-		fatalf("scan static HTML: %v", err)
 	}
 	if largest.RawPath == "" || largest.GzipPath == "" {
-		fatalf("no static HTML found under %s", root)
+		fatalf("no rendered HTML found")
 	}
 	return largest
 }
@@ -503,8 +544,6 @@ func directorySize(root string) int64 {
 }
 
 func checkRouteCapabilities(root string, routes []routeSource, limits budget) bool {
-	var manifest exportManifest
-	readJSON(filepath.Join(root, "dist", "export.json"), &manifest)
 	violations := make([]string, 0)
 	seen := make(map[string]bool, len(routes))
 	for _, route := range routes {
@@ -526,9 +565,9 @@ func checkRouteCapabilities(root string, routes []routeSource, limits budget) bo
 		}
 	}
 	sort.Strings(violations)
-	fmt.Printf("exported routes              %d (minimum %d)\n", len(manifest.Routes), limits.MinimumExportedRoutes)
-	if len(manifest.Routes) < limits.MinimumExportedRoutes {
-		fmt.Println("  FAIL: too few exported routes")
+	fmt.Printf("rendered routes              %d (minimum %d)\n", len(routes), limits.MinimumRenderedRoutes)
+	if len(routes) < limits.MinimumRenderedRoutes {
+		fmt.Println("  FAIL: too few rendered routes")
 		return true
 	}
 	if len(violations) > 0 {
