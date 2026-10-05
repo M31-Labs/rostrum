@@ -52,7 +52,7 @@ For a source checkout and verified production build, install:
 - Go 1.26, matching [`go.mod`](https://github.com/M31-Labs/rostrum/blob/main/go.mod).
 - GNU Make or a compatible `make` implementation.
 - A POSIX shell and `curl` for the repository checks.
-- GoSX `v0.38.1`.
+- GoSX `v0.57.5`.
 - Arbiter `v1.9.0` for policy validation in `make check`.
 - TinyGo `v0.40.1` and Binaryen `wasm-opt` version `125` for the production
   WebAssembly islands emitted by `make build`.
@@ -70,7 +70,7 @@ Install the pinned build tools, then clone and verify the exact source you plan
 to operate:
 
 ```bash
-go install m31labs.dev/gosx/cmd/gosx@v0.38.1
+go install m31labs.dev/gosx/cmd/gosx@v0.57.5
 go install m31labs.dev/arbiter/cmd/arbiter@v1.9.0
 
 tinygo version
@@ -351,7 +351,7 @@ fallbacks.
 | `ROSTRUM_VERSION` | Immutable release tag or commit SHA returned by `/api/health`. Do not deploy `dev`. |
 | `PORT` | HTTP listen port; defaults to `8080`. Terminate TLS at the reverse proxy. |
 | `PUBLIC_URL` | Exact external HTTPS origin, such as the `program.example.com` origin shown in this manual. The development fallback is the HTTP loopback origin on `PORT`. It drives canonical links, secure cookies, magic links, OAuth callbacks, and WebAuthn origin checks. A path-prefix deployment is not documented; use a dedicated origin. |
-| `SESSION_SECRET` | Unique secret of at least 32 characters. It protects organizer sessions and signed speaker/reviewer links; the development fallback is refused in production and on a non-local origin. |
+| `SESSION_SECRET` | Unique secret of at least 32 characters. It protects organizer sessions and signed speaker/reviewer links; missing or placeholder secrets generate a random per-process development secret. Development sessions and signed links reset on restart. Production and non-local origins refuse missing, placeholder, or short secrets. |
 | `GOSX_APP_ROOT` | Optional explicit application-bundle root. Useful for native installs; the container resolves `/app` automatically. |
 | `RESET_SECRET` | Guards `POST /workspace/reset` when configured. Leave it empty on a real production workspace; production disables an unguarded reset. |
 | `TRUSTED_PROXY_CIDRS` | Comma-separated exact proxy networks allowed to supply `X-Forwarded-For`. Empty ignores forwarded headers. Invalid CIDRs stop startup; never use a trust-all network. |

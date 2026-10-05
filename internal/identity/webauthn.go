@@ -14,7 +14,8 @@ import (
 // auth.WebAuthnStore.
 type DurableWebAuthnStore struct{}
 
-// SaveCredential implements auth.WebAuthnStore.
+// SaveCredential atomically rejects existing IDs without changing their owner
+// or key. Counter updates use UpdateCounter instead.
 func (DurableWebAuthnStore) SaveCredential(credential auth.WebAuthnCredential) error {
 	store, err := appstate.Get()
 	if err != nil {
@@ -34,17 +35,10 @@ func (DurableWebAuthnStore) SaveCredential(credential auth.WebAuthnCredential) e
 		lastUsedAt = now
 	}
 	return store.Update(func(state *domain.State) error {
-		for index := range state.AuthPasskeys {
-			if state.AuthPasskeys[index].ID != credential.ID {
-				continue
+		for _, existing := range state.AuthPasskeys {
+			if existing.ID == credential.ID {
+				return auth.ErrWebAuthnCredentialExists
 			}
-			state.AuthPasskeys[index].UserJSON = string(userJSON)
-			state.AuthPasskeys[index].PublicKey = credential.PublicKey
-			state.AuthPasskeys[index].Algorithm = credential.Algorithm
-			state.AuthPasskeys[index].SignCount = credential.SignCount
-			state.AuthPasskeys[index].Transports = credential.Transports
-			state.AuthPasskeys[index].LastUsedAt = lastUsedAt
-			return nil
 		}
 		state.AuthPasskeys = append(state.AuthPasskeys, domain.AuthPasskey{
 			ID:         credential.ID,

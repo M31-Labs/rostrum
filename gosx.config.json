@@ -1,0 +1,8 @@
+{
+  "build": {
+    "runtime": {
+      "sourceMaps": false,
+      "exclude": ["scene3d", "video", "payments", "relay", "textlayout"]
+    }
+  }
+}

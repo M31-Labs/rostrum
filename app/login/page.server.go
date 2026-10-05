@@ -25,8 +25,8 @@ func init() {
 	if err := route.RegisterFileModuleHere(route.FileModuleOptions{
 		Load: loadLogin,
 		Metadata: func(ctx *route.RouteContext, page route.FilePage, data any) (server.Metadata, error) {
-			// The WebAuthn runtime is an inline <script> GoSX owns (like
-			// server.NavigationScript()), added here so it ships only on the
+			// The WebAuthn runtime is an inline <script> GoSX owns,
+			// added here so it ships only on the
 			// page that needs it. main.go hashes the identical render for the
 			// CSP script-src allowlist.
 			ctx.AddHead(auth.WebAuthnScript())

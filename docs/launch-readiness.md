@@ -37,7 +37,7 @@ surface and the recovery runbook have acceptance evidence.
 Install the pinned tools:
 
 ```bash
-go install m31labs.dev/gosx/cmd/gosx@v0.38.1
+go install m31labs.dev/gosx/cmd/gosx@v0.57.5
 go install m31labs.dev/arbiter/cmd/arbiter@v1.9.0
 ```
 
@@ -57,8 +57,14 @@ These commands prove:
   fictional example; organizer, signed persona, CFP,
   public/embed/API/calendar, header, count, and mutation-refusal contracts
   pass.
-- The production bundle stays within committed static HTML, island, runtime,
+- The production bundle stays within committed rendered HTML, island, runtime,
   server binary, distribution, and per-route client budgets.
+
+GoSX v0.57.5 keeps session-dependent responses dynamic, so the size gate samples
+15 rendered routes from a disposable local server. Unused 3D, video, payment,
+relay, and text-layout runtime chunks are excluded. The largest route transfers
+484,733 bytes gzip, and the stripped server is 56,303,778 bytes; the updated
+version-specific ceilings retain small margins above the measured artifacts.
 
 They do not prove a remote host, credential, DNS/TLS setup, external database,
 mailbox, Airtable base, backup system, or operator procedure.
@@ -120,7 +126,7 @@ distributed transaction.
 - Public JSON emits only published sessions and their attached speakers.
 - Production refuses weak/default session secrets, non-HTTPS public URLs, and
   in-memory persistence.
-- The exact GoSX preflight is `gosx v0.38.1`; build/check targets reject a
+- The exact GoSX preflight is `gosx v0.57.5`; build/check targets reject a
   different version.
 - `ROSTRUM_VERSION` is deployment-owned and visible at `/api/health`.
 

@@ -197,6 +197,10 @@ func TestPublishAgendaLeavesCancelledSessionsCancelled(t *testing.T) {
 	state.Sessions[0].Status = "draft"
 	state.Sessions[0].SpeakerIDs = nil
 	state.Communications = nil
+	// Keep due reminders outside this agenda publication assertion.
+	for index := range state.Tasks {
+		state.Tasks[index].RetiredAt = time.Now().UTC()
+	}
 	workspace := openAgendaTestWorkspace(t, state)
 
 	err := publishAgenda(&action.Context{

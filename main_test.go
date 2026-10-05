@@ -47,21 +47,32 @@ func TestRostrumFileRouterDeclaresEnglishLanguageAndPreservesContract(t *testing
 	if err != nil {
 		t.Fatalf("BuildChecked: %v", err)
 	}
+	app := server.New()
+	app.EnableNavigation()
+	app.EnableSecurityPolicy(rostrumSecurityPolicy("http://localhost", webAuthnScriptCSPHash()))
+	app.Mount("/", handler)
 	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/", nil))
+	app.Build().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/", nil))
 	html := response.Body.String()
 	for _, want := range []string{
 		`<!DOCTYPE html>`,
-		`<html lang="en" data-gosx-document="true">`,
+		`<html data-gosx-document="true" lang="en"`,
 		`<meta charset="utf-8">`,
 		`<meta name="viewport" content="width=device-width, initial-scale=1">`,
 		`<title>Rostrum test</title>`,
-		`<body data-gosx-document-body="true" data-gosx-enhancement-layer="html">`,
+		`<body data-gosx-document-body="true" data-gosx-enhancement-layer="html"`,
 		`<main>Ready</main>`,
 	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("document missing %q: %s", want, html)
 		}
+	}
+	if strings.Count(html, `data-gosx-navigation="true"`) != 1 || strings.Count(html, `name="viewport"`) != 1 {
+		t.Fatal("document must contain exactly one navigation runtime and viewport")
+	}
+	nonce := regexp.MustCompile(`data-gosx-navigation="true" nonce="([^"]+)"`).FindStringSubmatch(html)
+	if len(nonce) != 2 || !strings.Contains(response.Header().Get("Content-Security-Policy"), "'nonce-"+nonce[1]+"'") {
+		t.Fatal("navigation runtime must use the request CSP nonce")
 	}
 }
 
@@ -680,9 +691,9 @@ func TestRemoveSupersededUploadProtectsSharedAndOutsidePaths(t *testing.T) {
 
 func TestSecurityHeadersAuthorizeOnlyTheGoSXInlineRuntime(t *testing.T) {
 	t.Setenv("APP_MODE", "live")
-	hash := navigationScriptCSPHash()
+	hash := webAuthnScriptCSPHash()
 	if !strings.HasPrefix(hash, "'sha256-") {
-		t.Fatalf("navigation CSP hash = %q", hash)
+		t.Fatalf("WebAuthn CSP hash = %q", hash)
 	}
 	handler := testSecurityHeaders("https://rostrum.example", hash)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Test-Nonce", server.RequestNonce(r))
@@ -803,7 +814,7 @@ func TestOrganizerGateAllowsAnonymousReadOnlyPreviewInspection(t *testing.T) {
 
 func TestSecurityHeadersMarkReadOnlyPreviewResponsesNoindex(t *testing.T) {
 	t.Setenv("APP_MODE", "preview")
-	handler := testSecurityHeaders("https://preview.rostrum.example", navigationScriptCSPHash())(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := testSecurityHeaders("https://preview.rostrum.example", webAuthnScriptCSPHash())(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	for _, path := range []string{"/", "/organizer", "/public/m31-systems-forum-2026/agenda", "/login"} {
@@ -817,7 +828,7 @@ func TestSecurityHeadersMarkReadOnlyPreviewResponsesNoindex(t *testing.T) {
 
 func TestFrameAncestorsScopedToPublicRoutes(t *testing.T) {
 	t.Setenv("APP_MODE", "live")
-	hash := navigationScriptCSPHash()
+	hash := webAuthnScriptCSPHash()
 	handler := testSecurityHeaders("https://rostrum.example", hash)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	}))

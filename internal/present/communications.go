@@ -129,15 +129,16 @@ func Communications(state domain.State, templateID string, recipientID ...string
 	revisions := templateRevisions(state, selected.ID)
 	rules := notificationRuleRows(state)
 	return map[string]any{
-		"section":     "communications",
-		"workspace":   WorkspaceIdentity(state),
-		"templates":   templates,
-		"recipients":  recipients,
-		"outbox":      outbox,
-		"counts":      map[string]any{"sent": sent, "queued": queued, "failed": failed, "suppressed": suppressed, "templates": len(templates)},
-		"revisions":   revisions,
-		"rules":       rules,
-		"mergeFields": mailtemplate.Fields(),
+		"section":      "communications",
+		"workspace":    WorkspaceIdentity(state),
+		"templates":    templates,
+		"recipients":   recipients,
+		"outbox":       outbox,
+		"counts":       map[string]any{"sent": sent, "queued": queued, "failed": failed, "suppressed": suppressed, "templates": len(templates)},
+		"revisions":    revisions,
+		"hasRevisions": len(revisions) > 0,
+		"rules":        rules,
+		"mergeFields":  mailtemplate.Fields(),
 		"preview": map[string]any{
 			"id":          selected.ID,
 			"name":        selected.Name,

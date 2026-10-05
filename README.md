@@ -207,7 +207,7 @@ The runtime needs only Go. The full contributor gate also pins GoSX and
 Arbiter:
 
 ```bash
-go install m31labs.dev/gosx/cmd/gosx@v0.38.1
+go install m31labs.dev/gosx/cmd/gosx@v0.57.5
 go install m31labs.dev/arbiter/cmd/arbiter@v1.9.0
 
 make check          # formatting, policy validation, vet, tests, race tests

@@ -385,7 +385,7 @@ else
 fi
 
 assert_page "/" "public home" "The calm way to run a complicated program."
-if grep -Fq '<html lang="en"' "$BODY"; then
+if grep -Eq '<html[^>]*[[:space:]]lang="en"' "$BODY"; then
 	pass "file-router document declares English"
 else
 	fail "file-router document is missing lang=en"
@@ -451,7 +451,11 @@ assert_page "/submit/systems-forum-cfp" "submitter CFP" "Submission journey prev
 assert_observer_page "submitter CFP"
 assert_body_text "submitter CFP" "Save draft"
 assert_body_text "submitter CFP" "Submit proposal"
-assert_body_text "submitter CFP" "client-only walkthrough"
+if html_text | grep -Fq "This call is closed."; then
+	pass "submitter CFP respects the demo intake deadline"
+else
+	assert_body_text "submitter CFP" "client-only walkthrough"
+fi
 if grep -Eq '<form[^>]*(method="post"|action="[^"]*__actions/)' "$BODY"; then
 	fail "submitter CFP exposes a backend mutation form in observer mode"
 else
