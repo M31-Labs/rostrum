@@ -261,6 +261,7 @@ func TestValidateRuntimePosture(t *testing.T) {
 	}{
 		{name: "local development", publicURL: "http://127.0.0.1:8080", appEnv: "development", dataPath: ":memory:", secret: developmentSessionSecret},
 		{name: "production https durable", publicURL: "https://program.example.com", appEnv: "production", dataPath: "/srv/rostrum.json", secret: strongSecret},
+		{name: "production padded short secret", publicURL: "https://program.example.com", appEnv: "production", dataPath: "/srv/rostrum.json", secret: strings.Repeat(" ", 32) + "short", wantError: true},
 		{name: "public development still strict", publicURL: "https://program.example.com", appEnv: "development", dataPath: "/srv/rostrum.json", secret: strongSecret},
 		{name: "public weak secret", publicURL: "https://program.example.com", appEnv: "development", dataPath: "/srv/rostrum.json", secret: "short", wantError: true},
 		{name: "public plain http", publicURL: "http://program.example.com", appEnv: "development", dataPath: "/srv/rostrum.json", secret: strongSecret, wantError: true},

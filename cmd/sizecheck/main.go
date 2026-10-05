@@ -414,17 +414,35 @@ func fetchReleaseRoutes(root string, paths []string) map[string][]byte {
 }
 
 func releaseServerEnvironment(distDir, baseURL string, port int) []string {
+	// Startup runs the communications worker and applies deployment role
+	// grants. A memory data path only isolates the JSON backend; never let a
+	// probe inherit another store or operator-owned mutation destinations.
 	blocked := map[string]bool{
-		"APP_ENV":                true,
-		"APP_MODE":               true,
-		"DATA_PATH":              true,
-		"GOSX_APP_ROOT":          true,
-		"INITIAL_WORKSPACE":      true,
-		"INITIAL_WORKSPACE_PATH": true,
-		"GOSX_STATIC_EXPORT":     true,
-		"MAIL_DRIVER":            true,
-		"PORT":                   true,
-		"PUBLIC_URL":             true,
+		"APP_ENV":                        true,
+		"APP_MODE":                       true,
+		"DATA_PATH":                      true,
+		"STORE_DRIVER":                   true,
+		"DATABASE_URL":                   true,
+		"AUDIT_LOG_PATH":                 true,
+		"BACKUP_DIR":                     true,
+		"UPLOAD_DIR":                     true,
+		"PRINCIPAL_ROLES":                true,
+		"ORGANIZER_EMAILS":               true,
+		"RESET_SECRET":                   true,
+		"SESSION_SECRET":                 true,
+		"TRUSTED_PROXY_CIDRS":            true,
+		"GOSX_APP_ROOT":                  true,
+		"INITIAL_WORKSPACE":              true,
+		"INITIAL_WORKSPACE_PATH":         true,
+		"INITIAL_WORKSPACE_SHA256":       true,
+		"INITIAL_WORKSPACE_SHA256_FILE":  true,
+		"CFP_ROUTING_POLICY_PATH":        true,
+		"CFP_ROUTING_POLICY_SHA256":      true,
+		"CFP_ROUTING_POLICY_SHA256_FILE": true,
+		"GOSX_STATIC_EXPORT":             true,
+		"MAIL_DRIVER":                    true,
+		"PORT":                           true,
+		"PUBLIC_URL":                     true,
 	}
 	environment := make([]string, 0, len(os.Environ())+5)
 	for _, entry := range os.Environ() {
@@ -437,6 +455,7 @@ func releaseServerEnvironment(distDir, baseURL string, port int) []string {
 		"APP_ENV=development",
 		"GOSX_STATIC_EXPORT=1",
 		"MAIL_DRIVER=outbox",
+		"STORE_DRIVER=json",
 		"DATA_PATH=:memory:",
 		"INITIAL_WORKSPACE=fresh",
 		"GOSX_APP_ROOT="+distDir,

@@ -2,6 +2,7 @@ package identity
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/m31-labs/rostrum/internal/appstate"
@@ -85,6 +86,28 @@ func (DurableWebAuthnStore) Credentials(userID string) ([]auth.WebAuthnCredentia
 			continue
 		}
 		if credential.User.ID == userID {
+			out = append(out, credential)
+		}
+	}
+	return out, nil
+}
+
+// CredentialsForEmail looks up existing credentials without provisioning or
+// touching a principal. The email is only a browser credential-selection hint;
+// GoSX still authenticates the credential's stored owner using its signature.
+func (DurableWebAuthnStore) CredentialsForEmail(email string) ([]auth.WebAuthnCredential, error) {
+	store, err := appstate.Get()
+	if err != nil {
+		return nil, err
+	}
+	email = strings.TrimSpace(email)
+	var out []auth.WebAuthnCredential
+	if email == "" {
+		return out, nil
+	}
+	for _, passkey := range store.Snapshot().AuthPasskeys {
+		credential, err := toWebAuthnCredential(passkey)
+		if err == nil && strings.EqualFold(strings.TrimSpace(credential.User.Email), email) {
 			out = append(out, credential)
 		}
 	}

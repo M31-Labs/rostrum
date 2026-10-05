@@ -22,11 +22,11 @@ Requirements:
 
 - Go 1.26 or newer
 - Make
-- GoSX v0.38.1
+- GoSX v0.57.5
 - Arbiter v1.9.0
 
 ```bash
-go install m31labs.dev/gosx/cmd/gosx@v0.38.1
+go install m31labs.dev/gosx/cmd/gosx@v0.57.5
 go install m31labs.dev/arbiter/cmd/arbiter@v1.9.0
 APP_MODE=live make dev
 ```

@@ -382,7 +382,7 @@ func mountWebAuthnRoutes(app *server.App, manager *auth.Manager, publicBase stri
 	// Enrollment preserves the signed-in session; a new browser uses login.
 	app.Mount("POST /auth/webauthn/register-options", manager.Require(webAuthn.RegisterOptionsHandler()))
 	app.Mount("POST /auth/webauthn/register", manager.Require(webAuthn.RegisterHandler()))
-	app.Mount("POST /auth/webauthn/login-options", webAuthn.LoginOptionsHandler())
+	app.Mount("POST /auth/webauthn/login-options", legacyWebAuthnLoginOptions(webAuthn))
 	app.Mount("POST /auth/webauthn/login", webAuthn.LoginHandler())
 }
 
@@ -951,7 +951,7 @@ func validateRuntimePosture(publicBase, appEnv, dataPath, sessionSecret, staticE
 	if !strict {
 		return nil
 	}
-	if placeholderSessionSecret(sessionSecret) || len(sessionSecret) < 32 {
+	if placeholderSessionSecret(sessionSecret) || len(strings.TrimSpace(sessionSecret)) < 32 {
 		return fmt.Errorf("an internet-facing or production runtime requires a unique SESSION_SECRET of at least 32 characters")
 	}
 	parsed, err := url.Parse(strings.TrimSpace(publicBase))
@@ -976,7 +976,8 @@ func placeholderSessionSecret(secret string) bool {
 }
 
 func runtimeSessionSecret(publicBase, appEnv, secret string) (string, error) {
-	secret = strings.TrimSpace(secret)
+	// Placeholder checks normalize whitespace; configured signer keys must
+	// retain the exact bytes used by previously issued speaker/reviewer links.
 	if !placeholderSessionSecret(secret) {
 		return secret, nil
 	}

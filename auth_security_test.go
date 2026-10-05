@@ -237,7 +237,7 @@ func TestPasskeyEnrollmentPreservesIdentityAndDiscoverableLoginWorks(t *testing.
 	}
 	// A separate anonymous browser signs in with the enrolled passkey.
 	anonymous := newAuthTestClient(t, handler)
-	begin = anonymous.post("/auth/webauthn/login-options", map[string]string{"login": user.ID, "next": "/organizer"}, http.StatusOK)
+	begin = anonymous.post("/auth/webauthn/login-options", map[string]string{"next": "/organizer"}, http.StatusOK)
 	var request struct{ Options auth.WebAuthnRequestOptions }
 	if err := json.Unmarshal(begin.Body.Bytes(), &request); err != nil {
 		t.Fatal(err)
@@ -260,6 +260,126 @@ func TestPasskeyEnrollmentPreservesIdentityAndDiscoverableLoginWorks(t *testing.
 	current, signed = anonymous.current()
 	if !signed || current.ID != user.ID || !reflect.DeepEqual(current.Roles, expectedRoles) {
 		t.Fatal("passkey login did not restore the canonical identity")
+	}
+}
+
+func TestLegacyNonDiscoverablePasskeyLoginWithEmailHint(t *testing.T) {
+	for _, hint := range []string{"login", "email", "user.email", "form"} {
+		t.Run(hint, func(t *testing.T) {
+			handler, _, _ := authTestApp(t, nil)
+			owner, err := identity.ResolveEmail(t.Context(), "organizer@example.com")
+			if err != nil {
+				t.Fatal(err)
+			}
+			owner.ID = "legacy-account"
+			key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+			if err != nil {
+				t.Fatal(err)
+			}
+			publicKey, err := x509.MarshalPKIXPublicKey(&key.PublicKey)
+			if err != nil {
+				t.Fatal(err)
+			}
+			encode := base64.RawURLEncoding.EncodeToString
+			credentialID := encode([]byte("legacy-non-discoverable"))
+			credentials := identity.DurableWebAuthnStore{}
+			if err := credentials.SaveCredential(auth.WebAuthnCredential{
+				ID: credentialID, User: owner, PublicKey: publicKey, Algorithm: -7, SignCount: 7,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			client := newAuthTestClient(t, handler)
+			before := appstate.MustGet().Snapshot()
+			payload := map[string]any{"next": "/organizer", hint: "  ORGANIZER@example.com  "}
+			if hint == "user.email" {
+				payload = map[string]any{"user": auth.User{ID: "forged-account", Email: owner.Email, Roles: []string{identity.RoleChair}}}
+			}
+			var begin *httptest.ResponseRecorder
+			if hint == "form" {
+				begin = client.request(http.MethodPost, "/auth/webauthn/login-options", "application/x-www-form-urlencoded", []byte(url.Values{"login": {owner.Email}, "next": {"/organizer"}}.Encode()), true)
+				if begin.Code != http.StatusOK {
+					t.Fatalf("form options = %d: %s", begin.Code, begin.Body.String())
+				}
+			} else {
+				begin = client.post("/auth/webauthn/login-options", payload, http.StatusOK)
+			}
+			var request struct{ Options auth.WebAuthnRequestOptions }
+			if err := json.Unmarshal(begin.Body.Bytes(), &request); err != nil {
+				t.Fatal(err)
+			}
+			if len(request.Options.AllowCredentials) != 1 || request.Options.AllowCredentials[0].ID != credentialID {
+				t.Fatal("email hint did not offer the legacy credential")
+			}
+			if _, signed := client.current(); signed || !reflect.DeepEqual(before, appstate.MustGet().Snapshot()) {
+				t.Fatal("email hint authenticated or mutated the workspace")
+			}
+			// Knowing the email and offered ID does not replace the private key.
+			attacker := newAuthTestClient(t, handler)
+			attackBegin := attacker.post("/auth/webauthn/login-options", map[string]string{"email": owner.Email}, http.StatusOK)
+			var attackRequest struct{ Options auth.WebAuthnRequestOptions }
+			if err := json.Unmarshal(attackBegin.Body.Bytes(), &attackRequest); err != nil {
+				t.Fatal(err)
+			}
+			var forged auth.WebAuthnAuthenticationResponse
+			forged.ID, forged.RawID, forged.Type = credentialID, credentialID, "public-key"
+			forged.Response.ClientDataJSON = encode(authJSON(t, map[string]string{"type": "webauthn.get", "challenge": attackRequest.Options.Challenge, "origin": authTestOrigin}))
+			forged.Response.AuthenticatorData, forged.Response.Signature = encode(authData(8)), encode([]byte("invalid-signature"))
+			attacker.post("/auth/webauthn/login", forged, http.StatusUnauthorized)
+			if _, signed := attacker.current(); signed || !reflect.DeepEqual(before, appstate.MustGet().Snapshot()) {
+				t.Fatal("email hint bypassed signature verification")
+			}
+			// The legacy device requires allowCredentials and returns no userHandle.
+			clientData := authJSON(t, map[string]string{"type": "webauthn.get", "challenge": request.Options.Challenge, "origin": authTestOrigin})
+			data := authData(8)
+			clientHash := sha256.Sum256(clientData)
+			digest := sha256.Sum256(append(append([]byte(nil), data...), clientHash[:]...))
+			signature, err := ecdsa.SignASN1(rand.Reader, key, digest[:])
+			if err != nil {
+				t.Fatal(err)
+			}
+			var assertion auth.WebAuthnAuthenticationResponse
+			assertion.ID, assertion.RawID, assertion.Type = credentialID, credentialID, "public-key"
+			assertion.Response.ClientDataJSON, assertion.Response.AuthenticatorData, assertion.Response.Signature = encode(clientData), encode(data), encode(signature)
+			client.post("/auth/webauthn/login", assertion, http.StatusOK)
+			current, signed := client.current()
+			if !signed || current.ID != owner.ID || !reflect.DeepEqual(current.Roles, owner.Roles) {
+				t.Fatal("legacy login trusted hint claims instead of the credential owner")
+			}
+			stored, err := credentials.Credential(credentialID)
+			if err != nil || stored.SignCount != 8 {
+				t.Fatal("legacy login did not advance the signature counter")
+			}
+			client.post("/auth/webauthn/login", assertion, http.StatusUnauthorized)
+		})
+	}
+}
+
+func TestPasskeyEmailHintsReturnUniformOptionsWithoutIdentityChanges(t *testing.T) {
+	handler, _, _ := authTestApp(t, nil)
+	// The allowlisted address also has no passkeys. Looking it up must not
+	// provision it, authenticate it, or return a distinct account error.
+	for _, hint := range []string{"organizer@example.com", "unknown@example.com"} {
+		client := newAuthTestClient(t, handler)
+		before := appstate.MustGet().Snapshot()
+		begin := client.post("/auth/webauthn/login-options", map[string]string{"email": hint}, http.StatusOK)
+		var response struct {
+			OK      bool `json:"ok"`
+			Options auth.WebAuthnRequestOptions
+		}
+		if err := json.Unmarshal(begin.Body.Bytes(), &response); err != nil {
+			t.Fatal(err)
+		}
+		if !response.OK || response.Options.Challenge == "" || len(response.Options.AllowCredentials) != 1 || response.Options.AllowCredentials[0].Type != "public-key" {
+			t.Fatal("unknown hint did not return normal credential options")
+		}
+		if strings.Contains(begin.Body.String(), hint) || strings.Contains(begin.Body.String(), "roles") {
+			t.Fatal("hint options exposed account claims")
+		}
+		client.post("/auth/webauthn/register-options", map[string]any{"user": auth.User{ID: hint, Email: hint, Roles: []string{identity.RoleOrganizer}}}, http.StatusUnauthorized)
+		client.post("/auth/webauthn/login", auth.WebAuthnAuthenticationResponse{ID: response.Options.AllowCredentials[0].ID}, http.StatusUnauthorized)
+		if _, signed := client.current(); signed || !reflect.DeepEqual(before, appstate.MustGet().Snapshot()) {
+			t.Fatal("unknown hint changed identity or credentials")
+		}
 	}
 }
 
@@ -345,7 +465,7 @@ func TestColdBrowserMagicLinkRequestUsesSameOriginCSRF(t *testing.T) {
 }
 
 func TestRuntimeSessionSecretsAreRandomLocallyAndRequiredElsewhere(t *testing.T) {
-	for _, placeholder := range []string{"", developmentSessionSecret, "change-me-in-production", "gosx-app-session-secret", "REPLACE_ME"} {
+	for _, placeholder := range []string{"", " \t\r\n", developmentSessionSecret, "change-me-in-production", "gosx-app-session-secret", "REPLACE_ME", " \tREPLACE_ME\r\n"} {
 		first, err := runtimeSessionSecret(authTestOrigin, "development", placeholder)
 		if err != nil || len(first) < 32 {
 			t.Fatal("local development did not generate a strong secret")
